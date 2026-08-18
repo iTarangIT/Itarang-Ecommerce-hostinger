@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" width="800" height="800" role="img" aria-labelledby="ups-3-panel-title">
+<title id="ups-3-panel-title">Illustration of an iTarang UPS — connections</title>
+
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f3f6fb"/>
+      <stop offset="1" stop-color="#e4eaf4"/>
+    </linearGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#17325c"/>
+      <stop offset="1" stop-color="#0f2340"/>
+    </linearGradient>
+    <linearGradient id="bodySide" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#091729"/>
+      <stop offset="1" stop-color="#0f2340"/>
+    </linearGradient>
+    <linearGradient id="amber" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#faa113"/>
+      <stop offset="1" stop-color="#d1810a"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#faa113" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#faa113" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#0f2340" flood-opacity="0.16"/>
+    </filter>
+  </defs>
+
+  <rect width="800" height="800" fill="url(#bg)"/>
+  <circle cx="400" cy="370" r="300" fill="url(#glow)" opacity="0.35"/>
+  <ellipse cx="400" cy="678" rx="230" ry="26" fill="#0f2340" opacity="0.1"/>
+
+  <g filter="url(#soft)">
+    <rect x="160" y="250" width="480" height="300" rx="24" fill="url(#body)"/>
+    <rect x="196" y="292" width="92" height="66" rx="14" fill="#091729" opacity="0.7"/><circle cx="226" cy="325" r="8" fill="#2f4f88"/><circle cx="258" cy="325" r="8" fill="#2f4f88"/><rect x="308" y="292" width="92" height="66" rx="14" fill="#091729" opacity="0.7"/><circle cx="338" cy="325" r="8" fill="#2f4f88"/><circle cx="370" cy="325" r="8" fill="#2f4f88"/><rect x="420" y="292" width="92" height="66" rx="14" fill="#091729" opacity="0.7"/><circle cx="450" cy="325" r="8" fill="#2f4f88"/><circle cx="482" cy="325" r="8" fill="#2f4f88"/><rect x="532" y="292" width="92" height="66" rx="14" fill="#091729" opacity="0.7"/><circle cx="562" cy="325" r="8" fill="#2f4f88"/><circle cx="594" cy="325" r="8" fill="#2f4f88"/>
+    <rect x="196" y="392" width="92" height="66" rx="14" fill="#091729" opacity="0.45"/><circle cx="226" cy="425" r="8" fill="#2f4f88" opacity="0.7"/><circle cx="258" cy="425" r="8" fill="#2f4f88" opacity="0.7"/><rect x="308" y="392" width="92" height="66" rx="14" fill="#091729" opacity="0.45"/><circle cx="338" cy="425" r="8" fill="#2f4f88" opacity="0.7"/><circle cx="370" cy="425" r="8" fill="#2f4f88" opacity="0.7"/><rect x="420" y="392" width="92" height="66" rx="14" fill="#091729" opacity="0.45"/><circle cx="450" cy="425" r="8" fill="#2f4f88" opacity="0.7"/><circle cx="482" cy="425" r="8" fill="#2f4f88" opacity="0.7"/><rect x="532" y="392" width="92" height="66" rx="14" fill="#091729" opacity="0.45"/><circle cx="562" cy="425" r="8" fill="#2f4f88" opacity="0.7"/><circle cx="594" cy="425" r="8" fill="#2f4f88" opacity="0.7"/>
+    <rect x="196" y="486" width="180" height="14" rx="7" fill="#faa113" opacity="0.85"/>
+    <rect x="404" y="486" width="240" height="14" rx="7" fill="#2f4f88" opacity="0.35"/>
+  </g>
+<text x="400" y="742" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="22" font-weight="500" letter-spacing="0.6" fill="#16294a" opacity="0.5">Connections</text>
+</svg>

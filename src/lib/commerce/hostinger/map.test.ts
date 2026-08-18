@@ -1,0 +1,189 @@
+import { describe, expect, it } from 'vitest';
+import sample from './__fixtures__/products.sample.json';
+import { productsResponseSchema } from './schema';
+import {
+  htmlToParagraphs,
+  inventoryMap,
+  mapProduct,
+  mapVariant,
+  parseSpecBlock,
+  popularityRankFor,
+  toPaise,
+} from './map';
+
+/**
+ * Mapping tests run against `products.sample.json` — the real `/products`
+ * response captured from the live Hostinger Sales Channel API. Testing against
+ * the actual payload rather than a hand-written stub is what makes these
+ * meaningful while the upstream API is unavailable.
+ */
+
+const parsed = productsResponseSchema.parse(sample);
+const source = parsed.products[0];
+
+describe('schema', () => {
+  it('accepts the live payload unchanged', () => {
+    expect(parsed.products).toHaveLength(1);
+    expect(parsed.count).toBe(1);
+  });
+});
+
+describe('toPaise', () => {
+  it('passes two-decimal currencies through as minor units', () => {
+    expect(toPaise(850000, 2)).toBe(850000);
+  });
+
+  it('rescales currencies with a different exponent', () => {
+    // 8500 in a zero-decimal currency is ₹8,500 → 850000 paise.
+    expect(toPaise(8500, 0)).toBe(850000);
+    expect(toPaise(8500000, 3)).toBe(850000);
+  });
+});
+
+describe('htmlToParagraphs', () => {
+  it('splits paragraphs and strips markup and entities', () => {
+    expect(htmlToParagraphs('<p>One &amp; two</p><p>Three</p>')).toEqual(['One & two', 'Three']);
+  });
+
+  it('returns an empty array for missing copy', () => {
+    expect(htmlToParagraphs(null)).toEqual([]);
+    expect(htmlToParagraphs('')).toEqual([]);
+  });
+});
+
+describe('parseSpecBlock', () => {
+  it('splits "Label: Value" lines', () => {
+    expect(parseSpecBlock('<p>VA Rating: 900 VA</p>')).toEqual([
+      { label: 'VA Rating', value: '900 VA' },
+    ]);
+  });
+
+  it('keeps a line without a colon as a value-only row', () => {
+    expect(parseSpecBlock('<p>Ships crated</p>')).toEqual([{ label: '', value: 'Ships crated' }]);
+  });
+});
+
+describe('mapVariant', () => {
+  it('reads stock from the inventory map', () => {
+    const variant = mapVariant(source.variants[0], inventoryMap([{ id: source.variants[0].id, inventory_quantity: 12 }]));
+    expect(variant.stock).toBe(12);
+    expect(variant.availability).toBe('in-stock');
+  });
+
+  it('marks a managed variant with no stock as out of stock', () => {
+    const variant = mapVariant(source.variants[0], new Map());
+    expect(variant.stock).toBe(0);
+    expect(variant.availability).toBe('out-of-stock');
+  });
+
+  it('flags low stock at or below five units', () => {
+    const variant = mapVariant(source.variants[0], inventoryMap([{ id: source.variants[0].id, inventory_quantity: 3 }]));
+    expect(variant.availability).toBe('low-stock');
+  });
+
+  it('treats an unmanaged variant as available', () => {
+    const variant = mapVariant({ ...source.variants[0], manage_inventory: false }, new Map());
+    expect(variant.availability).toBe('in-stock');
+  });
+
+  it('uses amount as MRP and sale_amount as the selling price', () => {
+    const price = source.variants[0].prices[0];
+    const onSale = mapVariant(
+      { ...source.variants[0], prices: [{ ...price, sale_amount: 799900 }] },
+      new Map(),
+    );
+    expect(onSale.price.mrp).toBe(850000);
+    expect(onSale.price.selling).toBe(799900);
+  });
+});
+
+describe('mapProduct', () => {
+  const product = mapProduct(source, inventoryMap([{ id: source.variants[0].id, inventory_quantity: 25 }]));
+
+  it('maps identity and pricing from the live SKU', () => {
+    expect(product.id).toBe('prod_01KZXJ4DSGQCSHXW7BME2NJG0B');
+    expect(product.slug).toBe('itarang-inverter-900-va');
+    expect(product.title).toBe('iTarang Home Inverter 900VA');
+    expect(product.variants[0].sku).toBe('ITG-INV-900VA-150AH');
+    // ₹8,500 with decimal_digits 2 → 850000 paise, no sale price set.
+    expect(product.variants[0].price).toEqual({ mrp: 850000, selling: 850000 });
+  });
+
+  it('applies the enrichment entry rather than guessing', () => {
+    expect(product.category).toBe('combos');
+    expect(product.subcategory).toBe('home-combos');
+    expect(product.facets.capacityVa).toBe(900);
+    expect(product.facets.batteryAh).toBe(150);
+    expect(product.warrantyMonths).toBe(36);
+    expect(product.installationIncluded).toBe(true);
+  });
+
+  it('parses the Key Specifications block into rows', () => {
+    expect(product.specGroups).toHaveLength(1);
+    expect(product.specGroups[0].title).toBe('Key Specifications');
+    expect(product.specGroups[0].specs).toHaveLength(6);
+    expect(product.specGroups[0].specs[0]).toEqual({ label: 'VA Rating', value: '900 VA' });
+  });
+
+  it('carries the merchant image and description across', () => {
+    expect(product.images).toHaveLength(1);
+    expect(product.images[0]).toContain('cdn.zyrosite.com');
+    expect(product.description[0]).toContain('900VA pure sine wave home inverter');
+  });
+
+  it('never fabricates a rating — reviews are disabled on this store', () => {
+    expect(product.rating).toBeNull();
+  });
+
+  it('falls back to local illustrations when the merchant has no imagery', () => {
+    const withoutImages = mapProduct({ ...source, images: [], thumbnail: null }, new Map());
+    expect(withoutImages.images[0]).toMatch(/^\/art\//);
+  });
+});
+
+describe('enrichment fallback', () => {
+  it('files an unmapped product by title rather than dropping it', () => {
+    const unknown = mapProduct(
+      { ...source, id: 'prod_unknown', title: 'iTarang TallTube 150 Battery', subtitle: '150Ah tubular' },
+      new Map(),
+    );
+    expect(unknown.category).toBe('batteries');
+  });
+
+  it('states no warranty for a product it cannot vouch for', () => {
+    const unknown = mapProduct(
+      { ...source, id: 'prod_unknown', title: 'iTarang TallTube 150 Battery', subtitle: '150Ah tubular' },
+      new Map(),
+    );
+    // An invented warranty is a commercial promise nobody made.
+    expect(unknown.warrantyMonths).toBeUndefined();
+    expect(unknown.facets.warrantyMonths).toBeUndefined();
+    expect(unknown.installationIncluded).toBe(false);
+  });
+});
+
+describe('popularityRankFor', () => {
+  it('always ranks a curated product ahead of an unranked one', () => {
+    // Hostinger's `order` is negative on this store, which is exactly the case
+    // that used to push the curated bestseller to the bottom of the rail.
+    expect(popularityRankFor(1, undefined)).toBeLessThan(popularityRankFor(undefined, -4));
+    expect(popularityRankFor(99, undefined)).toBeLessThan(popularityRankFor(undefined, -999));
+    // Holds however extreme the upstream value is, because it is clamped.
+    expect(popularityRankFor(99, undefined)).toBeLessThan(
+      popularityRankFor(undefined, Number.MIN_SAFE_INTEGER),
+    );
+  });
+
+  it('keeps Hostinger ordering among unranked products', () => {
+    expect(popularityRankFor(undefined, -4)).toBeLessThan(popularityRankFor(undefined, -3));
+    expect(popularityRankFor(undefined, 0)).toBeLessThan(popularityRankFor(undefined, 1));
+  });
+
+  it('treats a missing order as the neutral position', () => {
+    expect(popularityRankFor(undefined, null)).toBe(popularityRankFor(undefined, 0));
+  });
+
+  it('uses the curated rank verbatim when present', () => {
+    expect(popularityRankFor(3, -4)).toBe(3);
+  });
+});

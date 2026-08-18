@@ -1,0 +1,32 @@
+# Optional local PostgreSQL for developers who do not have one installed.
+#
+# Port 5433 is deliberate: it cannot collide with a PostgreSQL already running
+# on the default 5432, so both can coexist.
+#
+#   docker compose up -d
+#   DATABASE_URL=postgresql://itarang:itarang@127.0.0.1:5433/itarang_dev
+#
+# The database name matches what the application's guard requires; any other
+# name is refused at startup.
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: itarang_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: itarang
+      POSTGRES_PASSWORD: itarang
+      POSTGRES_DB: itarang_dev
+    ports:
+      - '127.0.0.1:5433:5432'
+    volumes:
+      - itarang_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U itarang -d itarang_dev']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  itarang_pgdata:
