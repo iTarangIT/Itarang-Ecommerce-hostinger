@@ -16,32 +16,80 @@ npm run test         # unit and safety tests, no external service needed
 npm run gen:images   # regenerate the SVG product illustrations
 ```
 
-## Local database (checkout)
+## Database (checkout)
 
-Checkout stores orders, payments and stock reservations in a **local** PostgreSQL
-database called `itarang_dev`. Nothing is written anywhere else.
+Hostinger is the source of truth for products, prices and availability, and is
+read-only. **Our** PostgreSQL owns everything else: orders, order items, payment
+records, stock reservations, order events and admin tracking. Hostinger is never
+written to.
+
+The database is either a local `itarang_dev` or one approved managed database
+(Supabase). Set `DATABASE_URL` **once** in `.env.local` — three loaders read that
+file (Node's `--env-file` for `db:*`, Next.js, and `vitest.setup.ts`) and they
+disagree about which duplicate wins.
+
+```bash
+npm run db:status    # verify the guard passes and show what is there
+npm run db:migrate   # apply db/migrations
+npm run db:seed      # demo orders for the admin console   (local only)
+npm run db:reset     # drop, migrate, seed                 (local only)
+npm run db:sweep     # mark expired reservations (tidiness only)
+```
+
+### Local
 
 ```bash
 createdb -U postgres itarang_dev        # or use pgAdmin / docker compose up -d
-# put the connection string in .env.local:
 #   DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@127.0.0.1:5432/itarang_dev
-
-npm run db:status    # verify the guard passes and show what is there
-npm run db:migrate   # apply db/migrations
-npm run db:seed      # demo orders for the admin console
-npm run db:reset     # drop, migrate, seed
-npm run db:sweep     # mark expired reservations (tidiness only)
+npm run db:create && npm run db:migrate
 ```
 
 No Postgres installed? `docker compose up -d` starts one on port **5433** so it
 cannot collide with a local install:
 `DATABASE_URL=postgresql://itarang:itarang@127.0.0.1:5433/itarang_dev`
 
-**The guard.** `src/lib/db/guard.ts` refuses to open a connection unless the host
-is local *and* the database is exactly `itarang_dev`. `tarang_dev` — another
-application's database, one character away — is named in an explicit denylist.
-Every `db:*` script runs the guard before issuing a statement, so a mistyped URL
-aborts before connecting.
+### Remote (Supabase)
+
+Use the **Session pooler** connection string, port 5432 — the direct connection
+is IPv6-only unless the IPv4 add-on is enabled. All three variables are required
+together:
+
+```bash
+DATABASE_URL=postgresql://postgres.PROJECT_REF:PASSWORD@aws-0-REGION.pooler.supabase.com:5432/postgres?sslmode=require
+DB_ALLOW_REMOTE=true
+DB_REMOTE_HOST=aws-0-REGION.pooler.supabase.com
+DB_SSL_CA_FILE=db/prod-ca-2021.crt
+
+npm run db:migrate   # db:create is local-only; Supabase provisions for you
+```
+
+Supabase signs pooler certificates with its own private root (`Supabase Root
+2021 CA`), which is not in Node's default trust store — without the CA file the
+connection fails with `SELF_SIGNED_CERT_IN_CHAIN`. Download it from the
+dashboard: **Project Settings → Database → SSL Configuration → Download
+certificate**, and save it as `db/prod-ca-2021.crt`. It is a public certificate,
+not a secret, and is safe to commit.
+
+`sslmode=require` stays in the URL as the operator's statement of intent and for
+`psql`, but `src/lib/db/connection.ts` strips it before handing the string to
+`pg` — otherwise `pg` merges the parsed URL *over* the explicit `ssl` config and
+our TLS policy would be silently discarded.
+
+`db:create` refuses to run remotely. `db:seed` and `db:reset` refuse too unless
+`DB_ALLOW_DESTRUCTIVE=true` — `db:reset` drops the entire `public` schema, which
+on a managed provider takes its own objects with it.
+
+**The guard.** `src/lib/db/guard.ts` refuses to open a connection unless the URL
+names one of exactly two approved targets: local + `itarang_dev`, or the host in
+`DB_REMOTE_HOST` with TLS required. `tarang_dev` — another application's
+database, one character away — is named in an explicit denylist and refused on
+every host. Every `db:*` script and the connection pool run the guard before
+issuing a statement, so a mistyped URL aborts before connecting.
+
+**Lockdown.** `db/migrations/0002_lockdown.sql` enables row-level security with
+no policies on every table and revokes the `anon`/`authenticated` grants, so the
+provider's auto-generated REST API cannot reach customer data with a public key.
+It is a no-op on a local PostgreSQL.
 
 ## Checkout
 
@@ -57,8 +105,33 @@ Cart → /checkout → contact → address + serviceability → payment → /ord
   `/api/checkout/quote`. The cart's own prices are display-only.
 - Stock is reserved when payment starts and released if payment never completes.
   Expiry is evaluated on read, so nothing depends on a scheduler.
-- `/admin` is a local order console — `npm run admin:hash -- "your password"`
-  prints the two values it needs in `.env.local`.
+- `/admin` is the order console, open to accounts with `role = 'admin'`.
+
+## Accounts
+
+Customers register at `/register` and sign in at `/login`. Passwords are scrypt
+hashed; sessions are opaque tokens whose SHA-256 digest is what the `sessions`
+table stores, so signing out — or changing a password — revokes access
+immediately rather than at the next expiry.
+
+Verification and password-reset mail needs the `SMTP_*` values in `.env.local`.
+Leave them unset in development and `sendMail` logs the recipient and subject to
+the console instead of sending anything.
+
+### Creating the first admin
+
+```bash
+ADMIN_EMAIL=you@example.com ADMIN_PASSWORD='a long passphrase' npm run admin:create
+```
+
+The password is read from the environment, never from an argument, so it stays
+out of shell history and the process list. The account is flagged
+`must_change_password`, and `/admin` refuses to open until a new password has
+been set. Re-running the command rotates the password and revokes existing
+sessions, which is also the way back in after a lockout.
+
+A demo environment that needs a specific weak password can pass `--allow-weak`.
+It prints a warning and still forces the change at first sign-in.
 
 Every order placed in this build carries `is_test = true` in the database and is
 labelled **TEST** in the UI. No money moves.

@@ -42,9 +42,17 @@ const schema = z
     COD_FEE_PAISE: z.coerce.number().int().min(0).default(0),
     COD_MAX_ORDER_PAISE: z.coerce.number().int().min(0).default(2_000_000),
 
-    /* ----------------------------------------------------------- admin */
-    ADMIN_PASSWORD_HASH: z.string().optional(),
-    ADMIN_SESSION_SECRET: z.string().optional(),
+    /* ----------------------------------------------------------- email */
+    /**
+     * SMTP for verification and password-reset mail. All four are required
+     * together or none at all — a half-configured mailer silently drops mail,
+     * so it is refused at startup instead.
+     */
+    SMTP_HOST: z.string().optional(),
+    SMTP_PORT: z.coerce.number().int().min(1).max(65_535).default(587),
+    SMTP_USER: z.string().optional(),
+    SMTP_PASSWORD: z.string().optional(),
+    EMAIL_FROM: z.string().optional(),
 
     /* ------------------------------------------------------------- gst */
     SELLER_GSTIN: z.string().optional(),
@@ -56,6 +64,27 @@ const schema = z
         code: z.ZodIssueCode.custom,
         path: ['HOSTINGER_SALES_CHANNEL_ID'],
         message: 'COMMERCE_PROVIDER=hostinger requires HOSTINGER_SALES_CHANNEL_ID.',
+      });
+    }
+
+    // Half-configured SMTP is worse than none: mail would be attempted and
+    // silently dropped. Either all of it is present, or the mailer stays off
+    // and falls back to logging.
+    const smtp = [
+      ['SMTP_HOST', value.SMTP_HOST],
+      ['SMTP_USER', value.SMTP_USER],
+      ['SMTP_PASSWORD', value.SMTP_PASSWORD],
+      ['EMAIL_FROM', value.EMAIL_FROM],
+    ] as const;
+    const smtpSet = smtp.filter(([, v]) => v);
+    if (smtpSet.length > 0 && smtpSet.length < smtp.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['SMTP_HOST'],
+        message:
+          'Email is partially configured. Set all of ' +
+          smtp.map(([k]) => k).join(', ') +
+          ', or none of them to keep the mailer off.',
       });
     }
 
@@ -116,8 +145,11 @@ export function env(): Env {
     COD_ENABLED: process.env.COD_ENABLED,
     COD_FEE_PAISE: process.env.COD_FEE_PAISE,
     COD_MAX_ORDER_PAISE: process.env.COD_MAX_ORDER_PAISE,
-    ADMIN_PASSWORD_HASH: process.env.ADMIN_PASSWORD_HASH,
-    ADMIN_SESSION_SECRET: process.env.ADMIN_SESSION_SECRET,
+    SMTP_HOST: process.env.SMTP_HOST,
+    SMTP_PORT: process.env.SMTP_PORT,
+    SMTP_USER: process.env.SMTP_USER,
+    SMTP_PASSWORD: process.env.SMTP_PASSWORD,
+    EMAIL_FROM: process.env.EMAIL_FROM,
     SELLER_GSTIN: process.env.SELLER_GSTIN,
     SELLER_STATE_CODE: process.env.SELLER_STATE_CODE,
   });

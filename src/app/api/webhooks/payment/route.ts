@@ -19,6 +19,9 @@ export const dynamic = 'force-dynamic';
  *    nothing. Ordering is not guaranteed either.
  *
  * A 200 is returned for anything already handled, so the gateway stops retrying.
+ * A signature that does not verify gets a 400 — deliberately: the usual cause is
+ * a misconfigured secret on our side, and retries are what let the event land
+ * once that is fixed. A genuine forgery is not retrying anyway.
  */
 export async function POST(request: Request) {
   // Never `await request.json()` here — the raw bytes are what was signed.
@@ -38,7 +41,10 @@ export async function POST(request: Request) {
 
   const repository = orders();
 
-  const isNew = await repository.recordWebhookEvent(
+  // Claim the event. `processed_at` stays NULL until the work below succeeds,
+  // so a failure part-way leaves a row the sweeper can find and the gateway's
+  // retry can still get through.
+  const isNew = await repository.beginWebhookEvent(
     provider.id,
     result.eventId,
     result.eventType,
@@ -46,49 +52,96 @@ export async function POST(request: Request) {
   );
 
   if (!isNew) {
-    // Already processed. 200 so the gateway stops retrying.
+    // Already claimed. 200 so the gateway stops retrying.
     return NextResponse.json({ ok: true, duplicate: true, eventId: result.eventId });
   }
 
-  if (!result.status || !result.gatewayOrderId) {
-    // A verified event we do not act on — recorded, acknowledged, ignored.
-    return NextResponse.json({ ok: true, ignored: true, eventType: result.eventType });
-  }
+  try {
+    if (!result.status || !result.gatewayOrderId) {
+      // A verified event we do not act on — recorded, acknowledged, ignored.
+      await repository.completeWebhookEvent(provider.id, result.eventId);
+      return NextResponse.json({ ok: true, ignored: true, eventType: result.eventType });
+    }
 
-  const order = await repository.findByGatewayOrderId(result.gatewayOrderId);
+    const order = await repository.findByGatewayOrderId(result.gatewayOrderId);
 
-  if (!order) {
-    // A payment for an order we do not have. Logged rather than silently
-    // dropped, because it means something is genuinely wrong.
-    console.warn(
-      `[webhook] ${result.eventType} for unknown gateway order ${result.gatewayOrderId}`,
+    if (!order) {
+      // A payment for an order we do not have. Logged rather than silently
+      // dropped, because it means something is genuinely wrong.
+      console.warn(
+        `[webhook] ${result.eventType} for unknown gateway order ${result.gatewayOrderId}`,
+      );
+      await repository.completeWebhookEvent(provider.id, result.eventId);
+      return NextResponse.json({ ok: true, unmatched: true });
+    }
+
+    // The amount the gateway reports must be the amount we asked for.
+    //
+    // Nothing checked this before, so an underpayment — or a paise/rupee unit
+    // error at either end — still drove the order to paid and confirmed. A
+    // mismatch is recorded and acknowledged, never applied: the money question
+    // is for a human, and retrying the delivery would not change the answer.
+    if (typeof result.amount === 'number' && result.amount !== order.amounts.total) {
+      console.warn(
+        `[webhook] amount mismatch on ${order.orderNumber}: gateway reported ` +
+          `${result.amount} paise, order total is ${order.amounts.total}`,
+      );
+
+      if (result.gatewayPaymentId) {
+        await repository.recordPayment({
+          orderId: order.id,
+          provider: provider.id,
+          gatewayPaymentId: result.gatewayPaymentId,
+          status: 'failed',
+          amount: result.amount,
+          method: result.method,
+          signatureVerified: true,
+          errorCode: 'amount_mismatch',
+          errorDescription: `Gateway reported ${result.amount}, expected ${order.amounts.total}.`,
+        });
+      }
+
+      await repository.completeWebhookEvent(provider.id, result.eventId);
+      return NextResponse.json({ ok: true, mismatch: true, orderNumber: order.orderNumber });
+    }
+
+    if (result.gatewayPaymentId) {
+      await repository.recordPayment({
+        orderId: order.id,
+        provider: provider.id,
+        gatewayPaymentId: result.gatewayPaymentId,
+        status: result.status,
+        amount: result.amount ?? order.amounts.total,
+        method: result.method,
+        signatureVerified: true,
+      });
+    }
+
+    const updated = await repository.applyPaymentStatus(
+      order.id,
+      result.status,
+      'webhook',
+      result.eventType,
     );
-    return NextResponse.json({ ok: true, unmatched: true });
-  }
 
-  if (result.gatewayPaymentId) {
-    await repository.recordPayment({
-      orderId: order.id,
-      provider: provider.id,
-      gatewayPaymentId: result.gatewayPaymentId,
-      status: result.status,
-      amount: result.amount ?? order.amounts.total,
-      method: result.method,
-      signatureVerified: true,
+    await repository.completeWebhookEvent(provider.id, result.eventId);
+
+    return NextResponse.json({
+      ok: true,
+      orderNumber: order.orderNumber,
+      paymentStatus: updated?.paymentStatus,
+      status: updated?.status,
     });
+  } catch (error) {
+    // Release the claim so the gateway's retry is not turned away as a
+    // duplicate, and answer 500 so it does retry. Without this the payment
+    // update would be lost for good.
+    await repository.abandonWebhookEvent(provider.id, result.eventId).catch(() => {
+      // If even this fails the row stays claimed-but-unprocessed, which is
+      // exactly what `db:sweep` reports.
+    });
+
+    console.error(`[webhook] failed to apply ${result.eventId}: ${(error as Error).message}`);
+    return NextResponse.json({ ok: false, reason: 'processing_failed' }, { status: 500 });
   }
-
-  const updated = await repository.applyPaymentStatus(
-    order.id,
-    result.status,
-    'webhook',
-    result.eventType,
-  );
-
-  return NextResponse.json({
-    ok: true,
-    orderNumber: order.orderNumber,
-    paymentStatus: updated?.paymentStatus,
-    status: updated?.status,
-  });
 }

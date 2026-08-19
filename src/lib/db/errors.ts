@@ -13,8 +13,17 @@ const CONNECTION_CODES = new Set([
   'ENOTFOUND',
   'ETIMEDOUT',
   'EHOSTUNREACH',
+  // Remote database. `ENETUNREACH` in particular is what an IPv6-only host
+  // looks like from a network without IPv6 — a configuration problem that
+  // must not surface as an application bug.
+  'ENETUNREACH',
+  'ECONNRESET',
+  'EAI_AGAIN',
+  '08001', // client cannot establish connection
+  '08006', // connection failure
   '28P01', // invalid password
   '3D000', // database does not exist
+  '53300', // too many connections
   '57P03', // cannot connect now
 ]);
 
@@ -32,6 +41,6 @@ export function databaseUnavailableMessage(error: unknown): string {
   if (error instanceof DatabaseGuardError) return error.message;
   return (
     'The order database is not available, so this order was not created and nothing was ' +
-    'charged. Configure DATABASE_URL for a local itarang_dev database — see README → Local database.'
+    'charged. Check that DATABASE_URL is reachable — see README → Database.'
   );
 }

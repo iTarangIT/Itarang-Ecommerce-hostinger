@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { closePool, query } from '@/lib/db/pool';
+import { inspectDatabaseUrl, isLocalHost } from '@/lib/db/guard';
 import { PostgresOrderRepository } from './postgres-repository';
 import { generateOrderNumber } from './numbering';
 import type { NewOrder } from './types';
@@ -18,12 +19,38 @@ import type { NewOrder } from './types';
  * anything but a local `itarang_dev`.
  */
 
-const CONFIGURED = Boolean(process.env.DATABASE_URL);
+/**
+ * These tests write real rows. Against a remote database that means seeding
+ * live order data with test buyers, so the remote case has to be asked for
+ * explicitly — the more so because `vitest.setup.ts` resolves a duplicated
+ * `DATABASE_URL` differently from the application, and "which database is this
+ * pointing at?" is not a question a destructive suite should get wrong.
+ */
+function targetsRemote(): boolean {
+  // Decided by the URL this runner actually resolved, not by DB_ALLOW_REMOTE —
+  // that flag can be set for the application while vitest still resolves a
+  // local URL, and a wrong answer here would skip a suite that could run.
+  const raw = process.env.DATABASE_URL;
+  if (!raw) return false;
+  try {
+    return !isLocalHost(inspectDatabaseUrl(raw).host);
+  } catch {
+    return false;
+  }
+}
+
+const REMOTE = targetsRemote();
+const REMOTE_TESTS_ALLOWED = process.env.DB_ALLOW_REMOTE_TESTS === 'true';
+
+const CONFIGURED = Boolean(process.env.DATABASE_URL) && (!REMOTE || REMOTE_TESTS_ALLOWED);
 
 if (!CONFIGURED) {
   console.warn(
-    '\n  [skipped] Checkout integration tests need DATABASE_URL pointing at a local ' +
-      'itarang_dev database. See README → Local database.\n',
+    REMOTE
+      ? '\n  [skipped] Checkout integration tests write real rows and DATABASE_URL is ' +
+          'remote. Set DB_ALLOW_REMOTE_TESTS=true to run them anyway.\n'
+      : '\n  [skipped] Checkout integration tests need DATABASE_URL pointing at a local ' +
+          'itarang_dev database. See README → Database.\n',
   );
 }
 
@@ -239,8 +266,8 @@ describe.skipIf(!CONFIGURED)('checkout against the local database', () => {
   it('treats a duplicate webhook event as a no-op', async () => {
     const eventId = `test_evt_${Date.now()}`;
 
-    const first = await repository.recordWebhookEvent('mock', eventId, 'payment.captured', {});
-    const second = await repository.recordWebhookEvent('mock', eventId, 'payment.captured', {});
+    const first = await repository.beginWebhookEvent('mock', eventId, 'payment.captured', {});
+    const second = await repository.beginWebhookEvent('mock', eventId, 'payment.captured', {});
 
     expect(first).toBe(true);
     expect(second).toBe(false);

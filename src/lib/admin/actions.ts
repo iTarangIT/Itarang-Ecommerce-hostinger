@@ -2,43 +2,28 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
+import { currentUser } from '@/lib/auth/session';
 import { orders } from '@/lib/orders/postgres-repository';
 import { canTransitionOrder } from '@/lib/orders/state-machine';
 import type { OrderStatus } from '@/lib/orders/types';
-import {
-  checkAdminPassword,
-  createAdminSession,
-  destroyAdminSession,
-  isAdminAuthenticated,
-  isAdminConfigured,
-} from './session';
 
-/** Sign in to the local order console. */
-export async function loginAction(
-  _previous: { error?: string } | null,
-  formData: FormData,
-): Promise<{ error?: string }> {
-  if (!isAdminConfigured()) {
-    return {
-      error:
-        'Admin access is not configured. Run `npm run admin:hash -- "your password"` and add the ' +
-        'two values it prints to .env.local.',
-    };
-  }
+/**
+ * Admin order actions.
+ *
+ * Sign-in and sign-out are no longer here: admins authenticate through the same
+ * `/login` as everyone else and are distinguished by `users.role`. There is one
+ * credential system, not two.
+ *
+ * The authorization check is repeated here even though `admin/layout.tsx`
+ * already guards every page. A Server Action is its own endpoint — it is reached
+ * by a POST to the action id, not by rendering a page — so the layout's check
+ * does not protect it. Removing this line would leave the mutation open.
+ */
 
-  const password = String(formData.get('password') ?? '');
-  if (!checkAdminPassword(password)) {
-    // Deliberately vague — no hint about which part was wrong.
-    return { error: 'Incorrect password.' };
-  }
-
-  await createAdminSession();
-  redirect('/admin');
-}
-
-export async function logoutAction(): Promise<void> {
-  await destroyAdminSession();
-  redirect('/admin/login');
+async function requireAdminActor(): Promise<string> {
+  const user = await currentUser();
+  if (!user || user.role !== 'admin') redirect('/login?next=%2Fadmin');
+  return user.email;
 }
 
 /**
@@ -48,7 +33,7 @@ export async function logoutAction(): Promise<void> {
  * put an order into an impossible state even if the form is tampered with.
  */
 export async function updateOrderStatusAction(formData: FormData): Promise<void> {
-  if (!(await isAdminAuthenticated())) redirect('/admin/login');
+  const actor = await requireAdminActor();
 
   const orderNumber = String(formData.get('orderNumber') ?? '');
   const to = String(formData.get('status') ?? '') as OrderStatus;
@@ -60,7 +45,9 @@ export async function updateOrderStatusAction(formData: FormData): Promise<void>
 
   if (!canTransitionOrder(order.status, to)) return;
 
-  await repository.transitionOrderStatus(order.id, to, 'admin', note);
+  // The actor is the admin's email rather than the literal string 'admin', so
+  // the order history answers *who* changed it, not just that somebody did.
+  await repository.transitionOrderStatus(order.id, to, actor, note);
 
   revalidatePath('/admin');
   revalidatePath(`/admin/orders/${orderNumber}`);

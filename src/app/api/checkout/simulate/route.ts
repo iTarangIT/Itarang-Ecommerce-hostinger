@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { orders } from '@/lib/orders/postgres-repository';
+import { requireOrderAccess } from '@/lib/orders/checkout-auth';
 import { paymentProvider } from '@/lib/payments';
 import { MockPaymentProvider } from '@/lib/payments/mock-provider';
 
@@ -20,9 +21,20 @@ const schema = z.object({
  * which is the point: the signature check, the payment record and the state
  * transition are all genuinely exercised.
  *
- * Available only while the mock provider is active. With a real gateway
- * configured this endpoint refuses, so it can never be used to mark a real
- * order paid.
+ * Two things gate it, because "provider is the mock" was never enough on its
+ * own — under the default configuration *any* unauthenticated caller who knew
+ * an order number could drive that order to paid and confirmed:
+ *
+ * 1. Only while the mock provider is active. Selecting a real gateway disables
+ *    this endpoint outright, so it can never mark a real payment.
+ * 2. Only for an order the caller is entitled to. With ownership enforced this
+ *    is a "complete my own test payment" button and nothing more.
+ *
+ * Deliberately *not* gated on `NODE_ENV`. This build is deployed with the mock
+ * provider selected, and a production deployment running mock still needs its
+ * test payments to complete — the provider is what decides whether simulation
+ * is meaningful, not which machine the code happens to be running on. When a
+ * real gateway is configured the check above closes this regardless.
  */
 export async function POST(request: Request) {
   const provider = paymentProvider();
@@ -47,11 +59,12 @@ export async function POST(request: Request) {
   }
 
   const repository = orders();
-  const order = await repository.findByOrderNumber(parsed.data.orderNumber);
 
-  if (!order) {
-    return NextResponse.json({ error: 'Order not found.' }, { status: 404 });
-  }
+  // Ownership, not just existence. 404 rather than 403 so this cannot be used
+  // to discover which order numbers are real.
+  const access = await requireOrderAccess(parsed.data.orderNumber, request);
+  if (!access.ok) return access.response;
+  const order = access.order;
 
   if (!order.gatewayOrderId) {
     return NextResponse.json(

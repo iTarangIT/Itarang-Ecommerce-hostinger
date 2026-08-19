@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { placeOrder } from '@/lib/orders/place-order';
 import { fieldErrors, placeOrderSchema } from '@/lib/checkout/validation';
 import { grantOrderAccess } from '@/lib/orders/access';
+import { requireCustomer } from '@/lib/orders/checkout-auth';
 import { databaseUnavailableMessage, isDatabaseUnavailable } from '@/lib/db/errors';
 
 export const dynamic = 'force-dynamic';
@@ -14,6 +15,11 @@ export const dynamic = 'force-dynamic';
  * rather than creating a second one and reserving stock twice.
  */
 export async function POST(request: Request) {
+  // Checked before anything else: an unauthenticated caller must not be able
+  // to probe validation behaviour or consume an idempotency key.
+  const auth = await requireCustomer(request);
+  if (!auth.ok) return auth.response;
+
   const idempotencyKey = request.headers.get('idempotency-key')?.trim();
   if (!idempotencyKey) {
     return NextResponse.json(
@@ -46,7 +52,7 @@ export async function POST(request: Request) {
 
   let result: Awaited<ReturnType<typeof placeOrder>>;
   try {
-    result = await placeOrder({ ...parsed.data, idempotencyKey });
+    result = await placeOrder({ ...parsed.data, idempotencyKey, userId: auth.user.id });
   } catch (error) {
     // Fail closed: no order was recorded, so nothing may be charged.
     if (isDatabaseUnavailable(error)) {

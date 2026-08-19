@@ -15,7 +15,8 @@ import {
 } from 'lucide-react';
 import type { ProductSummary } from '@/lib/commerce/summary';
 import { useWishlist } from '@/lib/store/hooks';
-import { ButtonLink } from '@/components/ui/button';
+import { logoutAction } from '@/lib/auth/actions';
+import { Button, ButtonLink } from '@/components/ui/button';
 import { StateBlock } from '@/components/ui/states';
 import { ProductCard } from '@/components/product/product-card';
 import { ProductGridSkeleton } from '@/components/ui/skeleton';
@@ -35,12 +36,38 @@ const TABS: Array<{ id: TabId; label: string; icon: typeof User }> = [
 /**
  * Account area.
  *
- * Saved products work today because they live in local storage. Orders,
- * addresses, warranties and reviews all require an account, which arrives with
- * the backend phase — each panel says so plainly instead of showing invented
- * order history.
+ * Overview, orders and saved products are real. Saved products live in local
+ * storage and work signed out; order history comes from the server, filtered to
+ * this account. Addresses, warranties and reviews are still honest placeholders
+ * rather than invented data.
  */
-export function AccountBody({ suggestions }: { suggestions: ProductSummary[] }) {
+
+/** The serialisable slice of the session this component needs. */
+export interface AccountUser {
+  email: string;
+  fullName: string | null;
+  verified: boolean;
+}
+
+/** One row of order history, already reduced to what the list renders. */
+export interface AccountOrder {
+  orderNumber: string;
+  status: string;
+  paymentStatus: string;
+  total: number;
+  itemCount: number;
+  placedAt: string;
+}
+
+export function AccountBody({
+  suggestions,
+  user,
+  orders,
+}: {
+  suggestions: ProductSummary[];
+  user: AccountUser | null;
+  orders: AccountOrder[];
+}) {
   const searchParams = useSearchParams();
   const requested = searchParams.get('tab') as TabId | null;
   const [tab, setTab] = React.useState<TabId>(
@@ -76,16 +103,9 @@ export function AccountBody({ suggestions }: { suggestions: ProductSummary[] }) 
       </nav>
 
       <div className="lg:col-span-9">
-        {tab === 'overview' ? <Overview onOpen={setTab} /> : null}
+        {tab === 'overview' ? <Overview onOpen={setTab} user={user} /> : null}
         {tab === 'wishlist' ? <Wishlist suggestions={suggestions} /> : null}
-        {tab === 'orders' ? (
-          <AccountPlaceholder
-            icon={<Package className="h-6 w-6" />}
-            title="Order history needs an account"
-            description="Sign-in, order history, invoices and returns arrive with the backend phase. In the meantime you can follow an order with its order number and the phone number on it."
-            action={{ label: 'Track an order', href: '/track' }}
-          />
-        ) : null}
+        {tab === 'orders' ? <OrderHistory orders={orders} signedIn={Boolean(user)} /> : null}
         {tab === 'addresses' ? (
           <AccountPlaceholder
             icon={<MapPin className="h-6 w-6" />}
@@ -113,17 +133,120 @@ export function AccountBody({ suggestions }: { suggestions: ProductSummary[] }) 
   );
 }
 
-function Overview({ onOpen }: { onOpen: (tab: TabId) => void }) {
+function OrderHistory({ orders, signedIn }: { orders: AccountOrder[]; signedIn: boolean }) {
+  if (!signedIn) {
+    return (
+      <AccountPlaceholder
+        icon={<Package className="h-6 w-6" />}
+        title="Sign in to see your orders"
+        description="Your order history, invoices and returns live in your account. Orders placed as a guest before you signed up stay reachable with the order number and the mobile number on them."
+        action={{ label: 'Sign in', href: '/login?next=%2Faccount' }}
+      />
+    );
+  }
+
+  if (orders.length === 0) {
+    return (
+      <AccountPlaceholder
+        icon={<Package className="h-6 w-6" />}
+        title="No orders yet"
+        description="When you place an order it will appear here with its status and invoice."
+        action={{ label: 'Start shopping', href: '/' }}
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {orders.map((order) => (
+        <Link
+          key={order.orderNumber}
+          href={`/order/${order.orderNumber}`}
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-4 transition-colors hover:border-foreground/20"
+        >
+          <div className="min-w-0">
+            <p className="tabular font-medium">{order.orderNumber}</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {new Date(order.placedAt).toLocaleDateString('en-IN', {
+                day: 'numeric',
+                month: 'short',
+                year: 'numeric',
+              })}
+              {' · '}
+              {order.itemCount} item{order.itemCount === 1 ? '' : 's'}
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="tabular font-semibold">
+              ₹{(order.total / 100).toLocaleString('en-IN')}
+            </p>
+            <p className="mt-0.5 text-xs capitalize text-muted-foreground">
+              {order.status.replace(/_/g, ' ')}
+            </p>
+          </div>
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+function Overview({
+  onOpen,
+  user,
+}: {
+  onOpen: (tab: TabId) => void;
+  user: AccountUser | null;
+}) {
   const wishlist = useWishlist();
 
   return (
     <div className="space-y-6">
+      {user ? (
+        <div className="rounded-xl border border-border bg-card p-5 sm:p-6">
+          <h2 className="heading-3">{user.fullName ?? 'Your account'}</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Signed in as {user.email}
+            {user.verified ? null : ' — email not confirmed yet'}
+          </p>
+          {user.verified ? null : (
+            <p className="mt-3 rounded-lg border border-border bg-surface p-3 text-sm text-muted-foreground">
+              We sent a confirmation link when you signed up. You can keep shopping without it —
+              confirming just means we can reach you about an order.
+            </p>
+          )}
+          <div className="mt-5 flex flex-wrap gap-2">
+            <ButtonLink href="/track" variant="primary">
+              Track an order
+            </ButtonLink>
+            <form action={logoutAction}>
+              <Button type="submit" variant="outline">
+                Sign out
+              </Button>
+            </form>
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-border bg-card p-5 sm:p-6">
+          <h2 className="heading-3">Not signed in</h2>
+          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+            Sign in to keep your order history, addresses and warranty registrations in one place.
+            Your saved products are already kept on this device.
+          </p>
+          <div className="mt-5 flex flex-wrap gap-2">
+            <ButtonLink href="/login" variant="primary">
+              Sign in
+            </ButtonLink>
+            <ButtonLink href="/register" variant="outline">
+              Create an account
+            </ButtonLink>
+          </div>
+        </div>
+      )}
+
       <div className="rounded-xl border border-border bg-card p-5 sm:p-6">
-        <h2 className="heading-3">Not signed in</h2>
+        <h2 className="heading-3">Without an account</h2>
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-          Accounts — sign-in by mobile OTP, order history, GST invoices, saved addresses and
-          returns — arrive with the backend phase. Everything you can do without an account is
-          listed below, and your saved products are already kept on this device.
+          You can still follow an order with its order number and the mobile number on it.
         </p>
         <div className="mt-5 flex flex-wrap gap-2">
           <ButtonLink href="/track" variant="primary">

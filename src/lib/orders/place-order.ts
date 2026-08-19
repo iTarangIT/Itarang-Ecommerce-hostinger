@@ -19,6 +19,15 @@ import type { Order, PaymentMethod } from './types';
  */
 
 export interface PlaceOrderInput {
+  /**
+   * The authenticated customer placing the order. Required.
+   *
+   * `orders.user_id` is nullable in the schema so that guest orders placed
+   * before accounts existed remain valid, but no *new* order may be
+   * ownerless — that invariant lives here, and the routes return 401 rather
+   * than reaching this function without it.
+   */
+  userId: number;
   lines: Array<{ variantId: string; quantity: number }>;
   contact: ContactInput;
   address: AddressInput;
@@ -100,7 +109,13 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
       gstRate: 0.18,
     },
     items: quote.orderItems,
-    paymentMethod: input.paymentMethod,
+    userId: input.userId,
+    // Derived from the provider that will actually run, never from the request
+    // body. A client could previously post `paymentMethod: 'razorpay-test'` to
+    // a mock build and get an order row labelled razorpay-test whose payment
+    // rows all said 'mock' — the order's own record of how it was paid
+    // disagreeing with the payments attached to it.
+    paymentMethod: isCod ? ('cod' as const) : provider!.id,
     // Nothing in this build takes real money, and the flag records that
     // permanently rather than leaving it to be inferred later.
     isTest: true,
@@ -148,7 +163,7 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
   /* ---------------------------------------------------------- online */
 
   const intent = await provider!.createIntent(order);
-  await repository.setGatewayOrderId(order.id, intent.gatewayOrderId);
+  await repository.setGatewayOrderId(order.id, intent.gatewayOrderId, provider!.id);
 
   return {
     ok: true,

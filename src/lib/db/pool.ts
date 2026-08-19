@@ -1,5 +1,5 @@
 import pg, { Pool, type PoolClient, type QueryResultRow } from 'pg';
-import { assertLocalDatabase } from './guard';
+import { connectionOptions } from './connection';
 
 /**
  * `bigint` (oid 20) arrives as a string by default, because Postgres bigint is
@@ -14,8 +14,9 @@ pg.types.setTypeParser(1700, (value) => Number(value));
 /**
  * PostgreSQL connection pool.
  *
- * `assertLocalDatabase` runs before the pool is constructed, so a misconfigured
- * `DATABASE_URL` throws before any connection is opened. See `guard.ts`.
+ * The guard runs inside `connectionOptions()` before the pool is constructed,
+ * so a misconfigured `DATABASE_URL` throws before any connection is opened.
+ * See `guard.ts` and `connection.ts`.
  *
  * Server-only. Importing this from a client component is a build error, which
  * is the intent — no database credential can reach the browser.
@@ -26,13 +27,19 @@ let pool: Pool | null = null;
 export function db(): Pool {
   if (pool) return pool;
 
-  const info = assertLocalDatabase(process.env.DATABASE_URL);
+  const { info, connectionString, ssl } = connectionOptions();
 
   pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    max: 10,
+    connectionString,
+    ssl,
+    // A managed database is a shared, capped resource, and `next dev` can hold
+    // several pools at once across HMR reloads. Local Postgres has no such
+    // pressure.
+    max: info.remote ? 5 : 10,
     idleTimeoutMillis: 30_000,
-    connectionTimeoutMillis: 5_000,
+    // Every connection is now an internet round-trip rather than a loopback,
+    // and a pooler may queue before handing one over.
+    connectionTimeoutMillis: info.remote ? 15_000 : 5_000,
     // A checkout query that hangs is worse than one that fails.
     statement_timeout: 10_000,
   });
@@ -42,7 +49,7 @@ export function db(): Pool {
   });
 
   // Safe to log: the redacted form never contains the password.
-  console.info(`[db] connected to ${info.redacted}`);
+  console.info(`[db] connected to ${info.redacted} (${info.remote ? 'remote' : 'local'})`);
 
   return pool;
 }

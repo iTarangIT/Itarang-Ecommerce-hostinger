@@ -17,7 +17,7 @@
     "db:seed": "npm run db -- seed",
     "db:reset": "npm run db -- reset",
     "db:sweep": "npm run db -- sweep",
-    "admin:hash": "node scripts/admin-hash.mts",
+    "admin:create": "node --env-file-if-exists=.env.local scripts/admin-create.mts",
     "test": "vitest run",
     "test:watch": "vitest",
     "verify": "npm run typecheck && npm run lint && npm run build && npm run test"
@@ -26,6 +26,7 @@
     "clsx": "^2.1.1",
     "lucide-react": "^0.468.0",
     "next": "^15.5.4",
+    "nodemailer": "^9.0.5",
     "pg": "^8.23.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -35,6 +36,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
     "@types/node": "^22.10.2",
+    "@types/nodemailer": "^8.0.1",
     "@types/pg": "^8.21.0",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",

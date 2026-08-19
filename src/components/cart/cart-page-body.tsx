@@ -26,7 +26,13 @@ import { CartLineItem, CouponField, FreeShipMeter, OrderSummary } from './cart-p
 
 const GSTIN_PATTERN = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
 
-export function CartPageBody({ recommendations }: { recommendations: ProductSummary[] }) {
+export function CartPageBody({
+  recommendations,
+  signedIn,
+}: {
+  recommendations: ProductSummary[];
+  signedIn: boolean;
+}) {
   const cart = useCart();
   const { toast } = useUI();
   const [gstin, setGstinLocal] = React.useState('');
@@ -132,15 +138,21 @@ export function CartPageBody({ recommendations }: { recommendations: ProductSumm
                 </div>
 
                 <ButtonLink
-                  href="/checkout"
+                  href={signedIn ? '/checkout' : '/login?next=%2Fcheckout'}
                   variant="accent"
                   size="lg"
                   fullWidth
                   className="mt-5"
                 >
                   <Lock className="h-4 w-4" />
-                  Proceed to checkout
+                  {signedIn ? 'Proceed to checkout' : 'Sign in to check out'}
                 </ButtonLink>
+
+                {signedIn ? null : (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Your cart is saved on this device and will still be here after you sign in.
+                  </p>
+                )}
 
                 <p className="mt-2 flex items-start gap-1.5 text-xs text-muted-foreground">
                   <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />

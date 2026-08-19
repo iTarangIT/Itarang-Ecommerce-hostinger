@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
+import { currentUser } from '@/lib/auth/session';
 import { productsResponseSchema, settingsResponseSchema, variantsResponseSchema } from '@/lib/commerce/hostinger/schema';
 import { inventoryMap, mapProduct } from '@/lib/commerce/hostinger/map';
 import { unmappedProductIds } from '@/lib/commerce/hostinger/enrichment';
@@ -74,7 +75,18 @@ async function probe(label: string, url: string): Promise<{ probe: Probe; json?:
 }
 
 export async function GET() {
-  if (process.env.NODE_ENV === 'production') {
+  // Admins only, in every environment.
+  //
+  // This used to be gated on NODE_ENV, which meant any non-production deploy —
+  // staging, a preview build, a misconfigured server — published the sales
+  // channel id, the upstream URL, store settings and the field-level mapping to
+  // anyone who asked. An environment variable is a deployment detail, not an
+  // authorization decision.
+  //
+  // 404 rather than 403, so the endpoint's existence is not confirmed to a
+  // caller who has no business knowing about it.
+  const user = await currentUser();
+  if (user?.role !== 'admin') {
     return new NextResponse('Not found', { status: 404 });
   }
 

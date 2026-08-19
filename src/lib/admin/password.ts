@@ -1,19 +1,21 @@
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 
 /**
- * Password hashing for the admin console.
+ * Password hashing for every account, customer and admin alike.
  *
- * Kept free of any Next.js import so the `admin:hash` script can use it
- * directly from Node without pulling in the framework.
+ * Kept free of any Next.js import so the `admin:create` script can use it
+ * directly from Node without pulling in the framework. Application code should
+ * import it through `src/lib/auth/password.ts`, which also carries the policy.
  *
  * Format: `scrypt.<salt-hex>.<hash-hex>` — the password itself is never stored.
  *
- * The separator is a full stop, **not** the conventional `$`, and that matters:
- * this value lives in `.env.local`, and Next.js loads env files through
- * dotenv-expand, which treats `$name` as variable interpolation. A
- * `scrypt$salt$hash` value silently arrives in the application as just
- * `scrypt` — the salt and hash expanded to nothing — and every login fails
- * with no error anywhere. Hex digits and `.` are inert to every dotenv parser.
+ * The separator is a full stop, **not** the conventional `$`. That was chosen
+ * when the admin hash lived in `.env.local`: Next.js loads env files through
+ * dotenv-expand, which treats `$name` as variable interpolation, so a
+ * `scrypt$salt$hash` value arrived as just `scrypt` and every login failed
+ * silently. Hashes now live in `users.password_hash` where that no longer
+ * applies, but the format is kept — changing it would invalidate every stored
+ * password for no benefit.
  *
  * `verifyPassword` still accepts the older `$` form so an existing stored hash
  * keeps working.

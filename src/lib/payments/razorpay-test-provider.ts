@@ -108,7 +108,24 @@ export class RazorpayTestProvider implements PaymentProvider {
       );
     }
 
-    const created = (await response.json()) as { id: string; amount: number };
+    const created = (await response.json()) as { id: string; amount: number; currency?: string };
+
+    // The gateway echoes back what it recorded. If that is not what we asked
+    // for, the customer would be shown one figure and charged another, so this
+    // fails the placement rather than proceeding on the mismatch. It also
+    // catches a paise/rupee unit error immediately instead of at settlement.
+    if (created.amount !== order.amounts.total) {
+      throw new PaymentProviderError(
+        `Razorpay recorded ${created.amount} paise for order ${order.orderNumber}, ` +
+          `but the order total is ${order.amounts.total}. Refusing to take payment.`,
+      );
+    }
+
+    if (created.currency && created.currency !== 'INR') {
+      throw new PaymentProviderError(
+        `Razorpay returned currency ${created.currency} for order ${order.orderNumber}.`,
+      );
+    }
 
     return {
       gatewayOrderId: created.id,
@@ -166,7 +183,10 @@ export class RazorpayTestProvider implements PaymentProvider {
 
     let parsed: {
       event?: string;
-      payload?: { payment?: { entity?: Record<string, unknown> } };
+      payload?: {
+        payment?: { entity?: Record<string, unknown> };
+        refund?: { entity?: Record<string, unknown> };
+      };
     };
     try {
       parsed = JSON.parse(rawBody);
@@ -174,8 +194,19 @@ export class RazorpayTestProvider implements PaymentProvider {
       return { ok: false, eventId, eventType: 'unknown', reason: 'invalid_json' };
     }
 
-    const entity = parsed.payload?.payment?.entity ?? {};
     const eventType = parsed.event ?? 'unknown';
+
+    // Razorpay puts a refund under `payload.refund.entity`, not
+    // `payload.payment.entity`. Reading the payment path for a refund event
+    // yielded an empty object, so `order_id` was undefined and the webhook
+    // route silently classified a real refund as "ignored".
+    //
+    // A refund entity carries `payment_id` rather than being the payment
+    // itself, so the ids are taken from the right fields for each shape.
+    const isRefund = eventType.startsWith('refund.');
+    const entity = isRefund
+      ? (parsed.payload?.refund?.entity ?? {})
+      : (parsed.payload?.payment?.entity ?? {});
 
     const status =
       eventType === 'payment.captured' || eventType === 'order.paid'
@@ -193,7 +224,10 @@ export class RazorpayTestProvider implements PaymentProvider {
       eventId,
       eventType,
       gatewayOrderId: entity.order_id as string | undefined,
-      gatewayPaymentId: entity.id as string | undefined,
+      // For a refund the entity's own id is the refund id; the payment it
+      // reverses is in `payment_id`. Using the refund id here would record a
+      // payment row that matches nothing.
+      gatewayPaymentId: (isRefund ? entity.payment_id : entity.id) as string | undefined,
       amount: entity.amount as number | undefined,
       method: entity.method as string | undefined,
       status,

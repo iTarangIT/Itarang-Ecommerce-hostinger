@@ -8,6 +8,7 @@ import {
   ArrowRight,
   Banknote,
   Check,
+  CreditCard,
   FlaskConical,
   Loader2,
   Lock,
@@ -29,6 +30,7 @@ import { Button, ButtonLink } from '@/components/ui/button';
 import { Checkbox, Field, Input, Select } from '@/components/ui/field';
 import { StateBlock } from '@/components/ui/states';
 import { OrderSummaryPanel } from './order-summary-panel';
+import { RazorpayPanel } from './razorpay-panel';
 import { TestModeBanner } from './test-mode-banner';
 import { cn } from '@/lib/utils';
 
@@ -41,7 +43,15 @@ import { cn } from '@/lib/utils';
  */
 
 type Step = 1 | 2 | 3;
-type PaymentChoice = 'cod' | 'mock';
+/**
+ * What the shopper picks, not which provider runs.
+ *
+ * 'online' resolves to whichever provider the server has configured — the
+ * client is told which one so it can render the right panel, but it never
+ * chooses. `placeOrder` derives the stored payment method from the provider
+ * itself, so a tampered request cannot mislabel an order.
+ */
+type PaymentChoice = 'cod' | 'online';
 
 interface QuoteResponse {
   items: CartItem[];
@@ -59,13 +69,33 @@ const STEPS: Array<{ id: Step; label: string; icon: typeof User }> = [
   { id: 3, label: 'Payment', icon: Wallet },
 ];
 
-export function CheckoutFlow() {
+/** The signed-in customer, passed down so the contact step starts filled in. */
+export interface CheckoutAccount {
+  email: string;
+  fullName: string | null;
+  phone: string | null;
+}
+
+export function CheckoutFlow({
+  account,
+  provider,
+}: {
+  account: CheckoutAccount;
+  provider: 'mock' | 'razorpay-test';
+}) {
   const cart = useCart();
   const router = useRouter();
   const { toast } = useUI();
 
   const [step, setStep] = React.useState<Step>(1);
-  const [contact, setContact] = React.useState({ name: '', phone: '', email: '' });
+  // Prefilled from the account rather than typed blind. The server ignores
+  // these values for identity — ownership comes from the session — so they are
+  // a convenience, not a trust boundary.
+  const [contact, setContact] = React.useState({
+    name: account.fullName ?? '',
+    phone: account.phone ?? '',
+    email: account.email,
+  });
   const [address, setAddress] = React.useState({
     line1: '',
     line2: '',
@@ -76,7 +106,7 @@ export function CheckoutFlow() {
   });
   const [wantsGstInvoice, setWantsGstInvoice] = React.useState(false);
   const [gstin, setGstin] = React.useState('');
-  const [payment, setPayment] = React.useState<PaymentChoice>('mock');
+  const [payment, setPayment] = React.useState<PaymentChoice>('online');
 
   const [quote, setQuote] = React.useState<QuoteResponse | null>(null);
   const [quoteLoading, setQuoteLoading] = React.useState(false);
@@ -84,6 +114,9 @@ export function CheckoutFlow() {
   const [formError, setFormError] = React.useState<string | null>(null);
   const [placing, setPlacing] = React.useState(false);
   const [pendingOrder, setPendingOrder] = React.useState<string | null>(null);
+  const [intent, setIntent] = React.useState<{ clientParams: Record<string, string | number> } | null>(
+    null,
+  );
 
   /** One key per placement attempt, so a double click cannot create two orders. */
   const idempotencyKey = React.useRef<string>(crypto.randomUUID());
@@ -113,7 +146,7 @@ export function CheckoutFlow() {
           lines,
           couponCode: cart.coupon?.code,
           pincode: address.pincode.length === 6 ? address.pincode : undefined,
-          paymentMethod: payment,
+          paymentMethod: payment === 'cod' ? 'cod' : provider,
         }),
       })
         .then((r) => r.json())
@@ -128,7 +161,7 @@ export function CheckoutFlow() {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [lines, cart.coupon?.code, address.pincode, payment]);
+  }, [lines, cart.coupon?.code, address.pincode, payment, provider]);
 
   /* ------------------------------------------------------- validation */
 
@@ -190,11 +223,19 @@ export function CheckoutFlow() {
           address,
           couponCode: cart.coupon?.code,
           gstin: wantsGstInvoice ? gstin : undefined,
-          paymentMethod: payment,
+          paymentMethod: payment === 'cod' ? 'cod' : provider,
         }),
       });
 
       const data = await response.json();
+
+      // The session expired between loading the page and submitting. Send them
+      // to sign in and straight back — the cart is in localStorage, so nothing
+      // they typed into it is lost.
+      if (response.status === 401) {
+        router.push(`/login?next=${encodeURIComponent('/checkout')}`);
+        return;
+      }
 
       if (!response.ok) {
         setFieldErrors(data.fields ?? {});
@@ -219,6 +260,7 @@ export function CheckoutFlow() {
 
       // Online: the order exists and is awaiting payment.
       setPendingOrder(data.orderNumber);
+      setIntent(data.intent ?? null);
     } catch {
       setFormError('We could not reach the server. Your cart is safe — please try again.');
     } finally {
@@ -547,7 +589,26 @@ export function CheckoutFlow() {
           <section className="rounded-xl border border-border bg-card p-5 sm:p-6">
             <h2 className="heading-3">How would you like to pay?</h2>
 
-            {pendingOrder ? (
+            {pendingOrder && provider === 'razorpay-test' && intent ? (
+              <RazorpayPanel
+                orderNumber={pendingOrder}
+                intent={intent}
+                total={quote?.totals.total ?? 0}
+                busy={placing}
+                prefill={{
+                  name: contact.name,
+                  email: contact.email,
+                  contact: contact.phone,
+                }}
+                onVerified={() => {
+                  cart.clear();
+                  router.push(`/order/${pendingOrder}?placed=1`);
+                }}
+                onFailed={(message) => {
+                  toast({ title: 'Payment not completed', description: message, tone: 'error' });
+                }}
+              />
+            ) : pendingOrder ? (
               <MockPaymentPanel
                 orderNumber={pendingOrder}
                 total={quote?.totals.total ?? 0}
@@ -558,12 +619,22 @@ export function CheckoutFlow() {
               <>
                 <div className="mt-5 space-y-3">
                   <PaymentOption
-                    id="mock"
-                    checked={payment === 'mock'}
-                    onSelect={() => setPayment('mock')}
-                    icon={<FlaskConical className="h-5 w-5" />}
-                    title="Test payment"
-                    description="Simulates a card or UPI payment. No gateway is contacted and no money moves."
+                    id="online"
+                    checked={payment === 'online'}
+                    onSelect={() => setPayment('online')}
+                    icon={
+                      provider === 'razorpay-test' ? (
+                        <CreditCard className="h-5 w-5" />
+                      ) : (
+                        <FlaskConical className="h-5 w-5" />
+                      )
+                    }
+                    title={provider === 'razorpay-test' ? 'Card, UPI or netbanking' : 'Test payment'}
+                    description={
+                      provider === 'razorpay-test'
+                        ? 'Pay securely through Razorpay. Test mode — use a test card; no real money moves.'
+                        : 'Simulates a card or UPI payment. No gateway is contacted and no money moves.'
+                    }
                     badge="Test mode"
                   />
 

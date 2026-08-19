@@ -70,6 +70,14 @@ export interface OrderAmounts {
 export interface Order {
   id: number;
   orderNumber: string;
+  /**
+   * The account that placed this order.
+   *
+   * Undefined only on historical guest orders, placed before accounts existed.
+   * Every new order has one — enforced in `placeOrder`, not by a NOT NULL
+   * constraint, which would have invalidated that history.
+   */
+  userId?: number;
   status: OrderStatus;
   paymentStatus: PaymentStatus;
   contact: OrderContact;
@@ -125,6 +133,8 @@ export interface StockReservation {
 /** Everything needed to persist a new order, computed server-side. */
 export interface NewOrder {
   orderNumber: string;
+  /** Required for every new order. See `Order.userId`. */
+  userId?: number;
   contact: OrderContact;
   shippingAddress: ShippingAddress;
   amounts: OrderAmounts;

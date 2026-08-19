@@ -1,23 +1,26 @@
 /**
- * Local database management for iTarang checkout testing.
+ * Database management for iTarang checkout.
  *
  *   node --env-file-if-exists=.env.local scripts/db.mts <command>
  *
  * Commands: status · create · migrate · seed · reset · sweep
  *
- * Every command calls the application's own `assertLocalDatabase` guard before
- * opening a connection — the same code path the server uses, not a copy — so a
- * misconfigured DATABASE_URL aborts before a single statement is issued.
+ * Every command goes through `connectionOptions()`, which calls the
+ * application's own guard before opening a connection — the same code path the
+ * server uses, not a copy — so a misconfigured DATABASE_URL aborts before a
+ * single statement is issued, and TLS settings cannot drift from the app's.
+ *
+ * The destructive commands (`create`, `seed`, `reset`) are local-only. A
+ * managed database is not ours to drop, and `db:reset` in particular would
+ * take Supabase's own objects in `public` with it. `DB_ALLOW_DESTRUCTIVE=true`
+ * overrides `seed`/`reset` for the rare deliberate case.
  */
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
-import {
-  EXPECTED_DATABASE,
-  assertLocalDatabase,
-  inspectDatabaseUrl,
-} from '../src/lib/db/guard.ts';
+import { connectionOptions } from '../src/lib/db/connection.ts';
+import { EXPECTED_DATABASE, inspectDatabaseUrl } from '../src/lib/db/guard.ts';
 
 const { Client } = pg;
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -30,10 +33,25 @@ function fail(message: string): never {
 
 /** Guarded connection to the project database. */
 async function connect() {
-  const info = assertLocalDatabase(process.env.DATABASE_URL);
-  const client = new Client({ connectionString: process.env.DATABASE_URL });
+  const { info, connectionString, ssl } = connectionOptions();
+  const client = new Client({ connectionString, ssl });
   await client.connect();
   return { client, info };
+}
+
+/**
+ * Refuse a command that has no business running against a managed database.
+ *
+ * `override` names the escape hatch, when one exists at all; `create` has none,
+ * because there is nothing sensible for it to do remotely.
+ */
+function refuseRemote(command: string, reason: string, override?: string): never {
+  fail(
+    `Refusing to run "${command}" against a remote database. ${reason}` +
+      (override
+        ? `\n    Set ${override}=true if this is genuinely what you want.`
+        : ''),
+  );
 }
 
 /**
@@ -46,8 +64,11 @@ async function connect() {
  * `CREATE DATABASE itarang_dev`.
  */
 async function connectMaintenance() {
-  const info = assertLocalDatabase(process.env.DATABASE_URL);
-  const url = new URL(process.env.DATABASE_URL!);
+  const { info, connectionString } = connectionOptions();
+  if (info.remote) {
+    refuseRemote('create', 'A managed provider provisions the database for you.');
+  }
+  const url = new URL(connectionString);
   url.pathname = '/postgres';
   const client = new Client({ connectionString: url.toString() });
   await client.connect();
@@ -59,11 +80,13 @@ async function connectMaintenance() {
 async function status() {
   const info = inspectDatabaseUrl(process.env.DATABASE_URL ?? '');
   console.log(`\n  target      ${info.redacted}`);
-  console.log(`  expected    ${EXPECTED_DATABASE} on a local host`);
+  console.log(`  expected    ${EXPECTED_DATABASE} on a local host, or the approved remote host`);
 
+  let remote = false;
   try {
-    assertLocalDatabase(process.env.DATABASE_URL);
-    console.log('  guard       PASS');
+    remote = connectionOptions().info.remote;
+    console.log(`  guard       PASS`);
+    console.log(`  mode        ${remote ? 'remote (TLS required)' : 'local'}`);
   } catch (error) {
     console.log(`  guard       REFUSED — ${(error as Error).message}`);
     process.exit(1);
@@ -86,7 +109,10 @@ async function status() {
 }
 
 async function create() {
-  const info = assertLocalDatabase(process.env.DATABASE_URL);
+  const { info } = connectionOptions();
+  if (info.remote) {
+    refuseRemote('create', 'A managed provider provisions the database for you.');
+  }
   console.log(`\n  Creating database "${info.database}" on ${info.host}:${info.port}`);
 
   const { client } = await connectMaintenance();
@@ -149,6 +175,14 @@ async function migrate() {
 }
 
 async function seed() {
+  if (connectionOptions().info.remote && process.env.DB_ALLOW_DESTRUCTIVE !== 'true') {
+    refuseRemote(
+      'seed',
+      'db/seed.sql deletes and rewrites the ITG-SEED-% demo orders.',
+      'DB_ALLOW_DESTRUCTIVE',
+    );
+  }
+
   const { client, info } = await connect();
   console.log(`\n  Seeding ${info.redacted}`);
   try {
@@ -162,6 +196,14 @@ async function seed() {
 }
 
 async function reset() {
+  if (connectionOptions().info.remote && process.env.DB_ALLOW_DESTRUCTIVE !== 'true') {
+    refuseRemote(
+      'reset',
+      'It drops the entire public schema, including objects the provider owns.',
+      'DB_ALLOW_DESTRUCTIVE',
+    );
+  }
+
   const { client, info } = await connect();
   console.log(`\n  Resetting ${info.redacted}`);
   try {
@@ -185,7 +227,44 @@ async function sweep() {
         WHERE state = 'active' AND expires_at <= now()`,
     );
     // Tidiness only — availability queries already exclude expired rows.
-    console.log(`  ✓ marked ${rowCount ?? 0} expired reservation(s)\n`);
+    console.log(`  ✓ marked ${rowCount ?? 0} expired reservation(s)`);
+
+    // Not tidiness. A webhook event is claimed before it is applied and
+    // stamped only after, so anything still unstamped some minutes later is a
+    // payment update that never landed — the gateway believes it delivered.
+    // These need a human, so the sweep reports them loudly rather than
+    // retrying blindly.
+    const { rows: stuck } = await client.query<{
+      provider: string;
+      event_id: string;
+      event_type: string;
+      received_at: Date;
+    }>(
+      `SELECT provider, event_id, event_type, received_at
+         FROM webhook_events
+        WHERE processed_at IS NULL
+          AND received_at < now() - interval '15 minutes'
+        ORDER BY received_at`,
+    );
+
+    // Rate-limit windows nobody will read again. Housekeeping only — expiry is
+    // decided by the window in the key, not by this running.
+    const { rowCount: limitsCleared } = await client.query(
+      `DELETE FROM rate_limits WHERE window_start < now() - interval '1 day'`,
+    );
+    console.log(`  ✓ cleared ${limitsCleared ?? 0} expired rate-limit window(s)`);
+
+    if (stuck.length === 0) {
+      console.log('  ✓ no unprocessed webhook events\n');
+    } else {
+      console.log(`\n  ✗ ${stuck.length} webhook event(s) recorded but never applied:`);
+      for (const row of stuck) {
+        console.log(
+          `      ${row.received_at.toISOString()}  ${row.provider}  ${row.event_type}  ${row.event_id}`,
+        );
+      }
+      console.log('    Each one is a payment the gateway thinks it told us about.\n');
+    }
   } finally {
     await client.end();
   }

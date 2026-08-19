@@ -56,12 +56,35 @@ export interface OrderRepository {
   findByIdempotencyKey(key: string): Promise<Order | null>;
   findByGatewayOrderId(gatewayOrderId: string): Promise<Order | null>;
 
-  /** Guest lookup — requires the phone number on the order. */
+  /**
+   * Guest lookup — order number plus the phone number on the order, and only
+   * for orders with no owner.
+   *
+   * Retained for historical orders placed before accounts existed, and for
+   * `/track`. An order that belongs to an account is reachable only through
+   * `findForOwner`, so this cannot be used to read somebody else's order.
+   */
   findForCustomer(orderNumber: string, phone: string): Promise<Order | null>;
+
+  /** Owner lookup — the account must match `orders.user_id`. */
+  findForOwner(orderNumber: string, userId: number): Promise<Order | null>;
+
+  /** This account's own order history. */
+  listOrdersForUser(
+    userId: number,
+    limit?: number,
+    offset?: number,
+  ): Promise<{ orders: Order[]; total: number }>;
 
   listOrders(filters: OrderListFilters): Promise<{ orders: Order[]; total: number }>;
 
-  setGatewayOrderId(orderId: number, gatewayOrderId: string): Promise<void>;
+  /** Point the order at a gateway order, recording it in the attempt history. */
+  setGatewayOrderId(orderId: number, gatewayOrderId: string, provider?: string): Promise<void>;
+
+  /** Every gateway order ever created for this order, newest first. */
+  listPaymentAttempts(orderId: number): Promise<
+    Array<{ gatewayOrderId: string; provider: string; amount: number; supersededAt: string | null }>
+  >;
 
   /** Records a payment attempt. Returns false when the id was already seen. */
   recordPayment(payment: Omit<PaymentRecord, 'id' | 'createdAt'>): Promise<boolean>;
@@ -87,13 +110,31 @@ export interface OrderRepository {
 
   listEvents(orderId: number): Promise<OrderEvent[]>;
 
-  /** Returns false when this event id has already been processed. */
-  recordWebhookEvent(
+  /**
+   * Claim a webhook event. Returns false when this event id was already claimed.
+   *
+   * Two-phase on purpose: the row is written with `processed_at` NULL and only
+   * stamped by `completeWebhookEvent` once the event has been applied, so a
+   * failure in between leaves work that can be found and retried instead of a
+   * payment update that is silently lost.
+   */
+  beginWebhookEvent(
     provider: string,
     eventId: string,
     eventType: string,
     payload: unknown,
   ): Promise<boolean>;
+
+  /** Mark a claimed event finished. */
+  completeWebhookEvent(provider: string, eventId: string): Promise<void>;
+
+  /** Release a claim after a failure, so the gateway's retry is let through. */
+  abandonWebhookEvent(provider: string, eventId: string): Promise<void>;
+
+  /** Claimed but never completed — events that need a second look. */
+  unprocessedWebhookEvents(olderThanMinutes?: number): Promise<
+    Array<{ id: number; provider: string; eventId: string; eventType: string; receivedAt: string }>
+  >;
 
   /* ------------------------------------------------------- inventory */
 

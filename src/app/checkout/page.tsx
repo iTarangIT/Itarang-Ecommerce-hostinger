@@ -1,6 +1,10 @@
 import type { Metadata } from 'next';
+import { requireUser } from '@/lib/auth/guards';
+import { paymentProvider } from '@/lib/payments';
 import { Breadcrumbs } from '@/components/ui/breadcrumbs';
 import { CheckoutFlow } from '@/components/checkout/checkout-flow';
+
+export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   title: 'Checkout',
@@ -8,7 +12,11 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-export default function CheckoutPage() {
+export default async function CheckoutPage() {
+  // Placing an order requires an account. The cart lives in localStorage, so a
+  // round trip through /login and back leaves it exactly as it was — the
+  // shopper returns to a full cart rather than an empty one.
+  const user = await requireUser('/checkout');
   return (
     <>
       <div className="border-b border-border bg-surface">
@@ -25,7 +33,10 @@ export default function CheckoutPage() {
       </div>
 
       <div className="container py-8 lg:py-10">
-        <CheckoutFlow />
+        <CheckoutFlow
+          account={{ email: user.email, fullName: user.fullName, phone: user.phone }}
+          provider={paymentProvider().id}
+        />
       </div>
     </>
   );

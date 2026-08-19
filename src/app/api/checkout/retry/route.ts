@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { orders } from '@/lib/orders/postgres-repository';
+import { requireOrderAccess } from '@/lib/orders/checkout-auth';
 import { paymentProvider } from '@/lib/payments';
 
 export const dynamic = 'force-dynamic';
@@ -28,11 +29,17 @@ export async function POST(request: Request) {
   }
 
   const repository = orders();
-  const order = await repository.findByOrderNumber(parsed.data.orderNumber);
 
-  if (!order) {
-    return NextResponse.json({ error: 'Order not found.' }, { status: 404 });
-  }
+  // Ownership, not just existence.
+  //
+  // Anyone holding an order number could previously mint a fresh payment
+  // intent on somebody else's order — against a real gateway that is an
+  // unauthenticated outbound API call per request, and it replaced the
+  // order's gateway id, orphaning any payment already in flight against the
+  // previous one.
+  const access = await requireOrderAccess(parsed.data.orderNumber, request);
+  if (!access.ok) return access.response;
+  const order = access.order;
 
   if (order.paymentStatus === 'paid') {
     return NextResponse.json(
@@ -68,8 +75,9 @@ export async function POST(request: Request) {
     );
   }
 
-  const intent = await paymentProvider().createIntent(order);
-  await repository.setGatewayOrderId(order.id, intent.gatewayOrderId);
+  const provider = paymentProvider();
+  const intent = await provider.createIntent(order);
+  await repository.setGatewayOrderId(order.id, intent.gatewayOrderId, provider.id);
 
   return NextResponse.json({
     ok: true,

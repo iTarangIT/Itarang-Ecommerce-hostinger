@@ -91,6 +91,11 @@ describe('no payment secret can reach the browser', () => {
       expect(bundle.text, `${bundle.path} contains a database URL`).not.toMatch(
         /postgres(ql)?:\/\/[^\s"']*@/,
       );
+      // The SMTP password is a live mailbox credential — worse to leak than a
+      // test payment key, because it can send mail as us.
+      expect(bundle.text, `${bundle.path} references the SMTP password`).not.toContain(
+        'SMTP_PASSWORD',
+      );
     }
   });
 
@@ -105,6 +110,312 @@ describe('no payment secret can reach the browser', () => {
       expect(file.text, `${file.path} exposes the database URL publicly`).not.toMatch(
         /NEXT_PUBLIC_DATABASE_URL/,
       );
+      expect(file.text, `${file.path} exposes the SMTP password publicly`).not.toMatch(
+        /NEXT_PUBLIC_SMTP/,
+      );
+    }
+  });
+});
+
+describe('the admin area stays behind its boundary', () => {
+  const adminDir = join(ROOT, 'src', 'app', 'admin');
+
+  it('has a layout that calls requireAdmin', () => {
+    // The whole point of the layout is that a new page under /admin inherits
+    // the check instead of having to remember it. If this file loses its
+    // guard, every admin page silently becomes public.
+    const layout = join(adminDir, 'layout.tsx');
+    expect(existsSync(layout), 'src/app/admin/layout.tsx is missing').toBe(true);
+
+    const text = readFileSync(layout, 'utf8');
+    expect(text, 'the admin layout does not call requireAdmin()').toMatch(/requireAdmin\s*\(/);
+    expect(text, 'the admin layout is not force-dynamic').toMatch(
+      /dynamic\s*=\s*['"]force-dynamic['"]/,
+    );
+  });
+
+  it('no admin page renders data without the layout above it', () => {
+    // A page directly under src/app/ that happens to be named "admin" would
+    // escape the boundary; so would a route handler, which layouts do not
+    // wrap at all.
+    const handlers = readAll(adminDir, ['route.ts']);
+    for (const handler of handlers) {
+      expect(
+        handler.text,
+        `${handler.path} is a route handler under /admin — layouts do not guard these, ` +
+          'so it must check authorization itself',
+      ).toMatch(/requireAdmin|currentUser/);
+    }
+  });
+
+  it('the shared-password admin login is gone', () => {
+    // Two credential systems guarding the same pages means the weaker one sets
+    // the security level. This asserts the old one stayed deleted.
+    expect(existsSync(join(ROOT, 'src', 'lib', 'admin', 'session.ts'))).toBe(false);
+
+    const all = readAll(join(ROOT, 'src'), ['.ts', '.tsx']);
+    for (const file of all) {
+      if (file.path.includes('security.test')) continue;
+      // Comments legitimately explain what was removed and why; code must not
+      // call it. Same treatment the Hostinger tripwire gives HTTP methods.
+      const code = file.text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+      expect(code, `${file.path} still references the retired admin session`).not.toMatch(
+        /isAdminAuthenticated|createAdminSession|ADMIN_SESSION_SECRET|ADMIN_PASSWORD_HASH/,
+      );
+    }
+  });
+});
+
+describe('order placement requires an authenticated customer', () => {
+  it('both placement routes gate on a session', () => {
+    // These two write orders, items, reservations and events. A route that
+    // loses this check would silently reopen guest checkout, and the schema
+    // cannot catch it: orders.user_id is nullable so that historical guest
+    // orders stay valid, so the invariant lives in code and here.
+    for (const route of ['order', 'cod']) {
+      const path = join(ROOT, 'src', 'app', 'api', 'checkout', route, 'route.ts');
+      const text = readFileSync(path, 'utf8');
+
+      expect(text, `${route}/route.ts does not require a customer`).toMatch(
+        /requireCustomer\s*\(/,
+      );
+      expect(text, `${route}/route.ts does not attach the owner to the order`).toMatch(
+        /userId:\s*auth\.user\.id/,
+      );
+    }
+  });
+
+  it('placeOrder cannot be called without an owner', () => {
+    // A required (non-optional) userId is what makes the compiler enforce this
+    // at every call site rather than relying on review.
+    const text = readFileSync(join(ROOT, 'src', 'lib', 'orders', 'place-order.ts'), 'utf8');
+    expect(text, 'PlaceOrderInput.userId must not be optional').toMatch(/^\s*userId: number;/m);
+  });
+
+  it('the checkout page is gated too, not just the API', () => {
+    const text = readFileSync(join(ROOT, 'src', 'app', 'checkout', 'page.tsx'), 'utf8');
+    expect(text, 'the checkout page does not require a user').toMatch(/requireUser\s*\(/);
+  });
+});
+
+describe('order-mutating checkout endpoints check ownership', () => {
+  it('retry and simulate require entitlement to the order', () => {
+    // Both take an order number and change payment state. Knowing a number
+    // must never be enough: simulate could drive any order to paid, and retry
+    // replaced the gateway order id, orphaning a payment already in flight.
+    for (const route of ['retry', 'simulate']) {
+      const text = readFileSync(
+        join(ROOT, 'src', 'app', 'api', 'checkout', route, 'route.ts'),
+        'utf8',
+      );
+      expect(text, `${route}/route.ts does not check order ownership`).toMatch(
+        /requireOrderAccess\s*\(/,
+      );
+      expect(
+        text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, ''),
+        `${route}/route.ts still looks the order up without an entitlement check`,
+      ).not.toMatch(/findByOrderNumber\s*\(/);
+    }
+  });
+
+  it('simulate is closed the moment a real gateway is configured', () => {
+    // The provider, not NODE_ENV, is what makes simulation safe: this build is
+    // deployed running the mock, and a production deployment on mock still
+    // needs its test payments to complete.
+    const text = readFileSync(
+      join(ROOT, 'src', 'app', 'api', 'checkout', 'simulate', 'route.ts'),
+      'utf8',
+    );
+    expect(text, 'simulate does not check the provider is the mock').toMatch(
+      /instanceof MockPaymentProvider/,
+    );
+  });
+});
+
+describe('the payment model is enforced where it is written', () => {
+  it('the repository consults the transition tables, not just rank', () => {
+    // PAYMENT_TRANSITIONS and canTransitionOrder existed but were referenced
+    // only from tests — rank alone decided, which would have permitted
+    // pending → refunded, and transitionOrderStatus wrote whatever it was
+    // handed.
+    const text = readFileSync(
+      join(ROOT, 'src', 'lib', 'orders', 'postgres-repository.ts'),
+      'utf8',
+    );
+    const code = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+
+    expect(code, 'applyPaymentStatus does not check the payment transition table').toMatch(
+      /canTransitionPayment\s*\(/,
+    );
+    expect(code, 'transitionOrderStatus does not validate the order transition').toMatch(
+      /canTransitionOrder\s*\(/,
+    );
+  });
+
+  it('the order INSERT retry runs inside a savepoint', () => {
+    // A failed statement aborts the transaction in PostgreSQL, so without a
+    // savepoint the collision retry could only ever hit 25P02.
+    const text = readFileSync(
+      join(ROOT, 'src', 'lib', 'orders', 'postgres-repository.ts'),
+      'utf8',
+    );
+    expect(text, 'no SAVEPOINT around the order insert retry').toMatch(/SAVEPOINT \$\{savepoint\}/);
+    expect(text, 'no ROLLBACK TO SAVEPOINT on the failure path').toMatch(
+      /ROLLBACK TO SAVEPOINT/,
+    );
+  });
+});
+
+describe('abuse-prone endpoints are rate limited', () => {
+  it('every authentication action counts against a limit', () => {
+    // Unlimited sign-in attempts are both a credential attack and, because
+    // each one runs scrypt, a cheap way to burn server CPU.
+    const text = readFileSync(join(ROOT, 'src', 'lib', 'auth', 'actions.ts'), 'utf8');
+    for (const marker of [
+      'login:',
+      'login:ip:',
+      'register:ip:',
+      'reset:',
+      'verify-resend:user:',
+      'change-password:user:',
+    ]) {
+      expect(text, `no rate-limit bucket for ${marker}`).toContain(marker);
+    }
+  });
+
+  it('the guest order lookup is limited', () => {
+    // Order number + a 10-digit phone is brute-forceable given unlimited tries.
+    const text = readFileSync(
+      join(ROOT, 'src', 'app', 'api', 'orders', '[orderNumber]', 'route.ts'),
+      'utf8',
+    );
+    expect(text, 'the guest lookup path is not rate limited').toContain('order-lookup:ip:');
+  });
+
+  it('the webhook is deliberately not throttled', () => {
+    // Throttling the gateway would drop real payment notifications during a
+    // burst. Its credential is the HMAC, and replay is already a no-op.
+    const text = readFileSync(
+      join(ROOT, 'src', 'app', 'api', 'webhooks', 'payment', 'route.ts'),
+      'utf8',
+    );
+    expect(text, 'the webhook must not be rate limited').not.toContain('rate-limit');
+  });
+});
+
+describe('state-changing API handlers check the request origin', () => {
+  it('checkout handlers pass the request through the origin check', () => {
+    // Server Actions get this from Next.js; route handlers get nothing, and
+    // these read a session cookie while changing state.
+    for (const route of ['order', 'cod']) {
+      const text = readFileSync(
+        join(ROOT, 'src', 'app', 'api', 'checkout', route, 'route.ts'),
+        'utf8',
+      );
+      expect(text, `${route}/route.ts does not pass the request for an origin check`).toMatch(
+        /requireCustomer\(request\)/,
+      );
+    }
+
+    for (const route of ['retry', 'simulate']) {
+      const text = readFileSync(
+        join(ROOT, 'src', 'app', 'api', 'checkout', route, 'route.ts'),
+        'utf8',
+      );
+      expect(text, `${route}/route.ts does not pass the request for an origin check`).toMatch(
+        /requireOrderAccess\([^)]*request\)/,
+      );
+    }
+  });
+});
+
+describe('security headers are configured', () => {
+  it('sets the headers a live deployment needs', () => {
+    const text = readFileSync(join(ROOT, 'next.config.mjs'), 'utf8');
+    for (const header of [
+      'X-Content-Type-Options',
+      'X-Frame-Options',
+      'Referrer-Policy',
+      'Permissions-Policy',
+      'Strict-Transport-Security',
+      'Content-Security-Policy-Report-Only',
+    ]) {
+      expect(text, `${header} is not set`).toContain(header);
+    }
+    expect(text, 'the Next.js version header is still advertised').toMatch(
+      /poweredByHeader:\s*false/,
+    );
+  });
+
+  it('does not enforce a CSP that would break the running site', () => {
+    // Next.js emits inline bootstrap scripts, so enforcing without nonces
+    // would white-screen the storefront. Report-Only is the deliberate state
+    // until nonces exist — this asserts the choice was made, not forgotten.
+    const text = readFileSync(join(ROOT, 'next.config.mjs'), 'utf8');
+    expect(text).not.toMatch(/key:\s*'Content-Security-Policy'/);
+  });
+
+  it('keeps API responses out of shared caches', () => {
+    const text = readFileSync(join(ROOT, 'next.config.mjs'), 'utf8');
+    expect(text, 'API responses are not marked no-store').toContain('no-store');
+  });
+});
+
+describe('diagnostics are authorized, not environment-gated', () => {
+  it('the Hostinger diagnostics endpoint requires an admin', () => {
+    // It previously returned 404 only when NODE_ENV === 'production', so every
+    // staging or preview deploy published the sales channel id and the
+    // upstream mapping to anyone who asked. An env var is a deployment
+    // detail, not an authorization decision.
+    const path = join(ROOT, 'src', 'app', 'api', 'diagnostics', 'hostinger', 'route.ts');
+    const text = readFileSync(path, 'utf8');
+    const code = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+
+    expect(code, 'diagnostics does not check the caller').toMatch(/currentUser\s*\(/);
+    expect(code, "diagnostics does not require role 'admin'").toMatch(/role\s*!==\s*'admin'/);
+    expect(code, 'diagnostics is still gated on NODE_ENV').not.toMatch(/NODE_ENV/);
+  });
+});
+
+describe('order access is decided server-side', () => {
+  it('the device cookie is signed', () => {
+    // It used to be an unsigned list defended only by httpOnly, which does not
+    // stop a client sending the header directly.
+    const text = readFileSync(join(ROOT, 'src', 'lib', 'orders', 'access.ts'), 'utf8');
+    expect(text, 'the order access cookie is not HMAC signed').toMatch(/createHmac/);
+    expect(text, 'the order access cookie is not compared in constant time').toMatch(
+      /timingSafeEqual/,
+    );
+  });
+
+  it('ownership is filtered in SQL, not compared after fetching', () => {
+    const text = readFileSync(
+      join(ROOT, 'src', 'lib', 'orders', 'postgres-repository.ts'),
+      'utf8',
+    );
+    expect(text, 'findForOwner does not constrain on user_id').toMatch(
+      /order_number = \$1 AND user_id = \$2/,
+    );
+    expect(text, 'listOrdersForUser does not constrain on user_id').toMatch(
+      /FROM orders WHERE user_id = \$1/,
+    );
+  });
+});
+
+describe('server actions authorize independently of any layout', () => {
+  it('every mutating admin action checks the caller', () => {
+    // A Server Action is reached by POSTing to its id, not by rendering a page,
+    // so admin/layout.tsx does not protect it. Each one must check for itself.
+    const actions = readFileSync(join(ROOT, 'src', 'lib', 'admin', 'actions.ts'), 'utf8');
+    const exported = [...actions.matchAll(/export async function (\w+)/g)].map((m) => m[1]);
+
+    expect(exported.length).toBeGreaterThan(0);
+    for (const name of exported) {
+      const body = actions.slice(actions.indexOf(`export async function ${name}`));
+      expect(
+        body.slice(0, body.indexOf('\n}')),
+        `${name} does not establish the caller is an admin`,
+      ).toMatch(/requireAdminActor|currentUser/);
     }
   });
 });

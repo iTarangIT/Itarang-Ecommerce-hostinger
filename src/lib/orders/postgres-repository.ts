@@ -1,7 +1,12 @@
 import type { PoolClient } from 'pg';
 import { query, queryOne, transaction } from '@/lib/db/pool';
 import { generateOrderNumber } from './numbering';
-import { isPaymentAdvance, orderStatusForPayment } from './state-machine';
+import {
+  canTransitionOrder,
+  canTransitionPayment,
+  isPaymentAdvance,
+  orderStatusForPayment,
+} from './state-machine';
 import type {
   CreateOrderInput,
   CreateOrderResult,
@@ -42,6 +47,8 @@ import type {
 interface OrderRow {
   id: number;
   order_number: string;
+  /** Null on guest orders placed before accounts existed. */
+  user_id: number | null;
   status: OrderStatus;
   payment_status: PaymentStatus;
   customer_name: string;
@@ -107,6 +114,7 @@ function toOrder(row: OrderRow, items: OrderItem[]): Order {
   return {
     id: row.id,
     orderNumber: row.order_number,
+    userId: row.user_id ?? undefined,
     status: row.status,
     paymentStatus: row.payment_status,
     contact: {
@@ -140,7 +148,7 @@ function toOrder(row: OrderRow, items: OrderItem[]): Order {
 }
 
 const ORDER_COLUMNS = `
-  id, order_number, status, payment_status,
+  id, order_number, user_id, status, payment_status,
   customer_name, customer_phone, customer_email, shipping_address,
   subtotal, product_savings, coupon_code, coupon_discount, shipping, cod_fee,
   total, gst_amount, gst_rate, place_of_supply, buyer_gstin, seller_gstin,
@@ -213,12 +221,68 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
     return this.findOneBy('idempotency_key = $1', [key]);
   }
 
-  findByGatewayOrderId(gatewayOrderId: string) {
-    return this.findOneBy('gateway_order_id = $1', [gatewayOrderId]);
+  /**
+   * Find the order a gateway order id belongs to.
+   *
+   * Checks the current id first, then the attempt history. A capture webhook
+   * for an attempt that a retry has since replaced must still find its order —
+   * otherwise the customer is charged and the order stays unpaid.
+   */
+  async findByGatewayOrderId(gatewayOrderId: string) {
+    const current = await this.findOneBy('gateway_order_id = $1', [gatewayOrderId]);
+    if (current) return current;
+
+    return this.findOneBy(
+      'id = (SELECT order_id FROM payment_attempts WHERE gateway_order_id = $1)',
+      [gatewayOrderId],
+    );
   }
 
+  /**
+   * Guest lookup by order number + phone.
+   *
+   * Constrained to orders with no owner. Once an order belongs to an account,
+   * the account is the only way in — otherwise anyone who learned an order
+   * number and its phone number could read a stranger's order, and a signed-in
+   * customer could reach orders that are not theirs, which is precisely what
+   * ownership is supposed to prevent.
+   *
+   * The `user_id IS NULL` clause is what confines this path to the historical
+   * guest orders it exists to serve.
+   */
   findForCustomer(orderNumber: string, phone: string) {
-    return this.findOneBy('order_number = $1 AND customer_phone = $2', [orderNumber, phone]);
+    return this.findOneBy('order_number = $1 AND customer_phone = $2 AND user_id IS NULL', [
+      orderNumber,
+      phone,
+    ]);
+  }
+
+  /**
+   * An order, but only if this account owns it.
+   *
+   * Ownership is filtered in SQL rather than fetched-then-compared, so there is
+   * no window in which a caller holds another customer's order object.
+   */
+  findForOwner(orderNumber: string, userId: number) {
+    return this.findOneBy('order_number = $1 AND user_id = $2', [orderNumber, userId]);
+  }
+
+  /** This account's order history, newest first. */
+  async listOrdersForUser(userId: number, limit = 50, offset = 0) {
+    const capped = Math.min(limit, 200);
+
+    const totalRow = await queryOne<{ count: number }>(
+      `SELECT count(*)::bigint AS count FROM orders WHERE user_id = $1`,
+      [userId],
+    );
+
+    const rows = await query<OrderRow>(
+      `SELECT ${ORDER_COLUMNS} FROM orders WHERE user_id = $1
+        ORDER BY created_at DESC LIMIT ${capped} OFFSET ${Math.max(0, Math.floor(offset))}`,
+      [userId],
+    );
+
+    return { orders: await this.hydrate(rows), total: totalRow?.count ?? 0 };
   }
 
   async listOrders(filters: OrderListFilters) {
@@ -236,7 +300,12 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
     if (filters.search) {
       params.push(`%${filters.search.trim()}%`);
       const i = params.length;
-      conditions.push(`(order_number ILIKE $${i} OR customer_phone ILIKE $${i} OR customer_name ILIKE $${i})`);
+      // Email is included because orders now belong to accounts, and the
+      // address is what an admin has to hand when a customer writes in.
+      conditions.push(
+        `(order_number ILIKE $${i} OR customer_phone ILIKE $${i} ` +
+          `OR customer_name ILIKE $${i} OR customer_email ILIKE $${i})`,
+      );
     }
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -337,20 +406,29 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
       let inserted: OrderRow | undefined;
 
       // The unique index is the guarantee; retry on the vanishingly rare clash.
+      //
+      // Each attempt runs inside a SAVEPOINT. In PostgreSQL a failed statement
+      // aborts the whole transaction, so without one the retry would hit
+      // `25P02 current transaction is aborted` and the recovery path would be
+      // dead code — which it was. Rolling back to the savepoint puts the
+      // transaction back into a usable state so the next INSERT can run.
       for (let attempt = 0; attempt < 5 && !inserted; attempt += 1) {
+        const savepoint = `order_insert_${attempt}`;
+        await client.query(`SAVEPOINT ${savepoint}`);
         try {
           const result = await client.query<OrderRow>(
             `INSERT INTO orders (
-               order_number, status, payment_status,
+               order_number, user_id, status, payment_status,
                customer_name, customer_phone, customer_email, shipping_address,
                subtotal, product_savings, coupon_code, coupon_discount, shipping, cod_fee,
                total, gst_amount, gst_rate, place_of_supply, buyer_gstin, seller_gstin,
                payment_method, is_test, idempotency_key, gateway_order_id
              ) VALUES (
-               $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23
+               $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24
              ) RETURNING ${ORDER_COLUMNS}`,
             [
               orderNumber,
+              order.userId ?? null,
               order.status,
               order.paymentStatus,
               order.contact.name,
@@ -376,11 +454,24 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
             ],
           );
           inserted = result.rows[0];
+          await client.query(`RELEASE SAVEPOINT ${savepoint}`);
         } catch (error) {
+          await client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+
           if (isUniqueViolation(error, 'orders_order_number_key')) {
             orderNumber = generateOrderNumber();
             continue;
           }
+
+          // Two simultaneous submits of the same idempotency key: the earlier
+          // SELECT missed because the other transaction had not committed yet,
+          // and this INSERT lost the race. The caller asked for "this order,
+          // once" and that is exactly what exists now, so return it rather
+          // than surfacing a 500 for what is a successful outcome.
+          if (order.idempotencyKey && isUniqueViolation(error, 'orders_idempotency_key_key')) {
+            throw new IdempotencyRace(order.idempotencyKey);
+          }
+
           throw error;
         }
       }
@@ -429,7 +520,18 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
 
       const [hydrated] = await this.hydrateWithin(client, [inserted]);
       return { ok: true, order: hydrated, reused: false } as CreateOrderResult;
-    }).catch((error: unknown) => {
+    }).catch(async (error: unknown) => {
+      if (error instanceof IdempotencyRace) {
+        // Resolved outside the aborted transaction: the winning row was
+        // committed by another connection and is only visible from a fresh
+        // snapshot.
+        const existing = await this.findByIdempotencyKey(error.key);
+        if (existing) {
+          return { ok: true, order: existing, reused: true } satisfies CreateOrderResult;
+        }
+        throw error;
+      }
+
       if (error instanceof InsufficientStock) {
         return {
           ok: false,
@@ -442,8 +544,65 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
     });
   }
 
-  async setGatewayOrderId(orderId: number, gatewayOrderId: string) {
-    await query(`UPDATE orders SET gateway_order_id = $2 WHERE id = $1`, [orderId, gatewayOrderId]);
+  /**
+   * Point the order at a gateway order, recording the attempt.
+   *
+   * `orders.gateway_order_id` still holds the newest attempt, because that is
+   * what the callback verifies against. The history in `payment_attempts` is
+   * what stops an earlier attempt's webhook from becoming unmatched when a
+   * retry replaces it.
+   */
+  async setGatewayOrderId(orderId: number, gatewayOrderId: string, provider = 'unknown') {
+    await transaction(async (client) => {
+      const current = await client.query<{ gateway_order_id: string | null; total: number }>(
+        `SELECT gateway_order_id, total FROM orders WHERE id = $1 FOR UPDATE`,
+        [orderId],
+      );
+      const row = current.rows[0];
+      if (!row) return;
+
+      if (row.gateway_order_id && row.gateway_order_id !== gatewayOrderId) {
+        await client.query(
+          `UPDATE payment_attempts SET superseded_at = now()
+            WHERE order_id = $1 AND superseded_at IS NULL`,
+          [orderId],
+        );
+      }
+
+      await client.query(
+        `INSERT INTO payment_attempts (order_id, provider, gateway_order_id, amount)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (gateway_order_id) DO NOTHING`,
+        [orderId, provider, gatewayOrderId, row.total],
+      );
+
+      await client.query(`UPDATE orders SET gateway_order_id = $2 WHERE id = $1`, [
+        orderId,
+        gatewayOrderId,
+      ]);
+    });
+  }
+
+  /** Every gateway order ever created for this order, newest first. */
+  async listPaymentAttempts(orderId: number): Promise<
+    Array<{ gatewayOrderId: string; provider: string; amount: number; supersededAt: string | null }>
+  > {
+    const rows = await query<{
+      gateway_order_id: string;
+      provider: string;
+      amount: number;
+      superseded_at: Date | null;
+    }>(
+      `SELECT gateway_order_id, provider, amount, superseded_at
+         FROM payment_attempts WHERE order_id = $1 ORDER BY created_at DESC`,
+      [orderId],
+    );
+    return rows.map((r) => ({
+      gatewayOrderId: r.gateway_order_id,
+      provider: r.provider,
+      amount: r.amount,
+      supersededAt: r.superseded_at?.toISOString() ?? null,
+    }));
   }
 
   /* ---------------------------------------------------------- payments */
@@ -521,7 +680,21 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
       const row = current.rows[0];
       if (!row) return null;
 
-      if (!isPaymentAdvance(row.payment_status, status)) {
+      // Two gates, and they answer different questions.
+      //
+      // `isPaymentAdvance` is about *ordering*: webhooks arrive late and out of
+      // sequence, and a stale `authorized` after a `captured` must change
+      // nothing. Rank alone was the only check here, which meant the declared
+      // PAYMENT_TRANSITIONS table was never consulted at runtime — it would
+      // happily have accepted pending → refunded, a transition the table
+      // forbids.
+      //
+      // `canTransitionPayment` is about *legality*: which moves the model
+      // permits at all. Both must agree before anything is written.
+      if (
+        !isPaymentAdvance(row.payment_status, status) ||
+        !canTransitionPayment(row.payment_status, status)
+      ) {
         const [unchanged] = await this.hydrateWithin(client, [row]);
         return unchanged;
       }
@@ -577,6 +750,16 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
       const row = current.rows[0];
       if (!row) return null;
 
+      // Validated here, not only in the admin action that calls it. The
+      // repository is the last place before the write, and a caller that
+      // forgets to check must not be able to put an order into a state the
+      // model says is impossible — `shipped → cancelled`, say, or anything
+      // out of a terminal state.
+      if (!canTransitionOrder(row.status, to)) {
+        const [unchanged] = await this.hydrateWithin(client, [row]);
+        return unchanged;
+      }
+
       const updated = await client.query<OrderRow>(
         `UPDATE orders SET status = $2 WHERE id = $1 RETURNING ${ORDER_COLUMNS}`,
         [orderId, to],
@@ -620,20 +803,82 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
   }
 
   /** False when this event has already been recorded — the replay guard. */
-  async recordWebhookEvent(
+  /**
+   * Claim a webhook event for processing.
+   *
+   * Returns false when this event id has already been claimed, which is what
+   * makes a redelivery a no-op. `processed_at` is deliberately left NULL: it is
+   * stamped by `completeWebhookEvent` once the event has actually been applied.
+   *
+   * The previous version stamped it here, at insert. That made the window
+   * between "recorded" and "applied" fatal — a database blip in between meant
+   * the gateway's retry was rejected as a duplicate and the payment update was
+   * lost with nothing left to find it by.
+   */
+  async beginWebhookEvent(
     provider: string,
     eventId: string,
     eventType: string,
     payload: unknown,
   ): Promise<boolean> {
     const rows = await query<{ id: number }>(
-      `INSERT INTO webhook_events (provider, event_id, event_type, payload, processed_at)
-       VALUES ($1, $2, $3, $4, now())
+      `INSERT INTO webhook_events (provider, event_id, event_type, payload)
+       VALUES ($1, $2, $3, $4)
        ON CONFLICT (provider, event_id) DO NOTHING
        RETURNING id`,
       [provider, eventId, eventType, JSON.stringify(payload)],
     );
     return rows.length > 0;
+  }
+
+  /** Mark an event finished. Only now is a redelivery genuinely redundant. */
+  async completeWebhookEvent(provider: string, eventId: string): Promise<void> {
+    await query(
+      `UPDATE webhook_events SET processed_at = now()
+        WHERE provider = $1 AND event_id = $2 AND processed_at IS NULL`,
+      [provider, eventId],
+    );
+  }
+
+  /**
+   * Release a claim so the gateway's next retry is allowed through.
+   *
+   * Used when applying the event failed. Without this the row would sit there
+   * claimed-but-unapplied, and every retry would be turned away as a duplicate.
+   */
+  async abandonWebhookEvent(provider: string, eventId: string): Promise<void> {
+    await query(
+      `DELETE FROM webhook_events
+        WHERE provider = $1 AND event_id = $2 AND processed_at IS NULL`,
+      [provider, eventId],
+    );
+  }
+
+  /** Events claimed but never completed — the dead-letter queue. */
+  async unprocessedWebhookEvents(olderThanMinutes = 5): Promise<
+    Array<{ id: number; provider: string; eventId: string; eventType: string; receivedAt: string }>
+  > {
+    const rows = await query<{
+      id: number;
+      provider: string;
+      event_id: string;
+      event_type: string;
+      received_at: Date;
+    }>(
+      `SELECT id, provider, event_id, event_type, received_at
+         FROM webhook_events
+        WHERE processed_at IS NULL
+          AND received_at < now() - ($1 || ' minutes')::interval
+        ORDER BY received_at`,
+      [olderThanMinutes],
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      provider: r.provider,
+      eventId: r.event_id,
+      eventType: r.event_type,
+      receivedAt: r.received_at.toISOString(),
+    }));
   }
 
   /* --------------------------------------------------------- inventory */
@@ -758,6 +1003,19 @@ class InsufficientStock extends Error {
   ) {
     super(`Insufficient stock for ${variantId}`);
     this.name = 'InsufficientStock';
+  }
+}
+
+/**
+ * Signals that another transaction committed this idempotency key first.
+ *
+ * Thrown from inside the transaction and handled outside it, because the
+ * winning row cannot be read from a snapshot that started before it committed.
+ */
+class IdempotencyRace extends Error {
+  constructor(readonly key: string) {
+    super(`Idempotency key ${key} was claimed concurrently.`);
+    this.name = 'IdempotencyRace';
   }
 }
 

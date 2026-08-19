@@ -1,8 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { notFound, redirect } from 'next/navigation';
+import { notFound } from 'next/navigation';
 import { ArrowLeft, FlaskConical } from 'lucide-react';
-import { isAdminAuthenticated } from '@/lib/admin/session';
 import { updateOrderStatusAction } from '@/lib/admin/actions';
 import { orders } from '@/lib/orders/postgres-repository';
 import { nextOrderStatuses } from '@/lib/orders/state-machine';
@@ -24,8 +23,6 @@ export default async function AdminOrderDetailPage({
 }: {
   params: Promise<{ orderNumber: string }>;
 }) {
-  if (!(await isAdminAuthenticated())) redirect('/admin/login');
-
   const { orderNumber } = await params;
   const repository = orders();
   const order = await repository.findByOrderNumber(normaliseOrderNumber(orderNumber));
@@ -209,6 +206,16 @@ export default async function AdminOrderDetailPage({
             {order.contact.email ? (
               <p className="text-muted-foreground">{order.contact.email}</p>
             ) : null}
+            <p className="mt-2 text-xs text-muted-foreground">
+              {order.userId ? (
+                <>Account #{order.userId} — reachable by the customer when signed in.</>
+              ) : (
+                // Placed before checkout required an account. It is reachable
+                // only with the order number plus the phone on it, and is never
+                // claimed by an account that registers later.
+                <>Guest order — order number and phone only, no account attached.</>
+              )}
+            </p>
             <address className="mt-3 not-italic text-muted-foreground">
               {order.shippingAddress.line1}
               {order.shippingAddress.line2 ? `, ${order.shippingAddress.line2}` : ''}
