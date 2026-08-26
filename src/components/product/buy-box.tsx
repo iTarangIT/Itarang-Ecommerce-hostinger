@@ -17,6 +17,7 @@ import type { Product, ProductVariant } from '@/lib/commerce/types';
 import { discountPercent, formatPrice } from '@/lib/catalog/pricing';
 import { useCart, useCompare, useRecentlyViewed, useWishlist } from '@/lib/store/hooks';
 import { useUI } from '@/lib/store/ui-provider';
+import { track } from '@/lib/analytics/track';
 import { Button } from '@/components/ui/button';
 import { QuantityStepper } from '@/components/cart/quantity-stepper';
 import { PriceBlock } from './price-block';
@@ -63,12 +64,29 @@ export function BuyBox({ product }: { product: Product }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [product.slug, recentlyViewed.hydrated]);
 
+  // The funnel's product-view stage.
+  //
+  // Fired from the client, not the server, on purpose: /p/[slug] is
+  // prerendered with `dynamicParams: false`, and recording this in the page
+  // would force it dynamic and cost the whole route its static generation.
+  // The event is worth far less than the page speed.
+  React.useEffect(() => {
+    track('product_view', { productId: product.id });
+  }, [product.id]);
+
   React.useEffect(() => {
     setQuantity((q) => Math.min(Math.max(1, q), Math.max(1, variant.stock)));
   }, [variant.stock]);
 
   const addToCart = () => {
     cart.add(product, variant, quantity);
+    track('add_to_cart', {
+      productId: product.id,
+      variantId: variant.id,
+      quantity,
+      // Adding the same variant twice is two real intents, so each one counts.
+      dedupe: String(Date.now()),
+    });
     toast({
       title: 'Added to cart',
       description: `${product.title}${product.options.length ? ` — ${variant.title}` : ''}`,
@@ -82,6 +100,15 @@ export function BuyBox({ product }: { product: Product }) {
 
   const buyNow = () => {
     cart.add(product, variant, quantity);
+    // Buy Now is otherwise indistinguishable from add-to-cart server-side —
+    // same reducer action, same destination — so this event is the only thing
+    // that separates the two paths in the funnel.
+    track('buy_now', {
+      productId: product.id,
+      variantId: variant.id,
+      quantity,
+      dedupe: String(Date.now()),
+    });
     startNavigating(() => router.push('/cart'));
   };
 

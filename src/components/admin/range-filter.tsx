@@ -43,10 +43,13 @@ export function RangeFilter({
   current,
   currentMonth,
   months,
+  basePath = '/admin/analytics',
 }: {
   current: RangeKey;
   currentMonth: string | null;
   months: string[];
+  /** Which screen the controls navigate within. Analytics and funnel share them. */
+  basePath?: string;
 }) {
   return (
     <div className="mt-6 space-y-3">
@@ -56,7 +59,7 @@ export function RangeFilter({
           return (
             <Link
               key={preset.key}
-              href={`/admin/analytics?range=${preset.key}`}
+              href={`${basePath}?range=${preset.key}`}
               aria-current={active ? 'page' : undefined}
               className={cn(
                 'rounded-md border px-3 py-2 text-sm font-medium transition-colors',
@@ -72,7 +75,7 @@ export function RangeFilter({
       </div>
 
       {months.length > 0 ? (
-        <form action="/admin/analytics" className="flex flex-wrap items-end gap-2">
+        <form action={basePath} className="flex flex-wrap items-end gap-2">
           <input type="hidden" name="range" value="month" />
           <div className="flex flex-col gap-1.5">
             <label htmlFor="month" className="text-xs font-medium text-muted-foreground">

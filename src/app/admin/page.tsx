@@ -1,12 +1,27 @@
 import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, BarChart3, FlaskConical, Package, RefreshCw, UserRound } from 'lucide-react';
+import {
+  AlertTriangle,
+  BarChart3,
+  Filter,
+  FlaskConical,
+  Package,
+  RefreshCw,
+  UserRound,
+} from 'lucide-react';
 import { logoutAction } from '@/lib/auth/actions';
-import { syncInventoryFromHostingerAction } from '@/lib/admin/actions';
+import {
+  pushInventoryToHostingerAction,
+  resolveCatalogueAlertAction,
+  syncInventoryFromHostingerAction,
+} from '@/lib/admin/actions';
+import { inventoryPushAttention, inventoryPushPending } from '@/lib/orders/inventory-push';
+import { cn } from '@/lib/utils';
 import { currentUser } from '@/lib/auth/session';
 import { orders } from '@/lib/orders/postgres-repository';
 import { catalogHealth } from '@/lib/commerce/health';
+import { openCatalogueAlerts } from '@/lib/commerce/catalogue-sync';
 import { allProducts } from '@/lib/catalog/collections';
 import type { OrderStatus, PaymentStatus } from '@/lib/orders/types';
 import { OrderFilters, Pagination } from '@/components/admin/order-filters';
@@ -86,6 +101,13 @@ export default async function AdminOrdersPage({
           {admin ? (
             <span className="hidden text-sm text-muted-foreground sm:inline">{admin.email}</span>
           ) : null}
+          <Link
+            href="/admin/funnel"
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+          >
+            <Filter className="h-4 w-4" />
+            Funnel
+          </Link>
           <Link
             href="/admin/analytics"
             className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
@@ -192,10 +214,89 @@ export default async function AdminOrdersPage({
         params={{ q, status: params.status, payment: params.payment }}
       />
 
+      <Suspense fallback={<Skeleton className="mt-10 h-24 w-full rounded-lg" />}>
+        <InventoryPushPanel />
+      </Suspense>
+
       <Suspense fallback={<Skeleton className="mt-10 h-48 w-full rounded-lg" />}>
         <ReconciliationPanel />
       </Suspense>
     </div>
+  );
+}
+
+/**
+ * The Hostinger stock queue.
+ *
+ * Renders nothing when the queue is empty and nothing needs attention, which is
+ * the normal state — the webhook drains after every captured payment, so a job
+ * only lingers here if Hostinger was unreachable, a retry ran out, or the push
+ * is switched off.
+ *
+ * The button is safe to press repeatedly: every job re-reads the live quantity
+ * and decides again, so a second press cannot decrement twice.
+ */
+async function InventoryPushPanel() {
+  const [pending, attention] = await Promise.all([
+    inventoryPushPending().catch(() => 0),
+    inventoryPushAttention().catch(() => []),
+  ]);
+
+  if (pending === 0 && attention.length === 0) return null;
+
+  return (
+    <section className="mt-10 rounded-lg border border-border bg-card p-4">
+      <h2 className="flex items-center gap-2 font-display text-sm font-semibold text-foreground">
+        <RefreshCw className="h-4 w-4 shrink-0 text-accent-600" />
+        Hostinger stock queue
+      </h2>
+
+      <p className="mt-2 text-sm text-muted-foreground">
+        {pending > 0
+          ? `${pending} sold ${pending === 1 ? 'unit batch is' : 'unit batches are'} waiting to be deducted from Hostinger.`
+          : 'Nothing waiting.'}
+        {attention.length > 0
+          ? ` ${attention.length} need${attention.length === 1 ? 's' : ''} a human.`
+          : ''}
+      </p>
+
+      {attention.length > 0 ? (
+        <ul className="mt-3 space-y-1.5">
+          {attention.map((job) => (
+            <li key={job.id} className="text-xs text-foreground">
+              <span
+                className={cn(
+                  'mr-2 rounded-sm px-1 py-0.5 font-medium uppercase',
+                  job.state === 'drift' ? 'bg-warning-soft text-warning' : 'bg-surface',
+                )}
+              >
+                {job.state}
+              </span>
+              <span className="tabular">{job.variantId}</span>
+              <span className="text-muted-foreground">
+                {' '}
+                — {job.units} unit{job.units === 1 ? '' : 's'}, order #{job.orderId}
+                {job.lastError ? `: ${job.lastError}` : ''}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {attention.some((job) => job.state === 'drift') ? (
+        <p className="mt-3 text-xs text-muted-foreground">
+          <strong className="font-semibold text-foreground">Drift</strong> means the stock in
+          hPanel changed while a deduction was in flight, so the push stopped rather than guess.
+          Check the variant in hPanel, then press the button — it re-reads and decides again.
+        </p>
+      ) : null}
+
+      <form action={pushInventoryToHostingerAction} className="mt-3">
+        <Button type="submit" variant="outline" size="sm">
+          Push stock to Hostinger now
+        </Button>
+      </form>
+    </section>
   );
 }
 
@@ -210,7 +311,32 @@ async function CatalogHealthBanner() {
   const stale = health.unmapped.length;
   const duplicates = health.duplicateSkus;
 
-  if (stale === 0 && duplicates.length === 0) return null;
+  // Two layers, deliberately both.
+  //
+  // `catalogHealth()` reads the live catalogue, so it reports a duplicate the
+  // moment it appears upstream — even before anyone has run a sync. The alert
+  // table records what the mirror actually *refused*, which survives page
+  // loads, carries a first-seen timestamp and can be acknowledged.
+  //
+  // Failure to read the alerts must not take down the order console, so it
+  // degrades to a visible note rather than an exception. It is never silent —
+  // an unread server log is how the original drift went unnoticed for so long.
+  let alerts: Awaited<ReturnType<typeof openCatalogueAlerts>> = [];
+  let alertsUnavailable = false;
+  try {
+    alerts = await openCatalogueAlerts();
+  } catch (error) {
+    alertsUnavailable = true;
+    console.error(`[admin] catalogue alerts unavailable: ${(error as Error).message}`);
+  }
+
+  const quarantined = alerts.filter(
+    (alert) => alert.kind === 'duplicate_sku' || alert.kind === 'duplicate_slug',
+  );
+
+  if (stale === 0 && duplicates.length === 0 && quarantined.length === 0 && !alertsUnavailable) {
+    return null;
+  }
 
   return (
     <section className="mt-6 rounded-lg border border-warning/40 bg-warning-soft p-4">
@@ -262,6 +388,55 @@ async function CatalogHealthBanner() {
             ))}
           </ul>
         </div>
+      ) : null}
+
+      {quarantined.length > 0 ? (
+        <div className="mt-3 text-sm text-muted-foreground">
+          <p>
+            <strong className="font-semibold text-foreground">
+              {quarantined.length} product{quarantined.length === 1 ? '' : 's'} withheld from the
+              storefront.
+            </strong>{' '}
+            These lost a uniqueness check at the last sync and are not shown to shoppers, so a
+            duplicate SKU cannot reach an order item. Nothing was deleted — fix the collision in
+            hPanel and resync.
+          </p>
+          <ul className="mt-2 space-y-1.5">
+            {quarantined.map((alert) => (
+              <li
+                key={`${alert.kind}:${alert.subject}`}
+                className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-foreground"
+              >
+                <span className="rounded-sm bg-card px-1 py-0.5 font-medium">
+                  {alert.kind === 'duplicate_sku' ? 'SKU' : 'slug'}
+                </span>
+                <span className="tabular">{alert.subject}</span>
+                <span className="text-muted-foreground">
+                  held by {String(alert.detail.heldBy ?? '—')}, withheld{' '}
+                  {String(alert.detail.quarantined ?? '—')}
+                </span>
+                <form action={resolveCatalogueAlertAction} className="ml-auto">
+                  <input type="hidden" name="kind" value={alert.kind} />
+                  <input type="hidden" name="subject" value={alert.subject} />
+                  <Button type="submit" variant="outline" size="sm">
+                    Acknowledge
+                  </Button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {alertsUnavailable ? (
+        <p className="mt-3 text-sm text-muted-foreground">
+          <strong className="font-semibold text-foreground">
+            Catalogue alerts could not be read.
+          </strong>{' '}
+          The mirror tables are probably missing — run{' '}
+          <code className="rounded-sm bg-card px-1 py-0.5 text-xs">npm run db:migrate</code>.
+          Duplicate prevention is not active until they exist.
+        </p>
       ) : null}
     </section>
   );

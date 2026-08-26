@@ -3,9 +3,16 @@ import { z } from 'zod';
 /**
  * Server-side environment.
  *
- * No `NEXT_PUBLIC_` secret may appear here. Deliberately absent: any Hostinger
- * API token — the catalog read API needs no credential, and keeping a token out
- * of the project means no code path can reach a mutating management endpoint.
+ * No `NEXT_PUBLIC_` secret may appear here.
+ *
+ * `HOSTINGER_API_TOKEN` was deliberately absent for a long time, on the
+ * reasoning that the catalogue read API needs no credential and that keeping a
+ * token out of the project means no code path can reach a mutating endpoint.
+ * That reasoning held only while there was nothing we needed to write. Selling
+ * a unit has to decrement the merchant's own stock, and that is an
+ * authenticated call, so the token is now required — but confined to one
+ * module (`commerce/hostinger/admin-client.ts`). The storefront client stays
+ * read-only by construction and never sees it.
  *
  * Razorpay variables are optional and unset in this local testing phase. The
  * schema below makes it impossible to select the Razorpay provider without a
@@ -21,6 +28,28 @@ const schema = z
     /** Public sales channel id, `scha_…`. Configuration, not a secret. */
     HOSTINGER_SALES_CHANNEL_ID: z.string().startsWith('scha_').optional(),
     HOSTINGER_CATALOG_REVALIDATE: z.coerce.number().int().min(0).max(86_400).default(300),
+
+    /* ------------------------------------------- hostinger account API */
+    /**
+     * The authenticated account API, which is a different service from the
+     * public sales-channel catalogue above. Only the inventory push uses it.
+     */
+    HOSTINGER_ACCOUNT_API_URL: z.string().url().default('https://developers.hostinger.com'),
+    /** SECRET. Never gains a NEXT_PUBLIC_ prefix; a test asserts it stays server-side. */
+    HOSTINGER_API_TOKEN: z.string().min(16).optional(),
+    /** Account-API store id, `store_…`. Not the sales channel id. */
+    HOSTINGER_STORE_ID: z.string().startsWith('store_').optional(),
+    /**
+     * Master switch for writing stock back to Hostinger.
+     *
+     * Off by default, and deliberately separate from having credentials: a
+     * token being present is not consent to start mutating the merchant's
+     * catalogue. Turning this on is the deliberate act.
+     */
+    HOSTINGER_INVENTORY_PUSH: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((v) => v === 'true'),
 
     /* -------------------------------------------------------- database */
     /** Validated in depth by `src/lib/db/guard.ts` before any connection. */
@@ -65,6 +94,30 @@ const schema = z
         path: ['HOSTINGER_SALES_CHANNEL_ID'],
         message: 'COMMERCE_PROVIDER=hostinger requires HOSTINGER_SALES_CHANNEL_ID.',
       });
+    }
+
+    // Pushing stock needs all three together. A half-configured push would
+    // fail at the moment a sale happens, which is the worst possible time to
+    // discover a missing store id.
+    if (value.HOSTINGER_INVENTORY_PUSH) {
+      const missing = (
+        [
+          ['HOSTINGER_API_TOKEN', value.HOSTINGER_API_TOKEN],
+          ['HOSTINGER_STORE_ID', value.HOSTINGER_STORE_ID],
+        ] as const
+      )
+        .filter(([, v]) => !v)
+        .map(([k]) => k);
+
+      if (missing.length > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['HOSTINGER_INVENTORY_PUSH'],
+          message:
+            `HOSTINGER_INVENTORY_PUSH=true requires ${missing.join(', ')}. ` +
+            'Run `npm run hostinger:probe` to discover the store id.',
+        });
+      }
     }
 
     // Half-configured SMTP is worse than none: mail would be attempted and
@@ -136,6 +189,10 @@ export function env(): Env {
     HOSTINGER_ECOMMERCE_API_URL: process.env.HOSTINGER_ECOMMERCE_API_URL,
     HOSTINGER_SALES_CHANNEL_ID: process.env.HOSTINGER_SALES_CHANNEL_ID,
     HOSTINGER_CATALOG_REVALIDATE: process.env.HOSTINGER_CATALOG_REVALIDATE,
+    HOSTINGER_ACCOUNT_API_URL: process.env.HOSTINGER_ACCOUNT_API_URL,
+    HOSTINGER_API_TOKEN: process.env.HOSTINGER_API_TOKEN,
+    HOSTINGER_STORE_ID: process.env.HOSTINGER_STORE_ID,
+    HOSTINGER_INVENTORY_PUSH: process.env.HOSTINGER_INVENTORY_PUSH,
     DATABASE_URL: process.env.DATABASE_URL,
     PAYMENT_PROVIDER: process.env.PAYMENT_PROVIDER,
     RAZORPAY_KEY_ID: process.env.RAZORPAY_KEY_ID,

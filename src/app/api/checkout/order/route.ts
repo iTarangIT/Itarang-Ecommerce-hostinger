@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { placeOrder } from '@/lib/orders/place-order';
 import { fieldErrors, placeOrderSchema } from '@/lib/checkout/validation';
 import { grantOrderAccess } from '@/lib/orders/access';
+import { attributeOrder, peekVisitor } from '@/lib/analytics/events';
 import { requireCustomer } from '@/lib/orders/checkout-auth';
 import { databaseUnavailableMessage, isDatabaseUnavailable } from '@/lib/db/errors';
 
@@ -73,6 +74,12 @@ export async function POST(request: Request) {
   // Let this browser view the confirmation without re-entering the phone
   // number; everyone else goes through the phone-gated lookup.
   await grantOrderAccess(result.order.orderNumber);
+
+  // Tie the order back to the anonymous session that produced it, so the funnel
+  // can join browsing to purchase. Kept out of `placeOrder` deliberately: order
+  // creation is a financial transaction and must not grow a dependency on an
+  // analytics cookie. Failure here is swallowed inside `attributeOrder`.
+  await attributeOrder(result.order.id, await peekVisitor());
 
   return NextResponse.json({
     ok: true,

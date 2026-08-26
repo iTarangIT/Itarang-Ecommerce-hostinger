@@ -8,6 +8,7 @@ import { BadgeCheck, GitCompare, Heart, Loader2, ShieldCheck, ShoppingCart } fro
 import type { ProductSummary } from '@/lib/commerce/summary';
 import { summaryToCartItem, useCart, useCompare, useWishlist } from '@/lib/store/hooks';
 import { useUI } from '@/lib/store/ui-provider';
+import { track } from '@/lib/analytics/track';
 import { BadgeStack } from '@/components/ui/badge';
 import { Button, ButtonLink } from '@/components/ui/button';
 import { RatingSummaryInline } from '@/components/ui/rating';
@@ -41,6 +42,11 @@ export function ProductCard({
 
   const addToCart = React.useCallback(() => {
     cart.addItem(summaryToCartItem(product));
+    track('add_to_cart', {
+      productId: product.id,
+      quantity: 1,
+      dedupe: String(Date.now()),
+    });
     toast({
       title: 'Added to cart',
       description: product.title,
@@ -54,6 +60,7 @@ export function ProductCard({
 
   const buyNow = () => {
     cart.addItem(summaryToCartItem(product));
+    track('buy_now', { productId: product.id, quantity: 1, dedupe: String(Date.now()) });
     startNavigating(() => router.push('/cart'));
   };
 

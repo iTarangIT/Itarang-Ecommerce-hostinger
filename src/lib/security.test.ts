@@ -27,20 +27,69 @@ function readAll(dir: string, extensions: string[]): Array<{ path: string; text:
   return out;
 }
 
-describe('Hostinger remains read-only', () => {
+describe('Hostinger stays read-only except for one module', () => {
   const files = readAll(join(ROOT, 'src/lib/commerce/hostinger'), ['.ts']);
+
+  /**
+   * This assertion used to cover the whole directory, on the premise that
+   * Hostinger had no write API at all. It does: the authenticated account API
+   * can set variant stock, and a sale has to decrement the merchant's own
+   * figure. So exactly one module is allowed to write, and it is named here.
+   *
+   * The exemption is narrow on purpose, and paid for by the extra assertions
+   * below — this file constrains the write client harder than it ever
+   * constrained the read one.
+   */
+  const WRITE_CAPABLE = 'admin-client.ts';
 
   it('has source files to check', () => {
     expect(files.length).toBeGreaterThan(0);
+    expect(files.some((f) => f.path.endsWith(WRITE_CAPABLE))).toBe(true);
   });
 
-  it('never sets a non-GET HTTP method', () => {
+  it('never sets a non-GET HTTP method outside the one write module', () => {
     for (const file of files) {
+      if (file.path.endsWith(WRITE_CAPABLE)) continue;
+      if (file.path.endsWith('.test.ts')) continue;
       // Comments legitimately mention POST; code must not set a method.
       const code = file.text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
       expect(code, `${file.path} sets an HTTP method`).not.toMatch(
         /method\s*:\s*['"`](POST|PUT|PATCH|DELETE)['"`]/i,
       );
+    }
+  });
+
+  it('lets the write module use only GET and PATCH', () => {
+    const admin = files.find((f) => f.path.endsWith(WRITE_CAPABLE))!;
+    const code = admin.text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+    // Creating or deleting a product is not something a storefront ever needs.
+    expect(code, 'admin-client.ts can POST').not.toMatch(
+      /method\s*:\s*['"`]POST['"`]/i,
+    );
+    expect(code, 'admin-client.ts can DELETE').not.toMatch(
+      /method\s*:\s*['"`]DELETE['"`]/i,
+    );
+    expect(code, 'admin-client.ts can PUT').not.toMatch(/method\s*:\s*['"`]PUT['"`]/i);
+  });
+
+  it('never puts a price field in a Hostinger request body', () => {
+    // The batch endpoint replaces prices in full, so a stray price key would
+    // overwrite the merchant's pricing with whatever we happened to hold.
+    const admin = files.find((f) => f.path.endsWith(WRITE_CAPABLE))!;
+    const code = admin.text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+    expect(code, 'admin-client.ts references prices in code').not.toMatch(/\bprices\s*:/);
+    expect(code, 'admin-client.ts references a price field').not.toMatch(/\bprice\s*:/);
+    expect(code, 'admin-client.ts references an amount field').not.toMatch(/\bamount\s*:/);
+    expect(code, 'admin-client.ts references sale_amount').not.toContain('sale_amount');
+    expect(code, 'admin-client.ts references currency').not.toContain('currency');
+  });
+
+  it('reaches only the variants endpoints', () => {
+    const admin = files.find((f) => f.path.endsWith(WRITE_CAPABLE))!;
+    const paths = [...admin.text.matchAll(/`\/api\/ecommerce\/v1\/[^`]*`/g)].map((m) => m[0]);
+    expect(paths.length).toBeGreaterThan(0);
+    for (const path of paths) {
+      expect(path, `admin-client.ts reaches ${path}`).toMatch(/\/variants(\/batch)?`$/);
     }
   });
 
@@ -96,6 +145,12 @@ describe('no payment secret can reach the browser', () => {
       expect(bundle.text, `${bundle.path} references the SMTP password`).not.toContain(
         'SMTP_PASSWORD',
       );
+      // The Hostinger account token can mutate the merchant's live catalogue —
+      // create products, delete them, rewrite stock. It is the most damaging
+      // credential in the project and must never leave the server.
+      expect(bundle.text, `${bundle.path} references the Hostinger token`).not.toContain(
+        'HOSTINGER_API_TOKEN',
+      );
     }
   });
 
@@ -112,6 +167,9 @@ describe('no payment secret can reach the browser', () => {
       );
       expect(file.text, `${file.path} exposes the SMTP password publicly`).not.toMatch(
         /NEXT_PUBLIC_SMTP/,
+      );
+      expect(file.text, `${file.path} exposes the Hostinger token publicly`).not.toMatch(
+        /NEXT_PUBLIC_HOSTINGER/,
       );
     }
   });

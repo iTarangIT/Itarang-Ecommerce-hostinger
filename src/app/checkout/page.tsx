@@ -3,6 +3,7 @@ import { requireUser } from '@/lib/auth/guards';
 import { paymentProvider } from '@/lib/payments';
 import { Breadcrumbs } from '@/components/ui/breadcrumbs';
 import { CheckoutFlow } from '@/components/checkout/checkout-flow';
+import { peekVisitor, record } from '@/lib/analytics/events';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,6 +18,26 @@ export default async function CheckoutPage() {
   // round trip through /login and back leaves it exactly as it was — the
   // shopper returns to a full cart rather than an empty one.
   const user = await requireUser('/checkout');
+
+  // The funnel's checkout stage, recorded on the server.
+  //
+  // This page is already `force-dynamic`, so there is no caching to lose, and a
+  // server-written event cannot be forged by a browser that never opened the
+  // page. That is worth more here than at the earlier stages, because this is
+  // the last one before money is involved.
+  //
+  // `peekVisitor` reads the cookies without minting them — a page render may
+  // not write cookies. A shopper arriving here has browsed first and will have
+  // them; the rare cold entry simply goes unrecorded rather than being invented.
+  const visitor = await peekVisitor();
+  if (visitor) {
+    await record({
+      event: 'begin_checkout',
+      visitor: { ...visitor, freshVisitor: false, freshSession: false },
+      userId: user.id,
+    });
+  }
+
   return (
     <>
       <div className="border-b border-border bg-surface">
