@@ -65,19 +65,22 @@ export default async function ProductPage({ params }: PageProps) {
   const product = await provider.getProduct(slug);
   if (!product) notFound();
 
-  const [reviews, category] = [
-    await provider.getReviews(product.id),
-    CATEGORY_BY_SLUG.get(product.category),
-  ];
+  const category = CATEGORY_BY_SLUG.get(product.category);
+
+  // All three depend only on the product, never on one another. The previous
+  // shape looked parallel but was not: an array literal evaluates its elements
+  // in order, so reviews had to resolve before the companion and related
+  // lookups were even started.
+  const [reviews, companions, related] = await Promise.all([
+    provider.getReviews(product.id),
+    productsByIds(product.frequentlyBoughtWith),
+    productsByIds(product.relatedProductIds),
+  ]);
 
   const subcategory = category?.subcategories.find((s) => s.slug === product.subcategory);
   const offers = offersForCategory(product.category);
   const price = displayPrice(product);
   const summary = toProductSummary(product);
-  const [companions, related] = await Promise.all([
-    productsByIds(product.frequentlyBoughtWith),
-    productsByIds(product.relatedProductIds),
-  ]);
 
   const crumbs = [
     { label: 'Home', href: '/' },

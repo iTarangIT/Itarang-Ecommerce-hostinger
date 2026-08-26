@@ -1,5 +1,5 @@
 import type { FacetId, FacetType, Product } from '@/lib/commerce/types';
-import { CATEGORY_BY_SLUG } from '@/lib/commerce/mock/categories';
+import { categoryName, subcategoryName } from './category-names';
 import { minSellingPrice, productAvailability } from './pricing';
 
 /**
@@ -44,20 +44,14 @@ export const FACET_DEFINITIONS: Record<FacetId, FacetDefinition> = {
     label: 'Category',
     type: 'checkbox',
     valuesOf: (p) => [p.category],
-    labelOf: (v) => CATEGORY_BY_SLUG.get(v as never)?.name ?? v,
+    labelOf: (v) => categoryName(v),
   },
   subcategory: {
     id: 'subcategory',
     label: 'Type',
     type: 'checkbox',
     valuesOf: (p) => [p.subcategory],
-    labelOf: (v) => {
-      for (const category of CATEGORY_BY_SLUG.values()) {
-        const match = category.subcategories.find((s) => s.slug === v);
-        if (match) return match.name;
-      }
-      return v;
-    },
+    labelOf: (v) => subcategoryName(v),
   },
   capacityVa: {
     id: 'capacityVa',

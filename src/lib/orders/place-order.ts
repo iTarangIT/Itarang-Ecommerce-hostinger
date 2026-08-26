@@ -1,5 +1,6 @@
 import { env } from '@/lib/env';
 import { paymentProvider, type PaymentIntent } from '@/lib/payments';
+import { couponRule } from '@/lib/offers/coupons';
 import { stateCode } from '@/lib/checkout/validation';
 import type { AddressInput, ContactInput } from '@/lib/checkout/validation';
 import { buildQuote, type QuoteIssue, type QuoteResult } from './quote';
@@ -35,12 +36,24 @@ export interface PlaceOrderInput {
   gstin?: string;
   paymentMethod: PaymentMethod;
   idempotencyKey?: string;
+  /** What the browser displayed, in paise. Advisory — see `placeOrder`. */
+  expectedTotal?: number;
+  /** The shopper has seen the new price and agreed to it. */
+  acceptPriceChange?: boolean;
 }
 
 export type PlaceOrderResult =
   | { ok: true; order: Order; intent: PaymentIntent | null; reused: boolean }
   | { ok: false; code: 'invalid_quote'; issues: QuoteIssue[]; quote: QuoteResult }
   | { ok: false; code: 'insufficient_stock'; variantId: string; available: number }
+  | {
+      ok: false;
+      code: 'price_changed';
+      expectedTotal: number;
+      total: number;
+      issues: QuoteIssue[];
+      quote: QuoteResult;
+    }
   | { ok: false; code: 'cod_limit'; message: string };
 
 /** Unpaid COD orders a single phone number may hold at once. */
@@ -59,6 +72,81 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
 
   if (!quote.placeable) {
     return { ok: false, code: 'invalid_quote', issues: quote.issues, quote };
+  }
+
+  /* --------------------------------------------------------- price drift */
+
+  // Hostinger owns the price and can change it at any moment. The quote the
+  // shopper read and the quote this function just rebuilt are two independent
+  // catalogue reads with nothing binding them, so a price that moved in
+  // between would previously have been charged silently.
+  //
+  // `expectedTotal` is what the browser displayed. It is advisory and is never
+  // used to price anything — the rebuilt quote above remains the sole
+  // authority. All this can do is *refuse* an order whose price moved, which
+  // is why trusting the client with it is safe: it cannot be used to pay less,
+  // only to be told sooner.
+  if (
+    input.expectedTotal !== undefined &&
+    !input.acceptPriceChange &&
+    input.expectedTotal !== quote.totals.total
+  ) {
+    const direction = quote.totals.total > input.expectedTotal ? 'gone up' : 'come down';
+    return {
+      ok: false,
+      code: 'price_changed',
+      expectedTotal: input.expectedTotal,
+      total: quote.totals.total,
+      quote,
+      issues: [
+        ...quote.issues,
+        {
+          code: 'price_changed',
+          message:
+            `The price has ${direction} since you opened checkout. ` +
+            'Please review the new total before continuing.',
+        },
+      ],
+    };
+  }
+
+  /* ---------------------------------------------------- coupon re-use */
+
+  // `validateCoupon` cannot check this. It is shared with the cart UI and has
+  // no database access by design, so the only place a per-customer limit can
+  // be enforced is here, on the server, immediately before the order is
+  // written. The matching redemption row is inserted inside the order's own
+  // transaction, so the two cannot disagree.
+  //
+  // Residual race: two orders submitted at the same instant could both pass
+  // this check. `coupon_redemptions` has no unique constraint to lean on —
+  // adding a blanket one would wrongly stop a customer using a *multi*-use
+  // code twice — and the idempotency key already blocks accidental double
+  // submits. Worth tightening if these ever carry real money.
+  if (quote.coupon) {
+    const rule = couponRule(quote.coupon.code);
+    if (rule?.oncePerCustomer) {
+      const alreadyUsed = await repository.hasRedeemedCoupon(
+        quote.coupon.code,
+        input.contact.phone,
+      );
+      if (alreadyUsed) {
+        return {
+          ok: false,
+          code: 'invalid_quote',
+          quote,
+          issues: [
+            ...quote.issues,
+            {
+              code: 'coupon_invalid',
+              message:
+                `${quote.coupon.code} has already been used on a previous order. ` +
+                'Remove it to continue.',
+            },
+          ],
+        };
+      }
+    }
   }
 
   /* ------------------------------------------------------- COD limits */

@@ -1,9 +1,11 @@
 'use server';
 
-import { revalidatePath } from 'next/cache';
+import { revalidatePath, revalidateTag } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { currentUser } from '@/lib/auth/session';
 import { orders } from '@/lib/orders/postgres-repository';
+import { allProducts } from '@/lib/catalog/collections';
+import { invalidateCatalogueSnapshot } from '@/lib/commerce/health';
 import { canTransitionOrder } from '@/lib/orders/state-machine';
 import type { OrderStatus } from '@/lib/orders/types';
 
@@ -51,4 +53,47 @@ export async function updateOrderStatusAction(formData: FormData): Promise<void>
 
   revalidatePath('/admin');
   revalidatePath(`/admin/orders/${orderNumber}`);
+}
+
+/**
+ * Re-mirror Hostinger's stock after the admin has deducted sold units in hPanel.
+ *
+ * Hostinger exposes no inventory write API, so our ledger and the merchant's
+ * own figures can only be brought back together by hand. Until this existed
+ * nothing ever wrote `inventory_baseline` after the first order for a variant:
+ * stock could only ratchet downwards, a restock upstream was invisible, and
+ * every reconciled sale went on being subtracted forever.
+ *
+ * The read is deliberately uncached. The admin has just changed these numbers
+ * in hPanel and is asking us to pick the change up, so a snapshot up to
+ * `HOSTINGER_CATALOG_REVALIDATE` seconds old is exactly the wrong answer —
+ * hence invalidating both the Next data cache (by the `catalog` tag the client
+ * has always set) and the provider's own in-process snapshot first.
+ */
+export async function syncInventoryFromHostingerAction(): Promise<void> {
+  const actor = await requireAdminActor();
+
+  revalidateTag('catalog');
+  invalidateCatalogueSnapshot();
+
+  const products = await allProducts();
+  const entries = products.flatMap((product) =>
+    product.variants.map((variant) => ({ variantId: variant.id, quantity: variant.stock })),
+  );
+
+  if (entries.length === 0) {
+    // An empty catalogue almost certainly means the upstream read failed.
+    // Writing zeroes would take the whole shop out of stock.
+    console.error('[admin] inventory resync aborted: the catalogue returned no products');
+    return;
+  }
+
+  const result = await orders().reconcileInventory(entries);
+
+  console.info(
+    `[admin] ${actor} resynced inventory from Hostinger: ` +
+      `${result.variants} variant(s), ${result.reservations} sale(s) marked reconciled`,
+  );
+
+  revalidatePath('/admin');
 }

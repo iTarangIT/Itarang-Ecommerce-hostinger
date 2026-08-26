@@ -94,10 +94,11 @@ export function useWishlist() {
   return React.useMemo(
     () => ({
       ids: state.wishlist,
+      hydrated: state.hydrated,
       has: (productId: string) => state.wishlist.includes(productId),
       toggle: (productId: string) => dispatch({ type: 'wishlist/toggle', productId }),
     }),
-    [state.wishlist, dispatch],
+    [state.wishlist, state.hydrated, dispatch],
   );
 }
 
@@ -106,8 +107,9 @@ export function useRecentlyViewed() {
   return React.useMemo(
     () => ({
       slugs: state.recentlyViewed,
+      hydrated: state.hydrated,
       push: (slug: string) => dispatch({ type: 'recent/push', slug }),
     }),
-    [state.recentlyViewed, dispatch],
+    [state.recentlyViewed, state.hydrated, dispatch],
   );
 }

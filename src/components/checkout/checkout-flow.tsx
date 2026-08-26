@@ -113,6 +113,15 @@ export function CheckoutFlow({
   const [fieldErrors, setFieldErrors] = React.useState<Record<string, string>>({});
   const [formError, setFormError] = React.useState<string | null>(null);
   const [placing, setPlacing] = React.useState(false);
+  /**
+   * Set when the server rebuilt the quote and got a different total from the
+   * one on screen. Holds both figures so the shopper is shown the change
+   * rather than just told about it.
+   */
+  const [priceChange, setPriceChange] = React.useState<{
+    from: number;
+    to: number;
+  } | null>(null);
   const [pendingOrder, setPendingOrder] = React.useState<string | null>(null);
   const [intent, setIntent] = React.useState<{ clientParams: Record<string, string | number> } | null>(
     null,
@@ -149,8 +158,19 @@ export function CheckoutFlow({
           paymentMethod: payment === 'cod' ? 'cod' : provider,
         }),
       })
-        .then((r) => r.json())
-        .then((data: QuoteResponse) => setQuote(data))
+        .then(async (response) => {
+          // The quote endpoint requires a session. If it lapsed while the page
+          // was open, the price on screen is no longer being refreshed, and
+          // leaving it there would be worse than saying so.
+          if (response.status === 401) {
+            router.push(`/login?next=${encodeURIComponent('/checkout')}`);
+            return null;
+          }
+          return (await response.json()) as QuoteResponse;
+        })
+        .then((data) => {
+          if (data) setQuote(data);
+        })
         .catch(() => {
           /* aborted or offline — the previous quote stays on screen */
         })
@@ -161,7 +181,7 @@ export function CheckoutFlow({
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [lines, cart.coupon?.code, address.pincode, payment, provider]);
+  }, [lines, cart.coupon?.code, address.pincode, payment, provider, router]);
 
   /* ------------------------------------------------------- validation */
 
@@ -198,7 +218,7 @@ export function CheckoutFlow({
 
   /* --------------------------------------------------------- placement */
 
-  const placeOrder = async () => {
+  const placeOrder = async ({ acceptPriceChange = false } = {}) => {
     if (!validateStep(3)) return;
     if (!quote?.placeable) {
       setFormError('Some items in your cart need attention before you can place this order.');
@@ -207,6 +227,7 @@ export function CheckoutFlow({
 
     setPlacing(true);
     setFormError(null);
+    if (!acceptPriceChange) setPriceChange(null);
 
     const endpoint = payment === 'cod' ? '/api/checkout/cod' : '/api/checkout/order';
 
@@ -224,6 +245,11 @@ export function CheckoutFlow({
           couponCode: cart.coupon?.code,
           gstin: wantsGstInvoice ? gstin : undefined,
           paymentMethod: payment === 'cod' ? 'cod' : provider,
+          // What this browser is showing. Advisory only — the server prices the
+          // order from the catalogue either way, and this can only stop the
+          // order, never lower it.
+          expectedTotal: quote.totals.total,
+          acceptPriceChange,
         }),
       });
 
@@ -234,6 +260,17 @@ export function CheckoutFlow({
       // they typed into it is lost.
       if (response.status === 401) {
         router.push(`/login?next=${encodeURIComponent('/checkout')}`);
+        return;
+      }
+
+      // The catalogue price moved between the quote on screen and this submit.
+      // Nothing has been created, so show both figures and let the shopper
+      // decide. The idempotency key is kept: this is the same order attempt.
+      if (response.status === 409 && data.code === 'price_changed') {
+        setPriceChange({ from: data.expectedTotal, to: data.total });
+        setQuote((current) =>
+          current ? { ...current, totals: { ...current.totals, total: data.total } } : current,
+        );
         return;
       }
 
@@ -367,6 +404,49 @@ export function CheckoutFlow({
             );
           })}
         </ol>
+
+        {priceChange ? (
+          <div
+            role="alert"
+            className="mb-4 rounded-md border border-warning/40 bg-warning-soft p-4 text-sm"
+          >
+            <p className="flex items-start gap-2 font-semibold text-foreground">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+              The price changed while you were checking out
+            </p>
+            <p className="mt-2 text-muted-foreground">
+              This order was {formatPrice(priceChange.from)} and is now{' '}
+              <strong className="font-semibold text-foreground">
+                {formatPrice(priceChange.to)}
+              </strong>
+              . Nothing has been ordered or charged. Continue only if the new total is right.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                disabled={placing}
+                onClick={() => placeOrder({ acceptPriceChange: true })}
+              >
+                {placing ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                Continue at {formatPrice(priceChange.to)}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={placing}
+                onClick={() => {
+                  setPriceChange(null);
+                  router.push('/cart');
+                }}
+              >
+                Back to cart
+              </Button>
+            </div>
+          </div>
+        ) : null}
 
         {formError ? (
           <p
@@ -663,7 +743,8 @@ export function CheckoutFlow({
                     Back
                   </Button>
                   <Button
-                    onClick={placeOrder}
+                    // Wrapped so the click event is not read as the options object.
+                    onClick={() => placeOrder()}
                     variant="accent"
                     size="lg"
                     disabled={placing || quoteLoading || !quote?.placeable}

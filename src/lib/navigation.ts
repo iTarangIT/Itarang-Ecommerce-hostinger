@@ -1,3 +1,4 @@
+import { cache } from 'react';
 import { catalog } from '@/lib/commerce';
 import { CATEGORIES } from '@/lib/commerce/mock/categories';
 import { displayPrice } from '@/lib/catalog/pricing';
@@ -43,9 +44,19 @@ export interface NavCategory {
   total: number;
 }
 
-export async function buildNavigation(): Promise<NavCategory[]> {
-  const categories = await catalog().listCategories();
-  const products = await allProducts();
+/**
+ * Memoised per request, and for a sharper reason than `allProducts`: this runs
+ * in the root layout, so it is on the critical path of *every* route — and the
+ * homepage called it a second time for its own category strip, doubling the
+ * work on the most-visited page in the app.
+ *
+ * The two reads are independent, so they run together rather than in series.
+ */
+export const buildNavigation = cache(async (): Promise<NavCategory[]> => {
+  const [categories, products] = await Promise.all([
+    catalog().listCategories(),
+    allProducts(),
+  ]);
 
   return categories.map((category) => {
     const inCategory = products.filter((p) => p.category === category.slug);
@@ -84,7 +95,7 @@ export async function buildNavigation(): Promise<NavCategory[]> {
       total: inCategory.length,
     };
   });
-}
+});
 
 /** Static category list, for surfaces that need names without product counts. */
 export const NAV_CATEGORIES = CATEGORIES;

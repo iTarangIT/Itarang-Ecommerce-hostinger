@@ -155,9 +155,19 @@ const ORDER_COLUMNS = `
   payment_method, is_test, idempotency_key, gateway_order_id,
   created_at, updated_at`;
 
-/** Reservations that still count against stock: active-and-unexpired, or sold. */
+/**
+ * Reservations that still count against stock: active-and-unexpired, or sold
+ * and not yet deducted from Hostinger.
+ *
+ * `reconciled_at` is what stops a sale being subtracted twice. Hostinger has
+ * no inventory write API, so a sale here never moves the merchant's own number;
+ * once the admin has deducted it by hand in hPanel, that number already
+ * accounts for it, and continuing to subtract our consumed reservation would
+ * take the same unit off the shelf a second time.
+ */
 const COMMITTED_RESERVATIONS = `
-  (state = 'consumed' OR (state = 'active' AND expires_at > now()))`;
+  ((state = 'consumed' AND reconciled_at IS NULL)
+   OR (state = 'active' AND expires_at > now()))`;
 
 /* -------------------------------------------------------- implementation */
 
@@ -312,16 +322,20 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
     const limit = Math.min(filters.limit ?? 50, 200);
     const offset = filters.offset ?? 0;
 
-    const totalRow = await queryOne<{ count: number }>(
-      `SELECT count(*)::bigint AS count FROM orders ${where}`,
-      params,
-    );
-
-    const rows = await query<OrderRow>(
-      `SELECT ${ORDER_COLUMNS} FROM orders ${where}
-        ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`,
-      params,
-    );
+    // Two independent reads against the same snapshot — the admin console paid
+    // for both round trips in series on every page view and every pagination
+    // click.
+    const [totalRow, rows] = await Promise.all([
+      queryOne<{ count: number }>(
+        `SELECT count(*)::bigint AS count FROM orders ${where}`,
+        params,
+      ),
+      query<OrderRow>(
+        `SELECT ${ORDER_COLUMNS} FROM orders ${where}
+          ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`,
+        params,
+      ),
+    ]);
 
     return { orders: await this.hydrate(rows), total: totalRow?.count ?? 0 };
   }
@@ -518,6 +532,17 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
         [inserted.id, order.status],
       );
 
+      // In the same transaction as the order, so a rollback cannot leave a
+      // redemption recorded against an order that does not exist. The table
+      // has existed since the first migration and nothing ever wrote to it,
+      // which is why per-customer coupon limits were unenforceable.
+      if (order.amounts.couponCode) {
+        await client.query(
+          `INSERT INTO coupon_redemptions (order_id, code, phone) VALUES ($1, $2, $3)`,
+          [inserted.id, order.amounts.couponCode, order.contact.phone],
+        );
+      }
+
       const [hydrated] = await this.hydrateWithin(client, [inserted]);
       return { ok: true, order: hydrated, reused: false } as CreateOrderResult;
     }).catch(async (error: unknown) => {
@@ -607,13 +632,36 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
 
   /* ---------------------------------------------------------- payments */
 
-  async recordPayment(payment: Omit<PaymentRecord, 'id' | 'createdAt'>): Promise<boolean> {
+  /**
+   * Record a payment, once per gateway payment id.
+   *
+   * `authoritative` marks a caller that heard the figures from the gateway
+   * itself — the webhook. The browser callback does not: it is told only that
+   * a payment succeeded, so it writes *our* order total as the amount, which
+   * is a reasonable guess and not evidence.
+   *
+   * Because the callback usually lands first and the insert ignored conflicts,
+   * that guess used to win permanently and the gateway's real figure was
+   * discarded. An authoritative writer may now correct `amount` and `method`
+   * on the existing row. It deliberately does **not** touch `status`: payment
+   * state transitions are ordered and validated by `applyPaymentStatus`, and
+   * letting a late webhook rewrite status here would bypass that.
+   */
+  async recordPayment(
+    payment: Omit<PaymentRecord, 'id' | 'createdAt'>,
+    options: { authoritative?: boolean } = {},
+  ): Promise<boolean> {
+    const onConflict = options.authoritative
+      ? `DO UPDATE SET amount = EXCLUDED.amount,
+                       method = COALESCE(EXCLUDED.method, payments.method)`
+      : 'DO NOTHING';
+
     const rows = await query<{ id: number }>(
       `INSERT INTO payments (
          order_id, provider, gateway_payment_id, status, amount, method,
          signature_verified, error_code, error_description
        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-       ON CONFLICT (provider, gateway_payment_id) DO NOTHING
+       ON CONFLICT (provider, gateway_payment_id) ${onConflict}
        RETURNING id`,
       [
         payment.orderId,
@@ -881,6 +929,25 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
     }));
   }
 
+  /* ----------------------------------------------------------- coupons */
+
+  /**
+   * Has this customer already redeemed this code?
+   *
+   * Keyed on phone because that is what `coupon_redemptions` records and what
+   * its index covers. A customer who changes their number could redeem a
+   * single-use code again; tying it to `user_id` would be tighter, and is the
+   * obvious next step if these ever carry real money.
+   */
+  async hasRedeemedCoupon(code: string, phone: string): Promise<boolean> {
+    const row = await queryOne<{ exists: boolean }>(
+      `SELECT true AS exists FROM coupon_redemptions
+        WHERE upper(code) = upper($1) AND phone = $2 LIMIT 1`,
+      [code, phone],
+    );
+    return Boolean(row);
+  }
+
   /* --------------------------------------------------------- inventory */
 
   async syncInventoryBaseline(entries: Array<{ variantId: string; quantity: number }>) {
@@ -966,16 +1033,93 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
   }
 
   async reconciliationReport() {
-    return query<{ variantId: string; sold: number; baseline: number }>(
+    // Only unreconciled sales: once a row is stamped, the admin has already
+    // deducted it upstream and it is no longer outstanding work.
+    return query<{ variantId: string; sold: number; baseline: number; syncedAt: Date }>(
       `SELECT b.variant_id AS "variantId",
-              COALESCE(sum(r.quantity) FILTER (WHERE r.state = 'consumed'), 0)::bigint AS sold,
-              b.hostinger_quantity::bigint AS baseline
+              COALESCE(
+                sum(r.quantity) FILTER (WHERE r.state = 'consumed' AND r.reconciled_at IS NULL),
+                0
+              )::bigint AS sold,
+              b.hostinger_quantity::bigint AS baseline,
+              b.synced_at AS "syncedAt"
          FROM inventory_baseline b
          LEFT JOIN stock_reservations r ON r.variant_id = b.variant_id
-        GROUP BY b.variant_id, b.hostinger_quantity
-       HAVING COALESCE(sum(r.quantity) FILTER (WHERE r.state = 'consumed'), 0) > 0
+        GROUP BY b.variant_id, b.hostinger_quantity, b.synced_at
+       HAVING COALESCE(
+                sum(r.quantity) FILTER (WHERE r.state = 'consumed' AND r.reconciled_at IS NULL),
+                0
+              ) > 0
         ORDER BY sold DESC`,
     );
+  }
+
+  /**
+   * Re-mirror Hostinger's stock and close out the sales it now accounts for.
+   *
+   * Called after the admin has deducted the outstanding quantities in hPanel.
+   * The two halves have to happen together, which is the whole reason this is
+   * one transaction rather than a call to `syncInventoryBaseline` followed by
+   * an update:
+   *
+   *   - writing the new baseline alone would double-count, because the
+   *     consumed reservations for those same sales keep subtracting;
+   *   - stamping alone would leave the baseline frozen at its old value, which
+   *     is the ratchet this is meant to end.
+   *
+   * The baseline rows are locked in the same sorted order `createOrder` locks
+   * them, so a checkout in flight either completes before the resync or sees
+   * the finished result — never a half-applied one.
+   */
+  async reconcileInventory(
+    entries: Array<{ variantId: string; quantity: number }>,
+  ): Promise<{ variants: number; reservations: number }> {
+    if (entries.length === 0) return { variants: 0, reservations: 0 };
+
+    return transaction(async (client) => {
+      const variantIds = [...new Set(entries.map((entry) => entry.variantId))].sort();
+
+      // Guarantee a lockable row exists before locking, exactly as order
+      // creation does — `FOR UPDATE` locks nothing if the row is absent.
+      for (const variantId of variantIds) {
+        await client.query(
+          `INSERT INTO inventory_baseline (variant_id, hostinger_quantity)
+           VALUES ($1, 0)
+           ON CONFLICT (variant_id) DO NOTHING`,
+          [variantId],
+        );
+      }
+
+      await client.query(
+        `SELECT variant_id
+           FROM inventory_baseline
+          WHERE variant_id = ANY($1::text[])
+          ORDER BY variant_id
+            FOR UPDATE`,
+        [variantIds],
+      );
+
+      const stamped = await client.query(
+        `UPDATE stock_reservations
+            SET reconciled_at = now()
+          WHERE variant_id = ANY($1::text[])
+            AND state = 'consumed'
+            AND reconciled_at IS NULL`,
+        [variantIds],
+      );
+
+      for (const entry of entries) {
+        await client.query(
+          `INSERT INTO inventory_baseline (variant_id, hostinger_quantity, synced_at)
+           VALUES ($1, $2, now())
+           ON CONFLICT (variant_id)
+           DO UPDATE SET hostinger_quantity = EXCLUDED.hostinger_quantity, synced_at = now()`,
+          [entry.variantId, Math.max(0, entry.quantity)],
+        );
+      }
+
+      return { variants: entries.length, reservations: stamped.rowCount ?? 0 };
+    });
   }
 
   /* ---------------------------------------------------- customer stats */

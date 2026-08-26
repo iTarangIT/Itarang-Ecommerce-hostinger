@@ -199,11 +199,13 @@ describe('order placement requires an authenticated customer', () => {
 });
 
 describe('order-mutating checkout endpoints check ownership', () => {
-  it('retry and simulate require entitlement to the order', () => {
-    // Both take an order number and change payment state. Knowing a number
-    // must never be enough: simulate could drive any order to paid, and retry
-    // replaced the gateway order id, orphaning a payment already in flight.
-    for (const route of ['retry', 'simulate']) {
+  it('retry, simulate and verify require entitlement to the order', () => {
+    // All three take an order number and change payment state. Knowing a
+    // number must never be enough: simulate could drive any order to paid,
+    // retry replaced the gateway order id, orphaning a payment already in
+    // flight, and verify wrote a payments row and disclosed the order's state
+    // to anyone who asked.
+    for (const route of ['retry', 'simulate', 'verify']) {
       const text = readFileSync(
         join(ROOT, 'src', 'app', 'api', 'checkout', route, 'route.ts'),
         'utf8',
@@ -317,7 +319,7 @@ describe('state-changing API handlers check the request origin', () => {
       );
     }
 
-    for (const route of ['retry', 'simulate']) {
+    for (const route of ['retry', 'simulate', 'verify']) {
       const text = readFileSync(
         join(ROOT, 'src', 'app', 'api', 'checkout', route, 'route.ts'),
         'utf8',
@@ -326,6 +328,87 @@ describe('state-changing API handlers check the request origin', () => {
         /requireOrderAccess\([^)]*request\)/,
       );
     }
+  });
+});
+
+describe('the quote endpoint is gated like the rest of checkout', () => {
+  it('requires a session, an origin check and its own rate limit', () => {
+    // This was the one checkout endpoint anybody could call: no origin check,
+    // no session, no limit — and every call fans out into a full catalogue
+    // read. Requiring a session costs nothing legitimate, because /checkout
+    // already calls requireUser before this endpoint is ever reached.
+    const text = readFileSync(
+      join(ROOT, 'src', 'app', 'api', 'checkout', 'quote', 'route.ts'),
+      'utf8',
+    );
+
+    expect(text, 'quote/route.ts does not gate on a customer session').toMatch(
+      /requireCustomer\(request[,)]/,
+    );
+    expect(text, 'quote/route.ts must not share the order-placement rate limit').toMatch(
+      /LIMITS\.quote/,
+    );
+  });
+});
+
+describe('the displayed price cannot become the charged price', () => {
+  it('placeOrder prices from its own quote, never from the client', () => {
+    // `expectedTotal` is what the browser displayed. It exists so a price that
+    // moved between the quote and the submit is caught and shown, and it must
+    // never reach a money column: the whole guarantee is that it can refuse an
+    // order but not price one.
+    const text = readFileSync(join(ROOT, 'src', 'lib', 'orders', 'place-order.ts'), 'utf8');
+
+    expect(text, 'placeOrder does not compare the displayed total').toMatch(
+      /input\.expectedTotal !== quote\.totals\.total/,
+    );
+    expect(text, 'the order total must come from the server quote').toMatch(
+      /total:\s*quote\.totals\.total/,
+    );
+    // The failure this guards against: assigning the client's figure to any
+    // amount on the order.
+    expect(text, 'an order amount is being taken from the client').not.toMatch(
+      /(total|subtotal|unitPrice|lineTotal):\s*input\.expectedTotal/,
+    );
+  });
+
+  it('no request schema accepts a price for an item', () => {
+    const text = readFileSync(join(ROOT, 'src', 'lib', 'checkout', 'validation.ts'), 'utf8');
+    // Line-level money from the client would be a real hole; a single advisory
+    // cart total that can only cause a refusal is not.
+    expect(text, 'quoteLineSchema must not accept prices').not.toMatch(
+      /quoteLineSchema[\s\S]{0,200}(price|amount|total)\s*:/,
+    );
+  });
+});
+
+describe('single-use coupons are enforced server-side', () => {
+  it('placement checks past redemptions and records new ones', () => {
+    // coupon_redemptions existed from the first migration and nothing ever
+    // wrote to it, so "one per customer" was unenforceable and FIRST5 — a
+    // first-order discount — could be used on every order forever.
+    const placeOrder = readFileSync(
+      join(ROOT, 'src', 'lib', 'orders', 'place-order.ts'),
+      'utf8',
+    );
+    expect(placeOrder, 'placement does not check for a previous redemption').toMatch(
+      /hasRedeemedCoupon\(/,
+    );
+
+    const repository = readFileSync(
+      join(ROOT, 'src', 'lib', 'orders', 'postgres-repository.ts'),
+      'utf8',
+    );
+    expect(repository, 'redemptions are never recorded').toMatch(
+      /INSERT INTO coupon_redemptions/,
+    );
+  });
+
+  it('the client-safe coupon module never reads the database', () => {
+    // It is imported by cart UI, so a database import here would both break
+    // the bundle and move the check somewhere the browser could skip.
+    const text = readFileSync(join(ROOT, 'src', 'lib', 'offers', 'coupons.ts'), 'utf8');
+    expect(text, 'coupons.ts must stay client-safe').not.toMatch(/@\/lib\/db|from 'pg'/);
   });
 });
 
@@ -355,9 +438,44 @@ describe('security headers are configured', () => {
     expect(text).not.toMatch(/key:\s*'Content-Security-Policy'/);
   });
 
-  it('keeps API responses out of shared caches', () => {
+  it('keeps API responses out of shared caches by default', () => {
     const text = readFileSync(join(ROOT, 'next.config.mjs'), 'utf8');
     expect(text, 'API responses are not marked no-store').toContain('no-store');
+  });
+
+  it('only ever exempts the three impersonal catalogue endpoints from no-store', () => {
+    // Caching is opt-in by an exact list. This is the tripwire for widening
+    // that list: anything carrying a session, an order or a payment must never
+    // reach a shared cache, and the failure mode is one customer being served
+    // another's data.
+    const text = readFileSync(join(ROOT, 'next.config.mjs'), 'utf8');
+
+    const cacheable = text.match(/source: '\/api\/:path\(([a-z|-]+)\)'/);
+    expect(cacheable, 'the cacheable API allow-list is missing or reshaped').not.toBeNull();
+
+    const allowed = (cacheable?.[1] ?? '').split('|').sort();
+    expect(allowed, 'the cacheable API allow-list changed').toEqual([
+      'cross-sell',
+      'products',
+      'suggest',
+    ]);
+
+    // And the endpoints that must never be in it.
+    for (const forbidden of ['checkout', 'orders', 'webhooks', 'diagnostics']) {
+      expect(allowed, `${forbidden} must never be cacheable`).not.toContain(forbidden);
+    }
+  });
+
+  it('the cacheable endpoints read nothing personal', () => {
+    // The justification for exempting them, asserted rather than assumed: the
+    // moment one of these reads a cookie or a session, its cached response
+    // would be somebody's private data sitting in a shared cache.
+    for (const route of ['suggest', 'products', 'cross-sell']) {
+      const text = readFileSync(join(ROOT, 'src', 'app', 'api', route, 'route.ts'), 'utf8');
+      expect(text, `${route} reads a cookie but is publicly cacheable`).not.toMatch(
+        /cookies\(\)|currentUser\(|hasOrderAccess\(/,
+      );
+    }
   });
 });
 

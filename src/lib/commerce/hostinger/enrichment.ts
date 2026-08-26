@@ -283,10 +283,25 @@ export const ENRICHMENT: Record<string, ProductEnrichment> = {
  * for its whole taxonomy. Here it is only a fallback so a newly added SKU shows
  * up somewhere sensible instead of vanishing — it is not the routine path.
  */
+/**
+ * Order matters: the first match wins, so the most specific patterns lead.
+ *
+ * The battery rows used to be one catch-all that matched `lithium` and
+ * `lifepo` but filed the result under `tall-tubular` regardless. That was
+ * survivable while the fallback was rare. It stopped being survivable when
+ * the merchant recreated the catalogue and every product started arriving
+ * with a new id: the whole shop ran on this table, every lithium battery
+ * landed in the wrong aisle, and `/c/batteries/lithium` listed nothing at
+ * all — a filter matching none of the products it exists for.
+ */
 const CATEGORY_HINTS: Array<{ category: CategorySlug; subcategory: string; match: RegExp }> = [
   { category: 'combos', subcategory: 'home-combos', match: /\bcombo\b|inverter\s*\+|with .*batter/i },
   { category: 'ups', subcategory: 'home-ups', match: /\bups\b/i },
-  { category: 'batteries', subcategory: 'tall-tubular', match: /\bbatter|tubular|lithium|\bah\b|lifepo/i },
+  { category: 'batteries', subcategory: 'lithium', match: /lithium|lifepo/i },
+  { category: 'batteries', subcategory: 'tall-tubular', match: /tubular/i },
+  // Anything else recognisably a battery. Tubular is the commonest chemistry
+  // in this catalogue, so it stays the battery default.
+  { category: 'batteries', subcategory: 'tall-tubular', match: /\bbatter|\bah\b/i },
   { category: 'inverters', subcategory: 'pure-sine-wave', match: /inverter|\bva\b|sine/i },
 ];
 

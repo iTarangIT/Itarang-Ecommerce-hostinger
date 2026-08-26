@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { isAbsolute, resolve } from 'node:path';
 import type { ConnectionOptions } from 'node:tls';
 import { type InspectedDatabaseUrl, assertProjectDatabase } from './guard.ts';
 
@@ -49,6 +50,46 @@ function withoutSslMode(raw: string): string {
 }
 
 /**
+ * Read the CA bundle named by `DB_SSL_CA_FILE`, anchoring a relative path
+ * explicitly.
+ *
+ * `readFileSync` resolves a relative path against `process.cwd()`. When npm
+ * starts the process that is the package root, which is why a relative path
+ * works on a developer machine; when a host's process manager starts it, it is
+ * whatever that manager chose. The resolution is spelled out here so the path
+ * actually opened is a value this code holds rather than an implicit property
+ * of how the process was launched — and, more usefully, so the error can name
+ * it. A bare `ENOENT: … open 'db/prod-ca-2021.crt'` says nothing about where it
+ * looked, which is exactly the information needed to fix it.
+ *
+ * A hosted deployment should set an ABSOLUTE path. The relative form is a
+ * local-development convenience and depends on the working directory.
+ *
+ * Failure here is deliberately fatal. Falling back to an unverified connection
+ * would turn a missing file into a silent downgrade from "authenticated" to
+ * "merely encrypted" — the single outcome this setting exists to prevent.
+ */
+function readCaFile(caFile: string): string {
+  const path = isAbsolute(caFile) ? caFile : resolve(process.cwd(), caFile);
+
+  try {
+    return readFileSync(path, 'utf8');
+  } catch (cause) {
+    throw new Error(
+      'DB_SSL_CA_FILE could not be read, so the database certificate cannot be ' +
+        'verified and no connection will be opened.\n' +
+        `  configured: ${caFile}\n` +
+        `  resolved:   ${path}\n` +
+        `  cwd:        ${process.cwd()}\n` +
+        'If the resolved path is anchored to the wrong directory, set ' +
+        'DB_SSL_CA_FILE to an absolute path. If it is right but the file is ' +
+        'absent, the deployment is not shipping it.',
+      { cause },
+    );
+  }
+}
+
+/**
  * TLS settings for the approved remote target.
  *
  * Supabase issues pooler certificates from its own private root ("Supabase
@@ -66,7 +107,7 @@ function sslFor(info: InspectedDatabaseUrl): ConnectionOptions | undefined {
 
   const caFile = process.env.DB_SSL_CA_FILE;
   if (caFile) {
-    return { ca: readFileSync(caFile, 'utf8'), rejectUnauthorized: true };
+    return { ca: readCaFile(caFile), rejectUnauthorized: true };
   }
 
   if (process.env.DB_SSL_INSECURE === 'true') {

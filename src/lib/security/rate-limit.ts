@@ -50,6 +50,16 @@ export const LIMITS = {
   checkout: { limit: 20, windowSeconds: 10 * 60 },
   /** Payment mutations on an order the caller already owns. */
   paymentAction: { limit: 30, windowSeconds: 10 * 60 },
+  /**
+   * Repricing the cart, per account.
+   *
+   * Far looser than `checkout` because it is not the same kind of action: the
+   * checkout form re-quotes on every debounced edit to the cart, the address
+   * and the payment method, so a careful shopper legitimately sends dozens.
+   * It has its own bucket precisely so that traffic cannot exhaust the quota
+   * that protects order placement.
+   */
+  quote: { limit: 120, windowSeconds: 10 * 60 },
 } as const satisfies Record<string, RateLimit>;
 
 /**

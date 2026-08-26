@@ -1,3 +1,4 @@
+import { cache } from 'react';
 import { catalog } from '@/lib/commerce';
 import { REVIEWS } from '@/lib/commerce/mock/reviews';
 import { toProductSummary, type ProductSummary } from '@/lib/commerce/summary';
@@ -20,10 +21,23 @@ const EVERYTHING: ProductQuery = {
   perPage: 1000,
 };
 
-export async function allProducts(): Promise<Product[]> {
+/**
+ * The whole catalogue, memoised per request.
+ *
+ * `cache()` matters more here than it looks. One homepage render called this
+ * five times — the layout's navigation, the page's navigation, `bestSellers`,
+ * `newArrivals` and `productTitleMap` — and every call ran the full
+ * `CatalogEngine.list` pass, including `buildFacetGroups` across all eight
+ * facets, whose output every one of those callers then discarded.
+ *
+ * Request-scoped, exactly like `currentUser()` in `lib/auth/session.ts`: two
+ * requests never share a result, so a revalidated catalogue is still picked up
+ * on the next render.
+ */
+export const allProducts = cache(async (): Promise<Product[]> => {
   const result = await catalog().listProducts(EVERYTHING);
   return result.items;
-}
+});
 
 export async function bestSellers(limit = 8): Promise<ProductSummary[]> {
   const products = await allProducts();

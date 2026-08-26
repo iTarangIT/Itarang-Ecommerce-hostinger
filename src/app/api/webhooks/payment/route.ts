@@ -106,15 +106,21 @@ export async function POST(request: Request) {
     }
 
     if (result.gatewayPaymentId) {
-      await repository.recordPayment({
-        orderId: order.id,
-        provider: provider.id,
-        gatewayPaymentId: result.gatewayPaymentId,
-        status: result.status,
-        amount: result.amount ?? order.amounts.total,
-        method: result.method,
-        signatureVerified: true,
-      });
+      await repository.recordPayment(
+        {
+          orderId: order.id,
+          provider: provider.id,
+          gatewayPaymentId: result.gatewayPaymentId,
+          status: result.status,
+          amount: result.amount ?? order.amounts.total,
+          method: result.method,
+          signatureVerified: true,
+        },
+        // Signature-verified and straight from the gateway, so this may correct
+        // an amount the browser callback could only guess at. Only when the
+        // gateway actually stated one.
+        { authoritative: result.amount !== undefined },
+      );
     }
 
     const updated = await repository.applyPaymentStatus(

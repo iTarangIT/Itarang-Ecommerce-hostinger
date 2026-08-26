@@ -12,8 +12,17 @@ import { cn } from '@/lib/utils';
 import { Logo } from './logo';
 import { MegaMenu } from './mega-menu';
 
-function CountBubble({ count }: { count: number }) {
-  if (count <= 0) return null;
+/**
+ * `hydrated` is what stops the badge flashing.
+ *
+ * The cart lives in localStorage, so the server render and the first client
+ * render both see an empty store; the real count only arrives once
+ * `StoreProvider`'s effect has run. Rendering nothing until then means the
+ * badge appears once, with the right number, instead of appearing empty and
+ * then jumping.
+ */
+function CountBubble({ count, hydrated }: { count: number; hydrated: boolean }) {
+  if (!hydrated || count <= 0) return null;
   return (
     <span className="tabular absolute -right-0.5 -top-0.5 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-accent px-1 text-[0.625rem] font-bold text-accent-foreground">
       {count > 99 ? '99+' : count}
@@ -127,7 +136,7 @@ export function Header({ categories }: { categories: NavCategory[] }) {
             className="relative hidden h-11 w-11 place-items-center rounded-md text-foreground transition-colors hover:bg-secondary sm:grid"
           >
             <Heart className="h-5 w-5" />
-            <CountBubble count={wishlist.ids.length} />
+            <CountBubble count={wishlist.ids.length} hydrated={wishlist.hydrated} />
           </Link>
 
           <Link
@@ -145,7 +154,7 @@ export function Header({ categories }: { categories: NavCategory[] }) {
             className="relative grid h-11 w-11 place-items-center rounded-md text-foreground transition-colors hover:bg-secondary"
           >
             <ShoppingCart className="h-5 w-5" />
-            <CountBubble count={cart.totals.itemCount} />
+            <CountBubble count={cart.totals.itemCount} hydrated={cart.hydrated} />
           </button>
         </div>
       </div>

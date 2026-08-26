@@ -67,6 +67,19 @@ export const placeOrderSchema = z.object({
   couponCode: z.string().trim().max(40).optional(),
   gstin: gstinSchema.optional().or(z.literal('')),
   paymentMethod: paymentMethodSchema,
+
+  /**
+   * The total the browser last displayed, in paise.
+   *
+   * ADVISORY ONLY, and the distinction matters: this is never used to price
+   * anything. The server rebuilds the quote from the catalogue regardless, and
+   * this value can only cause the order to be *refused* when the two disagree.
+   * It cannot lower a charge, so accepting it from the client is safe.
+   */
+  expectedTotal: z.number().int().nonnegative().max(1_000_000_00).optional(),
+
+  /** Set once the shopper has seen and accepted a changed price. */
+  acceptPriceChange: z.boolean().optional(),
 });
 
 export const callbackSchema = z.object({

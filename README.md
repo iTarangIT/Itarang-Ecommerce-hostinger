@@ -70,6 +70,23 @@ dashboard: **Project Settings → Database → SSL Configuration → Download
 certificate**, and save it as `db/prod-ca-2021.crt`. It is a public certificate,
 not a secret, and is safe to commit.
 
+**On a host, make `DB_SSL_CA_FILE` an absolute path.** A relative path is
+resolved against the process's working directory — the package root when npm
+starts the process, and whatever the host's process manager chose otherwise. Two
+things have to be true at runtime and neither is automatic: the certificate must
+be in the deployment (nothing in the build copies `db/` — it is not under
+`public/` and is never `import`ed, so it exists on the server only if the deploy
+ships the repo tree), and the path must point at it. Getting either wrong now
+fails with an error naming the configured path, the resolved path and the
+working directory, rather than a bare `ENOENT`.
+
+```bash
+DB_SSL_CA_FILE=/home/USER/APP_ROOT/db/prod-ca-2021.crt
+```
+
+A certificate kept outside the deploy target survives every redeploy regardless
+of what the artifact contains, which is the sturdier arrangement.
+
 `sslmode=require` stays in the URL as the operator's statement of intent and for
 `psql`, but `src/lib/db/connection.ts` strips it before handing the string to
 `pg` — otherwise `pg` merges the parsed URL *over* the explicit `ssl` config and
@@ -138,15 +155,56 @@ labelled **TEST** in the UI. No money moves.
 
 ### Razorpay
 
-Not configured, and no credentials are invented. `RazorpayTestProvider` is
-written against the documented contract but is **never constructed** while
-`PAYMENT_PROVIDER=mock`. When real `rzp_test_` credentials exist, set the three
-`RAZORPAY_*` variables and switch `PAYMENT_PROVIDER=razorpay-test`. An
-`rzp_live_` key is refused at startup — this environment cannot move real money.
+Razorpay runs in **TEST mode**, both locally and on the deployed host. It is a
+real gateway with real signatures and real webhooks; no card is ever charged and
+no real money moves. Every order still carries `is_test = true`.
 
-Webhook testing needs a public URL, so a tunnel (`cloudflared` or `ngrok`) is
-required. Without one the callback path masks webhook problems, so webhook
-behaviour should be tested against the tunnel deliberately.
+Four server-side variables, and no `NEXT_PUBLIC_` variant of any of them — the
+key id reaches the browser only inside the payment intent the server issues, so
+`RAZORPAY_KEY_SECRET` and `RAZORPAY_WEBHOOK_SECRET` never leave the server. A
+tripwire in `src/lib/security.test.ts` greps the built client bundle to keep it
+that way.
+
+```bash
+PAYMENT_PROVIDER=razorpay-test
+RAZORPAY_KEY_ID=rzp_test_...      # an rzp_live_ key is refused at startup
+RAZORPAY_KEY_SECRET=...           # signs and verifies the browser callback
+RAZORPAY_WEBHOOK_SECRET=...       # verifies webhooks, deliberately a separate secret
+```
+
+Set them in `.env.local` locally and in the host's environment in production.
+Never in source, never in a commit — `.env*` is gitignored, which is also why
+this section exists rather than living in `.env.production.example`.
+
+`env.ts` refuses to boot on a key that does not start with `rzp_test_`, whichever
+provider is selected, and `PAYMENT_PROVIDER=razorpay-test` requires all three
+credentials to be present. `RazorpayTestProvider` re-checks both in its
+constructor. Going live would mean removing those gates consciously.
+
+**Webhook.** Register `POST /api/webhooks/payment` in the Razorpay **Test Mode**
+dashboard for `payment.captured`, `payment.authorized`, `payment.failed`,
+`order.paid` and `refund.processed`.
+
+Razorpay gives each endpoint its own secret, so a local tunnel endpoint and the
+production endpoint have **different** `RAZORPAY_WEBHOOK_SECRET` values. That is
+correct, not a mistake. Rotating a secret is an environment edit and a dashboard
+edit — nothing in the repository references it.
+
+Local webhook testing needs a public URL, so a tunnel (`cloudflared` or `ngrok`)
+is required. Without one the callback path masks webhook problems, so webhook
+behaviour should be tested against the tunnel deliberately. Worth confirming all
+four behaviours: a valid delivery stamps `webhook_events.processed_at`; a
+redelivery of the same event id returns 200 and changes nothing; a tampered body
+is rejected with 400; and `npm run db:sweep` reports no claimed-but-unapplied
+events.
+
+The live-API test suite is opt-in and needs the credentials plus network:
+
+```bash
+RAZORPAY_LIVE_TEST=true npm run test -- razorpay.integration
+```
+
+It is excluded from `npm run verify` on purpose, so CI never needs a secret.
 
 ## Choosing a catalogue
 

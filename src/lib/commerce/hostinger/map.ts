@@ -76,10 +76,41 @@ export function toPaise(amount: number, decimalDigits: number): Paise {
 }
 
 export function mapPrice(price: HostingerPrice | undefined): Price {
-  if (!price) return { mrp: 0, selling: 0 };
+  // A variant with no price at all used to become silently free. That does not
+  // stay contained: zero is then the cheapest price in the catalogue, so it
+  // becomes the product's displayed "from" price and drags the lower bound of
+  // the price facet to zero for the whole shop.
+  if (!price) {
+    console.warn('[hostinger] variant has no price; treating as unavailable rather than free');
+    return { mrp: 0, selling: 0 };
+  }
+
+  // Only `prices[0]` is ever read, and nothing upstream promises it is the
+  // rupee one. Every figure in this app is paise and every price is rendered
+  // behind a hard-coded rupee sign, so a foreign minor unit would be shown as
+  // rupees with no visible sign that it is wrong.
+  if (price.currency_code && price.currency_code.toLowerCase() !== 'inr') {
+    console.warn(
+      `[hostinger] ignoring non-INR price (currency_code=${price.currency_code}); ` +
+        'this product will show as unpriced rather than in the wrong currency',
+    );
+    return { mrp: 0, selling: 0 };
+  }
+
   const digits = price.currency.decimal_digits;
   const list = toPaise(price.amount, digits);
   const sale = price.sale_amount != null ? toPaise(price.sale_amount, digits) : null;
+
+  // A sale above list is a merchant data error. Honouring it would render a
+  // negative discount; ignoring it quietly would hide the mistake. Take the
+  // lower figure and say so.
+  if (sale !== null && sale > list) {
+    console.warn(
+      `[hostinger] sale_amount (${sale}) exceeds amount (${list}); using the lower of the two`,
+    );
+    return { mrp: sale, selling: list };
+  }
+
   // When a sale is running, `amount` is the struck-through price.
   return { mrp: list, selling: sale ?? list };
 }

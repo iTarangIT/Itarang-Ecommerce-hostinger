@@ -136,6 +136,9 @@ export interface OrderRepository {
     Array<{ id: number; provider: string; eventId: string; eventType: string; receivedAt: string }>
   >;
 
+  /** Has this customer already redeemed this code? */
+  hasRedeemedCoupon(code: string, phone: string): Promise<boolean>;
+
   /* ------------------------------------------------------- inventory */
 
   /** Mirror Hostinger's stock as the opening balance for our ledger. */
@@ -150,8 +153,18 @@ export interface OrderRepository {
   /** Marks expired rows; tidiness only — reads already exclude them. */
   sweepExpiredReservations(): Promise<number>;
 
-  /** Units sold since the last Hostinger sync, for manual reconciliation. */
-  reconciliationReport(): Promise<Array<{ variantId: string; sold: number; baseline: number }>>;
+  /** Units sold but not yet deducted in hPanel, for manual reconciliation. */
+  reconciliationReport(): Promise<
+    Array<{ variantId: string; sold: number; baseline: number; syncedAt: Date }>
+  >;
+
+  /**
+   * Re-mirror Hostinger's stock and mark the sales it now accounts for as
+   * reconciled, in one transaction. Run after deducting in hPanel.
+   */
+  reconcileInventory(
+    entries: Array<{ variantId: string; quantity: number }>,
+  ): Promise<{ variants: number; reservations: number }>;
 }
 
 /** Total value of a set of reservations — used by COD abuse caps. */

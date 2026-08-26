@@ -4,7 +4,7 @@ import * as React from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { BadgeCheck, GitCompare, Heart, ShieldCheck, ShoppingCart } from 'lucide-react';
+import { BadgeCheck, GitCompare, Heart, Loader2, ShieldCheck, ShoppingCart } from 'lucide-react';
 import type { ProductSummary } from '@/lib/commerce/summary';
 import { summaryToCartItem, useCart, useCompare, useWishlist } from '@/lib/store/hooks';
 import { useUI } from '@/lib/store/ui-provider';
@@ -49,9 +49,12 @@ export function ProductCard({
     });
   }, [cart, product, toast, open]);
 
+  // Feedback for the gap between the click and /cart’s own skeleton.
+  const [navigating, startNavigating] = React.useTransition();
+
   const buyNow = () => {
     cart.addItem(summaryToCartItem(product));
-    router.push('/cart');
+    startNavigating(() => router.push('/cart'));
   };
 
   if (layout === 'compact') {
@@ -227,11 +230,13 @@ export function ProductCard({
               </Button>
               <Button
                 onClick={buyNow}
+                disabled={navigating}
                 variant="accent"
                 size="md"
                 fullWidth
                 className="hidden sm:inline-flex"
               >
+                {navigating ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                 Buy now
               </Button>
             </>

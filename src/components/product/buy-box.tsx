@@ -8,6 +8,7 @@ import {
   Check,
   GitCompare,
   Heart,
+  Loader2,
   PackageCheck,
   ShieldCheck,
   ShoppingCart,
@@ -49,10 +50,18 @@ export function BuyBox({ product }: { product: Product }) {
   const discount = discountPercent(variant.price);
 
   React.useEffect(() => {
+    // Wait for the store to hydrate before recording anything.
+    //
+    // This effect belongs to a child of StoreProvider, so it runs *before* the
+    // provider's own hydrate effect — and the hydrate reducer replaces state
+    // wholesale rather than merging. A push dispatched now is discarded, which
+    // is why a cold load of a product page never recorded that product: only
+    // client-side navigations to it were ever kept.
+    if (!recentlyViewed.hydrated) return;
     recentlyViewed.push(product.slug);
     // Record once per product view.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [product.slug]);
+  }, [product.slug, recentlyViewed.hydrated]);
 
   React.useEffect(() => {
     setQuantity((q) => Math.min(Math.max(1, q), Math.max(1, variant.stock)));
@@ -68,9 +77,12 @@ export function BuyBox({ product }: { product: Product }) {
     });
   };
 
+  // Feedback for the gap between the click and /cart’s own skeleton.
+  const [navigating, startNavigating] = React.useTransition();
+
   const buyNow = () => {
     cart.add(product, variant, quantity);
-    router.push('/cart');
+    startNavigating(() => router.push('/cart'));
   };
 
   /** Is this option value available given the rest of the current selection? */
@@ -171,12 +183,13 @@ export function BuyBox({ product }: { product: Product }) {
           </Button>
           <Button
             onClick={buyNow}
-            disabled={soldOut}
+            disabled={soldOut || navigating}
             variant="accent"
             size="lg"
             fullWidth
             className="sm:flex-1"
           >
+            {navigating ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             Buy now
           </Button>
         </div>

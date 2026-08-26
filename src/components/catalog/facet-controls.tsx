@@ -21,17 +21,34 @@ import { cn } from '@/lib/utils';
 
 /* ---------------------------------------------------------------- routing */
 
+/**
+ * Facet navigation, with a pending flag.
+ *
+ * Category and search pages are dynamic, so a facet click is a server round
+ * trip. Without `useTransition` the checkbox flips and then nothing visibly
+ * happens until the new grid streams in — on a slow connection the control
+ * looks broken and gets clicked again.
+ *
+ * The feedback belongs on the control the shopper touched rather than in a
+ * global progress bar, which is why the flag is returned here and applied by
+ * each caller.
+ */
 function useFacetNavigation(basePath: string) {
   const router = useRouter();
+  const [pending, startTransition] = React.useTransition();
 
-  return React.useCallback(
+  const navigate = React.useCallback(
     (next: ProductQuery) => {
       const qs = buildQueryString(next);
-      // scroll:false keeps the shopper's position in the grid while refining.
-      router.push(qs ? `${basePath}?${qs}` : basePath, { scroll: false });
+      startTransition(() => {
+        // scroll:false keeps the shopper's position in the grid while refining.
+        router.push(qs ? `${basePath}?${qs}` : basePath, { scroll: false });
+      });
     },
     [basePath, router],
   );
+
+  return { navigate, pending };
 }
 
 export function hrefFor(
@@ -253,12 +270,20 @@ export function FacetSidebar({
   query: ProductQuery;
   basePath: string;
 }) {
-  const navigate = useFacetNavigation(basePath);
+  const { navigate, pending } = useFacetNavigation(basePath);
   const count = activeFilterCount(query);
 
   return (
     <aside className="hidden lg:block" aria-label="Filters">
-      <div className="sticky top-24 max-h-[calc(100vh-8rem)] overflow-y-auto pr-2">
+      <div
+        aria-busy={pending}
+        className={cn(
+          'sticky top-24 max-h-[calc(100vh-8rem)] overflow-y-auto pr-2 transition-opacity',
+          // Dimmed rather than disabled: a transition can be interrupted, so a
+          // shopper who changes their mind mid-request should not have to wait.
+          pending && 'opacity-60',
+        )}
+      >
         <div className="flex items-center justify-between border-b border-border pb-3">
           <h2 className="font-display text-base font-bold text-foreground">Filters</h2>
           {count > 0 ? (
@@ -291,7 +316,7 @@ export function MobileFilterButton({
   total: number;
 }) {
   const [open, setOpen] = React.useState(false);
-  const navigate = useFacetNavigation(basePath);
+  const { navigate, pending } = useFacetNavigation(basePath);
   const count = activeFilterCount(query);
 
   return (
@@ -331,7 +356,10 @@ export function MobileFilterButton({
           </div>
         }
       >
-        <div className="px-4 pb-2">
+        <div
+          aria-busy={pending}
+          className={cn('px-4 pb-2 transition-opacity', pending && 'opacity-60')}
+        >
           <FacetPanel facets={facets} query={query} navigate={navigate} />
         </div>
       </Drawer>
@@ -350,7 +378,7 @@ export function ActiveFilterChips({
   basePath: string;
   facets: FacetGroup[];
 }) {
-  const navigate = useFacetNavigation(basePath);
+  const { navigate, pending } = useFacetNavigation(basePath);
   const entries = Object.entries(query.filters) as Array<[FacetId, string[]]>;
   const hasPrice = query.priceMin !== undefined || query.priceMax !== undefined;
 
@@ -363,7 +391,10 @@ export function ActiveFilterChips({
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div
+      aria-busy={pending}
+      className={cn('flex flex-wrap items-center gap-2 transition-opacity', pending && 'opacity-60')}
+    >
       <span className="text-xs font-medium text-muted-foreground">Filtered by</span>
 
       {entries.flatMap(([facetId, values]) =>
@@ -417,20 +448,28 @@ export function SortSelect({
   options: Array<{ id: string; label: string }>;
 }) {
   const router = useRouter();
+  const [pending, startTransition] = React.useTransition();
 
   return (
     <label className="flex items-center gap-2">
       <span className="hidden shrink-0 text-sm text-muted-foreground sm:inline">Sort</span>
       <select
         value={query.sort}
+        // Disabled while re-sorting, unlike the facet panel: a native select
+        // shows the newly chosen option immediately, so leaving it live would
+        // let a second choice be made that the first response then overwrites.
+        disabled={pending}
+        aria-busy={pending}
         onChange={(e) => {
           const qs = buildQueryString(query, {
             sort: e.target.value as ProductQuery['sort'],
             page: 1,
           });
-          router.push(qs ? `${basePath}?${qs}` : basePath, { scroll: false });
+          startTransition(() => {
+            router.push(qs ? `${basePath}?${qs}` : basePath, { scroll: false });
+          });
         }}
-        className="h-11 cursor-pointer rounded-md border border-input bg-card px-3 pr-8 text-sm font-medium text-foreground transition-colors hover:border-primary/30 focus-visible:ring-2 focus-visible:ring-ring"
+        className="h-11 cursor-pointer rounded-md border border-input bg-card px-3 pr-8 text-sm font-medium text-foreground transition-colors hover:border-primary/30 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-60"
         aria-label="Sort products"
       >
         {options.map((option) => (

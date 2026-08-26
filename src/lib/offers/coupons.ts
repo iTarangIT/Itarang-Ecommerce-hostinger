@@ -18,6 +18,15 @@ export interface CouponRule {
   minCart?: Paise;
   categories?: CategorySlug[];
   description: string;
+  /**
+   * One redemption per customer, ever.
+   *
+   * Enforced server-side at order placement against `coupon_redemptions`,
+   * never here: this module is deliberately client-safe so the cart can
+   * validate without a round trip, and the browser cannot be trusted to say
+   * whether somebody has used a code before.
+   */
+  oncePerCustomer?: boolean;
 }
 
 export const COUPONS: CouponRule[] = [
@@ -44,7 +53,10 @@ export const COUPONS: CouponRule[] = [
     kind: 'percent',
     value: 5,
     maxDiscount: 200000,
-    description: '5% off the cart, capped at ₹2,000.',
+    // The code says "first order" and nothing used to enforce it, so it was
+    // reusable without limit on every order a customer ever placed.
+    oncePerCustomer: true,
+    description: '5% off the cart, capped at ₹2,000. One use per customer.',
   },
   {
     code: 'FREESHIP',
@@ -54,6 +66,12 @@ export const COUPONS: CouponRule[] = [
     description: 'Waives the standard delivery charge on any order.',
   },
 ];
+
+/** The rule behind a code, if there is one. */
+export function couponRule(code: string): CouponRule | undefined {
+  const normalised = code.trim().toUpperCase();
+  return COUPONS.find((rule) => rule.code === normalised);
+}
 
 export type CouponResult =
   | { ok: true; coupon: AppliedCoupon }

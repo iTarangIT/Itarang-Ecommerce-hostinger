@@ -1,15 +1,20 @@
 import type { Metadata } from 'next';
+import { Suspense } from 'react';
 import Link from 'next/link';
-import { FlaskConical, Package, RefreshCw, UserRound } from 'lucide-react';
+import { AlertTriangle, BarChart3, FlaskConical, Package, RefreshCw, UserRound } from 'lucide-react';
 import { logoutAction } from '@/lib/auth/actions';
+import { syncInventoryFromHostingerAction } from '@/lib/admin/actions';
 import { currentUser } from '@/lib/auth/session';
 import { orders } from '@/lib/orders/postgres-repository';
+import { catalogHealth } from '@/lib/commerce/health';
+import { allProducts } from '@/lib/catalog/collections';
 import type { OrderStatus, PaymentStatus } from '@/lib/orders/types';
 import { OrderFilters, Pagination } from '@/components/admin/order-filters';
 import { formatPrice } from '@/lib/catalog/pricing';
 import { formatDate } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { StateBlock } from '@/components/ui/states';
+import { Skeleton } from '@/components/ui/skeleton';
 import { StatusPill } from '@/components/admin/status-pill';
 
 export const dynamic = 'force-dynamic';
@@ -56,9 +61,12 @@ export default async function AdminOrdersPage({
   const offset = Number.isFinite(parsedOffset) ? Math.max(0, parsedOffset) : 0;
 
   const repository = orders();
-  const [{ orders: list, total }, reconciliation, admin] = await Promise.all([
+  // The reconciliation report is a full inventory_baseline/stock_reservations
+  // join and has nothing to do with the current page of orders, but it used to
+  // be awaited alongside them — so every pagination click paid for it. It now
+  // streams in behind its own boundary and the table paints first.
+  const [{ orders: list, total }, admin] = await Promise.all([
     repository.listOrders({ search: q, status, paymentStatus, limit: PAGE_SIZE, offset }),
-    repository.reconciliationReport(),
     currentUser(),
   ]);
 
@@ -78,6 +86,13 @@ export default async function AdminOrdersPage({
           {admin ? (
             <span className="hidden text-sm text-muted-foreground sm:inline">{admin.email}</span>
           ) : null}
+          <Link
+            href="/admin/analytics"
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+          >
+            <BarChart3 className="h-4 w-4" />
+            Analytics
+          </Link>
           <form action={logoutAction}>
             <Button type="submit" variant="outline" size="sm">
               Sign out
@@ -85,6 +100,11 @@ export default async function AdminOrdersPage({
           </form>
         </div>
       </div>
+
+      {/* Streams in behind the order table rather than delaying it. */}
+      <Suspense fallback={null}>
+        <CatalogHealthBanner />
+      </Suspense>
 
       <OrderFilters current={{ q, status: params.status, payment: params.payment }} />
 
@@ -172,42 +192,186 @@ export default async function AdminOrdersPage({
         params={{ q, status: params.status, payment: params.payment }}
       />
 
-      {/* Reconciliation — Hostinger has no inventory write API, so stock sold
-          here has to be applied by hand in hPanel. */}
-      {reconciliation.length > 0 ? (
-        <section className="mt-10">
-          <h2 className="flex items-center gap-2 heading-3">
-            <RefreshCw className="h-4.5 w-4.5 text-accent-600" />
-            Stock to reconcile in hPanel
-          </h2>
-          <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">
-            Hostinger provides no inventory write API, so these quantities must be deducted
-            manually. The figures are units sold against the baseline last synced from Hostinger.
-          </p>
-          <div className="mt-4 overflow-x-auto rounded-lg border border-border">
-            <table className="w-full min-w-[32rem] text-left text-sm">
-              <thead className="bg-surface text-xs uppercase tracking-wide text-muted-foreground">
-                <tr>
-                  <th scope="col" className="px-4 py-3 font-semibold">Variant</th>
-                  <th scope="col" className="px-4 py-3 text-right font-semibold">Sold</th>
-                  <th scope="col" className="px-4 py-3 text-right font-semibold">Baseline</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border bg-card">
-                {reconciliation.map((row) => (
-                  <tr key={row.variantId}>
-                    <td className="tabular px-4 py-3 text-xs">{row.variantId}</td>
-                    <td className="tabular px-4 py-3 text-right font-semibold">{row.sold}</td>
-                    <td className="tabular px-4 py-3 text-right text-muted-foreground">
-                      {row.baseline}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      ) : null}
+      <Suspense fallback={<Skeleton className="mt-10 h-48 w-full rounded-lg" />}>
+        <ReconciliationPanel />
+      </Suspense>
     </div>
+  );
+}
+
+/**
+ * Warns when the live catalogue has drifted away from what the code knows.
+ *
+ * Renders nothing when everything matches, so it costs the admin no attention
+ * on a normal day.
+ */
+async function CatalogHealthBanner() {
+  const health = await catalogHealth();
+  const stale = health.unmapped.length;
+  const duplicates = health.duplicateSkus;
+
+  if (stale === 0 && duplicates.length === 0) return null;
+
+  return (
+    <section className="mt-6 rounded-lg border border-warning/40 bg-warning-soft p-4">
+      <h2 className="flex items-center gap-2 font-display text-sm font-semibold text-foreground">
+        <AlertTriangle className="h-4 w-4 shrink-0 text-warning" />
+        Catalogue needs attention
+      </h2>
+
+      {stale > 0 ? (
+        <div className="mt-2 text-sm text-muted-foreground">
+          <p>
+            <strong className="font-semibold text-foreground">
+              {stale} of {health.total} live product{health.total === 1 ? '' : 's'}
+            </strong>{' '}
+            {stale === 1 ? 'has' : 'have'} no enrichment entry, so {stale === 1 ? 'it is' : 'they are'}{' '}
+            filed by title matching and show no specifications, highlights, box contents, FAQs or
+            warranty — and match none of the catalogue filters.
+          </p>
+          <p className="mt-1.5">
+            An entry is keyed by Hostinger product id, so recreating a product in hPanel gives it a
+            new id and detaches it. Add the ids below to{' '}
+            <code className="rounded-sm bg-card px-1 py-0.5 text-xs">
+              src/lib/commerce/hostinger/enrichment.ts
+            </code>
+            :
+          </p>
+          <ul className="mt-2 space-y-1">
+            {health.unmapped.map((id) => (
+              <li key={id} className="tabular text-xs text-foreground">
+                {id}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {duplicates.length > 0 ? (
+        <div className="mt-3 text-sm text-muted-foreground">
+          <p>
+            <strong className="font-semibold text-foreground">Duplicate SKUs upstream.</strong> Each
+            of these is carried by more than one product, and our order items snapshot the SKU an
+            invoice is built from.
+          </p>
+          <ul className="mt-2 space-y-1">
+            {duplicates.map((entry) => (
+              <li key={entry.sku} className="tabular text-xs text-foreground">
+                {entry.sku} — {entry.productIds.join(', ')}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+/**
+ * Stock sold here that still has to be applied by hand in hPanel.
+ *
+ * Hostinger exposes no inventory write API, so our ledger and the merchant's
+ * own figures can only be brought back together manually.
+ */
+async function ReconciliationPanel() {
+  const [reconciliation, products] = await Promise.all([
+    orders().reconciliationReport(),
+    allProducts(),
+  ]);
+  if (reconciliation.length === 0) return null;
+
+  // A variant the merchant has since deleted upstream cannot be deducted in
+  // hPanel — there is nothing left to deduct it from. Those rows would
+  // otherwise sit in this list permanently, looking like outstanding work.
+  const liveVariantIds = new Set(products.flatMap((p) => p.variants.map((v) => v.id)));
+  const orphaned = reconciliation.filter((row) => !liveVariantIds.has(row.variantId));
+
+  return (
+    <section className="mt-10">
+      <h2 className="flex items-center gap-2 heading-3">
+        <RefreshCw className="h-4.5 w-4.5 text-accent-600" />
+        Stock to reconcile in hPanel
+      </h2>
+      <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">
+        Hostinger provides no inventory write API, so these quantities must be deducted in hPanel
+        by hand. Each figure is units sold here that Hostinger&rsquo;s own stock does not yet
+        account for.
+      </p>
+
+      <div className="mt-4 overflow-x-auto rounded-lg border border-border">
+        <table className="w-full min-w-[38rem] text-left text-sm">
+          <thead className="bg-surface text-xs uppercase tracking-wide text-muted-foreground">
+            <tr>
+              <th scope="col" className="px-4 py-3 font-semibold">Variant</th>
+              <th scope="col" className="px-4 py-3 text-right font-semibold">Sold, not deducted</th>
+              <th scope="col" className="px-4 py-3 text-right font-semibold">Our baseline</th>
+              <th scope="col" className="px-4 py-3 text-right font-semibold">Should become</th>
+              <th scope="col" className="px-4 py-3 text-right font-semibold">Baseline synced</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border bg-card">
+            {reconciliation.map((row) => (
+              <tr key={row.variantId}>
+                <td className="tabular px-4 py-3 text-xs">
+                  {row.variantId}
+                  {liveVariantIds.has(row.variantId) ? null : (
+                    <span className="ml-2 whitespace-nowrap rounded-sm bg-secondary px-1.5 py-0.5 text-2xs font-semibold uppercase text-muted-foreground">
+                      not in catalogue
+                    </span>
+                  )}
+                </td>
+                <td className="tabular px-4 py-3 text-right font-semibold">{row.sold}</td>
+                <td className="tabular px-4 py-3 text-right text-muted-foreground">
+                  {row.baseline}
+                </td>
+                <td className="tabular px-4 py-3 text-right font-semibold text-foreground">
+                  {Math.max(0, row.baseline - row.sold)}
+                </td>
+                <td className="px-4 py-3 text-right text-xs text-muted-foreground">
+                  {formatDate(row.syncedAt.toISOString())}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Order matters here, and getting it wrong oversells. */}
+      <div className="mt-4 rounded-lg border border-border bg-card p-4">
+        <h3 className="font-display text-sm font-semibold text-foreground">
+          After you have updated hPanel
+        </h3>
+        <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
+          <li>
+            In hPanel, set each variant above to the <strong>Should become</strong> figure.
+          </li>
+          <li>
+            Then press resync. It reads Hostinger fresh, adopts those numbers as our new
+            baseline, and marks the sales above as settled so they stop being subtracted a
+            second time.
+          </li>
+        </ol>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Pressing this <strong>before</strong> updating hPanel would settle the sales while
+          Hostinger still counts the stock as on hand, and the shop could oversell. Orders
+          still awaiting payment keep their reserved units either way.
+        </p>
+        {orphaned.length > 0 ? (
+          <p className="mt-2 text-sm text-muted-foreground">
+            {orphaned.length === 1 ? 'One row is' : `${orphaned.length} rows are`} marked{' '}
+            <strong>not in catalogue</strong>: the product was deleted or recreated upstream, so
+            there is nothing in hPanel left to deduct. Resyncing will not clear{' '}
+            {orphaned.length === 1 ? 'it' : 'them'} — {orphaned.length === 1 ? 'it is' : 'they are'}{' '}
+            a record of stock sold against a product that no longer exists.
+          </p>
+        ) : null}
+        <form action={syncInventoryFromHostingerAction} className="mt-3">
+          <Button type="submit" variant="outline" size="sm">
+            <RefreshCw className="h-4 w-4" />
+            I have updated hPanel &mdash; resync stock
+          </Button>
+        </form>
+      </div>
+    </section>
   );
 }

@@ -1,8 +1,6 @@
 import type { Metadata } from 'next';
-import { Suspense } from 'react';
 import { bestSellers } from '@/lib/catalog/collections';
 import { Breadcrumbs } from '@/components/ui/breadcrumbs';
-import { Skeleton } from '@/components/ui/skeleton';
 import { currentUser } from '@/lib/auth/session';
 import { orders } from '@/lib/orders/postgres-repository';
 import { AccountBody } from '@/components/account/account-body';
@@ -16,7 +14,10 @@ export const metadata: Metadata = {
 };
 
 export default async function AccountPage() {
-  const session = await currentUser();
+  // `bestSellers` depends on nothing above it, so it no longer waits behind the
+  // session lookup. The order history genuinely does depend on the session and
+  // still follows it.
+  const [session, suggestions] = await Promise.all([currentUser(), bestSellers(6)]);
   const user = session
     ? {
         email: session.email,
@@ -51,9 +52,7 @@ export default async function AccountPage() {
       </div>
 
       <div className="container py-8 lg:py-10">
-        <Suspense fallback={<Skeleton className="h-96 w-full" />}>
-          <AccountBody suggestions={await bestSellers(6)} user={user} orders={history} />
-        </Suspense>
+        <AccountBody suggestions={suggestions} user={user} orders={history} />
       </div>
     </>
   );

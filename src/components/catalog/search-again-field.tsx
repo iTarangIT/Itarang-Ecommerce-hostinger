@@ -2,13 +2,16 @@
 
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
-import { Search } from 'lucide-react';
+import { Loader2, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 /** Inline search field on the results page, so refining never needs the overlay. */
 export function SearchAgainField({ defaultValue = '' }: { defaultValue?: string }) {
   const router = useRouter();
   const [value, setValue] = React.useState(defaultValue);
+  // /search is a dynamic route, so submitting is a round trip with nothing to
+  // show for it until the results stream in.
+  const [pending, startTransition] = React.useTransition();
 
   React.useEffect(() => setValue(defaultValue), [defaultValue]);
 
@@ -19,7 +22,9 @@ export function SearchAgainField({ defaultValue = '' }: { defaultValue?: string 
       onSubmit={(event) => {
         event.preventDefault();
         const trimmed = value.trim();
-        router.push(trimmed ? `/search?q=${encodeURIComponent(trimmed)}` : '/search');
+        startTransition(() => {
+          router.push(trimmed ? `/search?q=${encodeURIComponent(trimmed)}` : '/search');
+        });
       }}
     >
       <div className="relative flex-1">
@@ -33,7 +38,8 @@ export function SearchAgainField({ defaultValue = '' }: { defaultValue?: string 
           className="h-12 w-full rounded-md border border-input bg-card pl-11 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-accent focus-visible:ring-2 focus-visible:ring-ring"
         />
       </div>
-      <Button type="submit" variant="primary" size="lg" className="shrink-0">
+      <Button type="submit" variant="primary" size="lg" className="shrink-0" disabled={pending}>
+        {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
         Search
       </Button>
     </form>

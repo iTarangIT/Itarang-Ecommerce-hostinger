@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { orders } from '@/lib/orders/postgres-repository';
+import { requireOrderAccess } from '@/lib/orders/checkout-auth';
 import { paymentProvider } from '@/lib/payments';
 import { callbackSchema, fieldErrors } from '@/lib/checkout/validation';
 
@@ -14,6 +15,19 @@ export const dynamic = 'force-dynamic';
  *
  * This path is an optimisation for the shopper's benefit: the webhook is the
  * authority, and will complete the order even if the browser never returns.
+ *
+ * Entitlement is checked before any of that, for the reasons its two siblings
+ * already do it. The signature check alone stops a forged *payment*, but it
+ * does not stop an anonymous caller from learning that an order number exists
+ * and what state it is in, and it does not stop them writing a `payments` row
+ * per request — `gatewayPaymentId` is theirs to choose, and the row was
+ * recorded before the signature verdict was acted on. `requireOrderAccess`
+ * closes all three: same-origin, entitled, rate limited, and 404 for "not
+ * yours" and "does not exist" alike so the order number is not an oracle.
+ *
+ * The browser that placed the order passes either as the signed-in owner or on
+ * the signed device cookie `grantOrderAccess` set at placement, so a session
+ * that lapsed between placing and paying still completes.
  */
 export async function POST(request: Request) {
   let body: unknown;
@@ -31,13 +45,11 @@ export async function POST(request: Request) {
     );
   }
 
+  const access = await requireOrderAccess(parsed.data.orderNumber, request);
+  if (!access.ok) return access.response;
+  const order = access.order;
+
   const repository = orders();
-  const order = await repository.findByOrderNumber(parsed.data.orderNumber);
-
-  if (!order) {
-    return NextResponse.json({ error: 'Order not found.' }, { status: 404 });
-  }
-
   const provider = paymentProvider();
   const result = await provider.verifyCallback(
     {

@@ -80,9 +80,34 @@ const nextConfig = {
     return [
       { source: '/:path*', headers: securityHeaders },
       {
-        // Nothing under /api is cacheable, and an intermediary caching an
-        // order response would serve one customer's data to another.
-        source: '/api/:path*',
+        // Three read-only catalogue endpoints, and only these three.
+        //
+        // They take a query string, read no cookie, no session and no header,
+        // and answer with public catalogue data that is identical for every
+        // visitor — so there is no customer data for an intermediary to leak.
+        // They are also the endpoints the browser hits repeatedly during
+        // ordinary use: search suggestions on every debounced keystroke,
+        // recently-viewed on every product page, cross-sell on every cart
+        // open. Under the blanket rule below, none of that could be reused.
+        //
+        // The list is exact, anchored with $ in the exclusion below, so a
+        // future /api/products/something does NOT inherit this and falls back
+        // to no-store. Adding an endpoint here means proving it carries
+        // nothing personal first.
+        source: '/api/:path(suggest|products|cross-sell)',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, s-maxage=60, stale-while-revalidate=300',
+          },
+        ],
+      },
+      {
+        // Everything else under /api stays uncacheable. An intermediary
+        // caching an order response would serve one customer's data to
+        // another, so this is the default and the exception above is the part
+        // that had to be argued for.
+        source: '/api/:path((?!(?:suggest|products|cross-sell)$).*)',
         headers: [{ key: 'Cache-Control', value: 'no-store, max-age=0' }],
       },
     ];

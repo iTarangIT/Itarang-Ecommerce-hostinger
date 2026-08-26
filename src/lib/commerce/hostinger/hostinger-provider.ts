@@ -60,15 +60,47 @@ export class HostingerCatalogProvider implements CatalogProvider {
     }
     if (this.inFlight) return this.inFlight;
 
-    this.inFlight = this.refresh().finally(() => {
-      this.inFlight = null;
-    });
+    this.inFlight = this.refresh()
+      .catch((error: unknown) => {
+        // An upstream blip used to take the whole storefront down with it: the
+        // rejection propagated to every caller sharing this promise, and every
+        // page that reads the catalogue — which is most of them — returned 500.
+        //
+        // A snapshot minutes past its TTL is a far better answer than an error
+        // page, so serve it and try again on the next request. Only a cold
+        // start with nothing cached still fails, and there is nothing else to
+        // give at that point.
+        if (this.snapshot) {
+          console.error(
+            `[hostinger] catalogue refresh failed, serving the snapshot from ` +
+              `${new Date(this.snapshot.fetchedAt).toISOString()}: ${(error as Error).message}`,
+          );
+          return this.snapshot;
+        }
+        throw error;
+      })
+      .finally(() => {
+        this.inFlight = null;
+      });
 
     return this.inFlight;
   }
 
   private async refresh(): Promise<Snapshot> {
-    const { products: raw } = await fetchProducts(100, 0);
+    const PAGE_SIZE = 100;
+    const { products: raw, count } = await fetchProducts(PAGE_SIZE, 0);
+
+    // The client asks for one page and the provider has always assumed that is
+    // the whole catalogue. Nothing checked, so a shop that grew past the page
+    // size would simply stop showing its newest products, with no error and no
+    // log line to explain it.
+    if (typeof count === 'number' && count > raw.length) {
+      console.error(
+        `[hostinger] catalogue truncated: the store reports ${count} products but only ` +
+          `${raw.length} were fetched (limit=${PAGE_SIZE}). Products beyond the first page ` +
+          'are missing from every surface. Pagination is needed here.',
+      );
+    }
 
     // Stock lives on a separate endpoint; skip the call entirely when the
     // merchant stock-manages nothing.
@@ -135,6 +167,22 @@ export class HostingerCatalogProvider implements CatalogProvider {
 
   async listOffers(): Promise<Offer[]> {
     return OFFERS;
+  }
+
+  /**
+   * Drop the cached snapshot so the next read goes upstream.
+   *
+   * Used by the inventory resync, where reading stock that is up to
+   * `HOSTINGER_CATALOG_REVALIDATE` seconds old would defeat the point: the
+   * admin has just changed those numbers in hPanel and is asking us to pick
+   * the change up.
+   *
+   * This clears one process's snapshot. The Next data cache behind it is keyed
+   * by the `catalog` tag and has to be invalidated separately, from a context
+   * that is allowed to — see `syncInventoryFromHostingerAction`.
+   */
+  invalidate(): void {
+    this.snapshot = null;
   }
 
   /** Snapshot metadata for the diagnostics route. */

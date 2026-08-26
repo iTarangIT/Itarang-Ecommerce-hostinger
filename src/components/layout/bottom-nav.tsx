@@ -54,7 +54,7 @@ export function BottomNav() {
         >
           <span className="relative">
             <ShoppingCart className="h-5 w-5" />
-            {cart.totals.itemCount > 0 ? (
+            {cart.hydrated && cart.totals.itemCount > 0 ? (
               <span className="tabular absolute -right-2 -top-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-accent px-1 text-[0.5625rem] font-bold text-accent-foreground">
                 {cart.totals.itemCount}
               </span>

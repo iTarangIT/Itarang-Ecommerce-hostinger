@@ -65,7 +65,8 @@ export async function POST(request: Request) {
   }
 
   if (!result.ok) {
-    const status = result.code === 'insufficient_stock' ? 409 : 400;
+    const status =
+      result.code === 'insufficient_stock' || result.code === 'price_changed' ? 409 : 400;
     return NextResponse.json(result, { status });
   }
 
