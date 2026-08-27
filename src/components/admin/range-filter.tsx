@@ -44,13 +44,25 @@ export function RangeFilter({
   currentMonth,
   months,
   basePath = '/admin/analytics',
+  carry,
 }: {
   current: RangeKey;
   currentMonth: string | null;
   months: string[];
   /** Which screen the controls navigate within. Analytics and funnel share them. */
   basePath?: string;
+  /**
+   * Other query parameters this screen owns, preserved across a range change.
+   *
+   * Without it, choosing a month would silently reset the funnel's segment back
+   * to everyone — the range and the segment are independent choices and neither
+   * should quietly undo the other.
+   */
+  carry?: Record<string, string>;
 }) {
+  const extra = Object.entries(carry ?? {});
+  const suffix = extra.map(([key, value]) => `&${key}=${encodeURIComponent(value)}`).join('');
+
   return (
     <div className="mt-6 space-y-3">
       <div className="flex flex-wrap gap-2">
@@ -59,7 +71,7 @@ export function RangeFilter({
           return (
             <Link
               key={preset.key}
-              href={`${basePath}?range=${preset.key}`}
+              href={`${basePath}?range=${preset.key}${suffix}`}
               aria-current={active ? 'page' : undefined}
               className={cn(
                 'rounded-md border px-3 py-2 text-sm font-medium transition-colors',
@@ -77,6 +89,9 @@ export function RangeFilter({
       {months.length > 0 ? (
         <form action={basePath} className="flex flex-wrap items-end gap-2">
           <input type="hidden" name="range" value="month" />
+          {extra.map(([key, value]) => (
+            <input key={key} type="hidden" name={key} value={value} />
+          ))}
           <div className="flex flex-col gap-1.5">
             <label htmlFor="month" className="text-xs font-medium text-muted-foreground">
               Or pick a month

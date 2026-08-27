@@ -53,6 +53,15 @@ export const FUNNEL_EVENTS = [
   'product_view',
   'buy_now',
   'add_to_cart',
+  /**
+   * The login wall.
+   *
+   * An anonymous visitor reached /checkout and was bounced to /login. Because
+   * placing an order requires an account, this is the last stage an unregistered
+   * visitor can reach, and the largest single drop in the product. Written
+   * server-side for the same reason `begin_checkout` is — see 0011.
+   */
+  'checkout_intent',
   'begin_checkout',
 ] as const;
 
@@ -121,7 +130,20 @@ export async function visitorContext(): Promise<VisitorContext> {
   return { visitorId, sessionId, freshVisitor, freshSession };
 }
 
-/** Read the visitor cookies without minting. Safe during a page render. */
+/**
+ * Read the visitor cookies without minting. Safe during a page render.
+ *
+ * All-or-nothing on purpose: a `funnel_events` row needs both ids, so there is
+ * nothing useful to return when only one survives.
+ *
+ * That makes it the wrong function for anything that needs only a visitor —
+ * `itarang_vsid` lapses after 30 minutes while `itarang_vid` lives for 180 days,
+ * so a returning shopper has a perfectly good visitor id and no session, and
+ * this returns `null` for them. Attribution used to be lost exactly there: a
+ * sign-in a week later, or an order placed after half an hour on the checkout
+ * page. Callers that can write cookies use `visitorContext()` instead, which
+ * mints the missing half rather than discarding the surviving one.
+ */
 export async function peekVisitor(): Promise<{ visitorId: string; sessionId: string } | null> {
   const store = await cookies();
   const visitorId = store.get(VISITOR_COOKIE)?.value;

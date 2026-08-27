@@ -116,6 +116,25 @@ describe.runIf(CONFIGURED)('funnel events', () => {
     expect(await countFor(who.visitorId)).toBe(1);
   });
 
+  it('records the login wall, and collapses a repeated bounce', async () => {
+    // Written server-side from /checkout for a signed-out visitor, so it carries
+    // no user_id. Bouncing off the wall twice in one visit is one visitor who
+    // could not check out, not two — the dedupe key already makes that true.
+    const who = visitor();
+
+    expect(await record({ event: 'checkout_intent', visitor: who })).toBe(true);
+    expect(await record({ event: 'checkout_intent', visitor: who })).toBe(false);
+
+    expect(await countFor(who.visitorId)).toBe(1);
+
+    const [row] = await query<{ event: string; user_id: number | null }>(
+      `SELECT event::text AS event, user_id FROM funnel_events WHERE visitor_id = $1::uuid`,
+      [who.visitorId],
+    );
+    expect(row?.event).toBe('checkout_intent');
+    expect(row?.user_id).toBeNull();
+  });
+
   it('collapses a repeated beacon in the same session', async () => {
     const who = visitor();
 

@@ -40,6 +40,10 @@ const KIND_LABELS: Record<string, string> = {
   product_view: 'Viewed a product',
   buy_now: 'Clicked Buy Now',
   add_to_cart: 'Added to cart',
+  // Only ever appears before this person had an account — /checkout records it
+  // for a signed-out visitor and then redirects them to sign in. Seeing it in a
+  // customer's timeline is the moment they stopped being anonymous.
+  checkout_intent: 'Hit the login wall (anonymous)',
   begin_checkout: 'Reached checkout',
   order_created: 'Placed an order',
   payment_pending: 'Payment started',

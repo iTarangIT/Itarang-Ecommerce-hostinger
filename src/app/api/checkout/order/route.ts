@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { placeOrder } from '@/lib/orders/place-order';
 import { fieldErrors, placeOrderSchema } from '@/lib/checkout/validation';
 import { grantOrderAccess } from '@/lib/orders/access';
-import { attributeOrder, peekVisitor } from '@/lib/analytics/events';
+import { attributeOrder, visitorContext } from '@/lib/analytics/events';
 import { requireCustomer } from '@/lib/orders/checkout-auth';
 import { databaseUnavailableMessage, isDatabaseUnavailable } from '@/lib/db/errors';
 
@@ -79,7 +79,14 @@ export async function POST(request: Request) {
   // can join browsing to purchase. Kept out of `placeOrder` deliberately: order
   // creation is a financial transaction and must not grow a dependency on an
   // analytics cookie. Failure here is swallowed inside `attributeOrder`.
-  await attributeOrder(result.order.id, await peekVisitor());
+  //
+  // `visitorContext`, not `peekVisitor`: the peek needs both cookies, and
+  // `itarang_vsid` expires after 30 minutes. A shopper who spent longer than
+  // that on the checkout page got no attribution row at all, which made their
+  // order invisible to the three derived funnel stages — it read as a
+  // conversion collapse rather than as a lapsed cookie. A route handler may
+  // write cookies, so mint the missing half rather than dropping the order.
+  await attributeOrder(result.order.id, await visitorContext());
 
   return NextResponse.json({
     ok: true,

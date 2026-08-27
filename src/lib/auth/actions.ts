@@ -12,7 +12,7 @@ import {
 import { LIMITS, callerIp, consume } from '@/lib/security/rate-limit';
 import { hashPassword, passwordProblem, verifyPassword } from './password';
 import { createSession, currentUser, destroyAllSessions, destroySession } from './session';
-import { linkVisitorToUser, peekVisitor } from '@/lib/analytics/events';
+import { linkVisitorToUser, visitorContext } from '@/lib/analytics/events';
 import {
   RESET_TTL_MINUTES,
   VERIFY_TTL_MINUTES,
@@ -152,8 +152,19 @@ export async function registerAction(
  * device the same person signs in from.
  */
 async function linkBrowsingHistory(userId: number): Promise<void> {
-  const visitor = await peekVisitor();
-  if (visitor) await linkVisitorToUser(visitor.visitorId, userId);
+  // `visitorContext`, not `peekVisitor`.
+  //
+  // `peekVisitor` needs both cookies and returns null when either is missing.
+  // `itarang_vsid` lapses after 30 minutes; `itarang_vid` lives for 180 days —
+  // so someone who browsed last week and signs in today has a visitor id and no
+  // session, and the peek discarded both. That silently dropped the single most
+  // valuable link there is: anonymous browsing to the account it turned into.
+  //
+  // A Server Action may write cookies, so mint the missing half instead. When
+  // the visitor is genuinely new this links an empty history, which is harmless
+  // and additive — and it seats the cookie so everything after this is linked.
+  const visitor = await visitorContext();
+  await linkVisitorToUser(visitor.visitorId, userId);
 }
 
 /* -------------------------------------------------------------- login */

@@ -3,11 +3,16 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { closePool, query } from '@/lib/db/pool';
 import { inspectDatabaseUrl, isLocalHost } from '@/lib/db/guard';
 import {
+  anonymousConversion,
+  anonymousVisitorDetail,
+  anonymousVisitors,
   attributionCoverage,
+  beaconCoverage,
   conversions,
   customerActivity,
   customerDetail,
   funnelCounts,
+  funnelVisitorCounts,
   productAudience,
   productFunnel,
 } from './funnel';
@@ -305,5 +310,192 @@ describe.runIf(CONFIGURED)('funnel reporting', () => {
 
   it('returns null for an unknown customer', async () => {
     expect(await customerDetail(2_147_483_600)).toBeNull();
+  });
+
+  /* --------------------------------------------------- anonymous funnel */
+
+  it('counts visitors as well as sessions', async () => {
+    // One person, three visits — the case a session-only funnel gets wrong.
+    // Browsing on Monday and buying on Friday is one success, not two failures.
+    const visitorId = randomUUID();
+    for (const _ of [1, 2, 3]) {
+      await addEvent({ event: 'visit', sessionId: randomUUID(), visitorId });
+    }
+
+    expect((await funnelCounts(FROM, TO)).visit).toBe(3);
+    expect((await funnelVisitorCounts(FROM, TO)).visit).toBe(1);
+  });
+
+  it('counts two visitors behind one address as two visitors', async () => {
+    // Identity is a server-minted cookie, and no IP is stored anywhere in the
+    // funnel — so a household, an office or a carrier NAT pool cannot collapse
+    // separate people into one. This is the property an IP-keyed funnel loses,
+    // and the reason the visitor id was chosen over the address.
+    await addEvent({ event: 'visit', sessionId: randomUUID(), visitorId: randomUUID() });
+    await addEvent({ event: 'visit', sessionId: randomUUID(), visitorId: randomUUID() });
+
+    expect((await funnelVisitorCounts(FROM, TO)).visit).toBe(2);
+  });
+
+  it('separates anonymous browsing from registered, without either losing rows', async () => {
+    const [user] = await query<{ id: number }>(`SELECT id FROM users ORDER BY id LIMIT 1`);
+    if (!user) return;
+
+    await addEvent({ event: 'product_view', sessionId: randomUUID(), productId: 'prod_x' });
+    await addEvent({
+      event: 'product_view',
+      sessionId: randomUUID(),
+      userId: user.id,
+      productId: 'prod_x',
+    });
+
+    const all = await funnelCounts(FROM, TO);
+    const anon = await funnelCounts(FROM, TO, 'anonymous');
+    const registered = await funnelCounts(FROM, TO, 'registered');
+
+    expect(all.product_view).toBe(2);
+    expect(anon.product_view).toBe(1);
+    expect(registered.product_view).toBe(1);
+  });
+
+  it('ends the anonymous funnel at the login wall', async () => {
+    // There is no guest checkout, so an anonymous visitor cannot reach an order.
+    // Those stages are zero because the schema guarantees it, not because the
+    // data is missing — and the wall itself is the stage that replaces them.
+    const session = randomUUID();
+    await addEvent({ event: 'add_to_cart', sessionId: session, productId: 'prod_x' });
+    await addEvent({ event: 'checkout_intent', sessionId: session });
+
+    const anon = await funnelCounts(FROM, TO, 'anonymous');
+
+    expect(anon.checkout_intent).toBe(1);
+    expect(anon.signed_in).toBe(0);
+    expect(anon.payment_initiated).toBe(0);
+    expect(anon.order_placed).toBe(0);
+  });
+
+  it('counts a session as signed in once its visitor is linked to an account', async () => {
+    // The regression this stage used to have: `signed_in` asked only for the
+    // user_id stamped at write time, so somebody who browsed signed-out and then
+    // registered was never counted — which is exactly the population the funnel
+    // exists to explain. It now resolves through `visitor_identities`, like
+    // every other identity query here.
+    const [user] = await query<{ id: number }>(`SELECT id FROM users ORDER BY id LIMIT 1`);
+    if (!user) return;
+
+    const visitorId = randomUUID();
+    await addEvent({ event: 'product_view', sessionId: randomUUID(), visitorId });
+
+    expect((await funnelCounts(FROM, TO)).signed_in).toBe(0);
+
+    await query(`INSERT INTO visitor_identities (visitor_id, user_id) VALUES ($1::uuid, $2)`, [
+      visitorId,
+      user.id,
+    ]);
+
+    expect((await funnelCounts(FROM, TO)).signed_in).toBe(1);
+    // And the event itself still says what was true when it happened.
+    const [row] = await query<{ user_id: number | null }>(
+      `SELECT user_id FROM funnel_events WHERE visitor_id = $1::uuid`,
+      [visitorId],
+    );
+    expect(row?.user_id).toBeNull();
+  });
+
+  it('reports what became of the anonymous visitors', async () => {
+    const [user] = await query<{ id: number }>(`SELECT id FROM users ORDER BY id LIMIT 1`);
+    if (!user) return;
+
+    // One who bounced, one who reached the wall and registered.
+    await addEvent({ event: 'visit', sessionId: randomUUID() });
+
+    const converter = randomUUID();
+    const session = randomUUID();
+    await addEvent({ event: 'visit', sessionId: session, visitorId: converter });
+    await addEvent({ event: 'checkout_intent', sessionId: session, visitorId: converter });
+    await query(`INSERT INTO visitor_identities (visitor_id, user_id) VALUES ($1::uuid, $2)`, [
+      converter,
+      user.id,
+    ]);
+
+    const conversion = await anonymousConversion(FROM, TO);
+
+    expect(conversion.visitors).toBe(2);
+    expect(conversion.reachedWall).toBe(1);
+    expect(conversion.registered).toBe(1);
+  });
+
+  it('lists anonymous visitors by behaviour alone', async () => {
+    const visitorId = randomUUID();
+    const first = randomUUID();
+    const second = randomUUID();
+
+    await addEvent({ event: 'product_view', sessionId: first, visitorId, productId: 'prod_x' });
+    await addEvent({ event: 'add_to_cart', sessionId: first, visitorId, productId: 'prod_x' });
+    await addEvent({ event: 'checkout_intent', sessionId: second, visitorId });
+
+    const rows = await anonymousVisitors(FROM, TO);
+    const row = rows.find((candidate) => candidate.visitorId === visitorId);
+
+    expect(row).toMatchObject({ sessions: 2, views: 1, cartAdds: 1, reachedWall: true });
+    expect(row?.converted).toBe(false);
+
+    const detail = await anonymousVisitorDetail(visitorId);
+    expect(detail?.sessions).toBe(2);
+    expect(detail?.timeline).toHaveLength(3);
+    // Newest first, and every entry carries the session it belonged to.
+    const times = detail!.timeline.map((entry) => Date.parse(entry.at));
+    expect([...times].sort((a, b) => b - a)).toEqual(times);
+    expect(detail!.timeline.every((entry) => entry.sessionId.length > 0)).toBe(true);
+  });
+
+  it('excludes a signed-in shopper from the anonymous visitor list', async () => {
+    const [user] = await query<{ id: number }>(`SELECT id FROM users ORDER BY id LIMIT 1`);
+    if (!user) return;
+
+    const visitorId = randomUUID();
+    await addEvent({
+      event: 'product_view',
+      sessionId: randomUUID(),
+      visitorId,
+      userId: user.id,
+      productId: 'prod_x',
+    });
+
+    const rows = await anonymousVisitors(FROM, TO);
+    expect(rows.some((row) => row.visitorId === visitorId)).toBe(false);
+  });
+
+  it('returns null for a visitor that has done nothing', async () => {
+    expect(await anonymousVisitorDetail(randomUUID())).toBeNull();
+  });
+
+  it('reports orders whose visitor was never seen browsing', async () => {
+    // The blind spot at the top of the funnel: the visitor cookie is minted by
+    // the beacon, so a blocked beacon means an order arrives attributed to a
+    // visitor with no browsing behind it. Reporting the size of that is the only
+    // honest option — hidden, it reads as a conversion collapse.
+    const [order] = await query<{ id: number; created_at: Date }>(
+      `SELECT id, created_at FROM orders WHERE payment_method <> 'cod' ORDER BY id LIMIT 1`,
+    );
+    if (!order) return;
+
+    const from = new Date(order.created_at);
+    from.setUTCHours(0, 0, 0, 0);
+    const to = new Date(from);
+    to.setUTCDate(to.getUTCDate() + 1);
+
+    await query(
+      `INSERT INTO order_attribution (order_id, visitor_id, session_id)
+       VALUES ($1, $2::uuid, $3::uuid)`,
+      [order.id, track(randomUUID()), randomUUID()],
+    );
+
+    const coverage = await beaconCoverage(from, to);
+
+    expect(coverage.attributed).toBe(1);
+    // That visitor wrote no events, so the funnel can see the order and nothing
+    // that led to it.
+    expect(coverage.withBrowsing).toBe(0);
   });
 });

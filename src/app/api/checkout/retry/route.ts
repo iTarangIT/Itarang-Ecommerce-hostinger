@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { orders } from '@/lib/orders/postgres-repository';
 import { requireOrderAccess } from '@/lib/orders/checkout-auth';
 import { paymentProvider } from '@/lib/payments';
+import { attributeOrder, visitorContext } from '@/lib/analytics/events';
 
 export const dynamic = 'force-dynamic';
 
@@ -78,6 +79,16 @@ export async function POST(request: Request) {
   const provider = paymentProvider();
   const intent = await provider.createIntent(order);
   await repository.setGatewayOrderId(order.id, intent.gatewayOrderId, provider.id);
+
+  // Attribute the order here too, not only at creation.
+  //
+  // An order whose first payment failed and was retried had no attribution row
+  // whenever the original attempt missed one — so the orders most worth
+  // understanding, the ones that needed a second try, were the ones the funnel
+  // could not see. `attributeOrder` is `ON CONFLICT (order_id) DO NOTHING`, so
+  // this can only fill a gap and can never overwrite the session that first
+  // produced the order.
+  await attributeOrder(order.id, await visitorContext());
 
   return NextResponse.json({
     ok: true,
