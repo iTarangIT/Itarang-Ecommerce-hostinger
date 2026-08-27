@@ -70,16 +70,16 @@ const SELF_SERVICE = [
 export default function SupportPage() {
   return (
     <>
-      <div className="border-b border-border bg-primary text-primary-foreground">
+      <div className="border-b border-border bg-ink-900 text-ink-50">
         <div className="container py-8 sm:py-12">
           <Breadcrumbs
             items={[{ label: 'Home', href: '/' }, { label: 'Support' }]}
-            className="[&_a]:text-primary-foreground/70 [&_span]:text-primary-foreground/90"
+            className="[&_a]:text-ink-50/70 [&_span]:text-ink-50/90"
           />
-          <h1 className="heading-1 mt-3 text-balance text-primary-foreground">
+          <h1 className="heading-1 mt-3 text-balance text-ink-50">
             Support &amp; Owner Centre
           </h1>
-          <p className="mt-3 max-w-2xl text-pretty text-sm leading-relaxed text-primary-foreground/75 sm:text-base">
+          <p className="mt-3 max-w-2xl text-pretty text-sm leading-relaxed text-ink-50/75 sm:text-base">
             Everything after the sale — warranty, installation, service and honest advice. Most
             things here you can do yourself in under a minute; if you would rather talk to an
             engineer, the number is below.
@@ -93,7 +93,7 @@ export default function SupportPage() {
               <Phone className="mt-0.5 h-5 w-5 shrink-0 text-accent" />
               <span>
                 <span className="block text-sm font-semibold">{SITE.phone}</span>
-                <span className="mt-0.5 flex items-center gap-1 text-xs text-primary-foreground/60">
+                <span className="mt-0.5 flex items-center gap-1 text-xs text-ink-50/60">
                   <Clock className="h-3 w-3" />
                   {SITE.supportHours}
                 </span>
@@ -106,7 +106,7 @@ export default function SupportPage() {
               <Mail className="mt-0.5 h-5 w-5 shrink-0 text-accent" />
               <span>
                 <span className="block text-sm font-semibold">{SITE.email}</span>
-                <span className="mt-0.5 block text-xs text-primary-foreground/60">
+                <span className="mt-0.5 block text-xs text-ink-50/60">
                   Orders, warranty and service
                 </span>
               </span>
@@ -118,7 +118,7 @@ export default function SupportPage() {
               <MessageCircle className="mt-0.5 h-5 w-5 shrink-0 text-accent" />
               <span>
                 <span className="block text-sm font-semibold">WhatsApp</span>
-                <span className="mt-0.5 block text-xs text-primary-foreground/60">
+                <span className="mt-0.5 block text-xs text-ink-50/60">
                   Send a photo of your setup
                 </span>
               </span>

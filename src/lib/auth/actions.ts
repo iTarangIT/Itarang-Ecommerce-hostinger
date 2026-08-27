@@ -12,6 +12,7 @@ import {
 import { LIMITS, callerIp, consume } from '@/lib/security/rate-limit';
 import { hashPassword, passwordProblem, verifyPassword } from './password';
 import { createSession, currentUser, destroyAllSessions, destroySession } from './session';
+import { linkVisitorToUser, visitorContext } from '@/lib/analytics/events';
 import {
   RESET_TTL_MINUTES,
   VERIFY_TTL_MINUTES,
@@ -136,8 +137,34 @@ export async function registerAction(
   await sendMail(verifyEmailMessage(user.email, token));
 
   await createSession(user.id, await requestMeta());
+  await linkBrowsingHistory(user.id);
 
   redirect(safeNext(formData.get('next')) ?? '/account?welcome=1');
+}
+
+
+/**
+ * Attach the browsing that led here to the account that just authenticated.
+ *
+ * Additive and resolved at query time — prior `funnel_events` keep the
+ * `user_id` they had when they happened. Rewriting them would misreport what
+ * was actually known at the time, and would have to be redone on every new
+ * device the same person signs in from.
+ */
+async function linkBrowsingHistory(userId: number): Promise<void> {
+  // `visitorContext`, not `peekVisitor`.
+  //
+  // `peekVisitor` needs both cookies and returns null when either is missing.
+  // `itarang_vsid` lapses after 30 minutes; `itarang_vid` lives for 180 days —
+  // so someone who browsed last week and signs in today has a visitor id and no
+  // session, and the peek discarded both. That silently dropped the single most
+  // valuable link there is: anonymous browsing to the account it turned into.
+  //
+  // A Server Action may write cookies, so mint the missing half instead. When
+  // the visitor is genuinely new this links an empty history, which is harmless
+  // and additive — and it seats the cookie so everything after this is linked.
+  const visitor = await visitorContext();
+  await linkVisitorToUser(visitor.visitorId, userId);
 }
 
 /* -------------------------------------------------------------- login */
@@ -188,6 +215,7 @@ export async function loginAction(
 
   await clearFailedLogins(row.id);
   await createSession(row.id, await requestMeta());
+  await linkBrowsingHistory(row.id);
 
   redirect(safeNext(formData.get('next')) ?? (row.role === 'admin' ? '/admin' : '/account'));
 }

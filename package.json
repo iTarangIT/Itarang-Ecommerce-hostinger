@@ -18,6 +18,7 @@
     "db:reset": "npm run db -- reset",
     "db:sweep": "npm run db -- sweep",
     "admin:create": "node --env-file-if-exists=.env.local scripts/admin-create.mts",
+    "hostinger:probe": "node --env-file-if-exists=.env.local scripts/hostinger-probe.mts",
     "test": "vitest run",
     "test:watch": "vitest",
     "verify": "npm run typecheck && npm run lint && npm run build && npm run test"

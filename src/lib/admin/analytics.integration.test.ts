@@ -401,5 +401,151 @@ describe.skipIf(!CONFIGURED)('admin analytics', () => {
       const range = await resolveRange('today');
       expect(range.to.getTime() - range.from.getTime()).toBe(24 * 60 * 60 * 1000);
     });
+
+    /* ------------------------------------------------------- custom range */
+
+    it('spans exactly one day when start and end are the same date', async () => {
+      const range = await resolveRange('custom', undefined, {
+        from: '2099-04-10',
+        to: '2099-04-10',
+      });
+
+      expect(range.key).toBe('custom');
+      expect(range.error).toBeNull();
+      expect(range.to.getTime() - range.from.getTime()).toBe(24 * 60 * 60 * 1000);
+    });
+
+    it('includes the end date rather than stopping at its start', async () => {
+      const range = await resolveRange('custom', undefined, {
+        from: '2099-04-01',
+        to: '2099-04-15',
+      });
+
+      // Fifteen days, not fourteen: the end date the admin picked is a day they
+      // expect counted, so the exclusive bound is the start of the 16th.
+      const days = (range.to.getTime() - range.from.getTime()) / (24 * 60 * 60 * 1000);
+      expect(days).toBe(15);
+      expect(range.to.toISOString()).toBe('2099-04-15T18:30:00.000Z');
+    });
+
+    it('starts a custom range at midnight IST, not midnight UTC', async () => {
+      const range = await resolveRange('custom', undefined, {
+        from: '2099-04-01',
+        to: '2099-04-01',
+      });
+
+      // 00:00 IST on 1 April is 18:30 UTC on 31 March.
+      expect(range.from.toISOString()).toBe('2099-03-31T18:30:00.000Z');
+    });
+
+    it('agrees with the month preset over the same calendar month', async () => {
+      const asMonth = await resolveRange('month', '2099-04');
+      const asCustom = await resolveRange('custom', undefined, {
+        from: '2099-04-01',
+        to: '2099-04-30',
+      });
+
+      // The two routes to one window must not disagree by so much as a second.
+      expect(asCustom.from.getTime()).toBe(asMonth.from.getTime());
+      expect(asCustom.to.getTime()).toBe(asMonth.to.getTime());
+      expect((await revenue(asCustom.from, asCustom.to)).gross).toBe(
+        (await revenue(asMonth.from, asMonth.to)).gross,
+      );
+    });
+
+    it('keeps the window half-open so an instant lands in exactly one bucket', async () => {
+      const first = await resolveRange('custom', undefined, {
+        from: '2099-04-01',
+        to: '2099-04-15',
+      });
+      const second = await resolveRange('custom', undefined, {
+        from: '2099-04-16',
+        to: '2099-04-30',
+      });
+
+      expect(first.to.getTime()).toBe(second.from.getTime());
+    });
+
+    it('refuses a start after the end and keeps the range that was on screen', async () => {
+      const range = await resolveRange('custom', undefined, {
+        from: '2099-04-15',
+        to: '2099-04-01',
+        prev: 'last_month',
+      });
+      const previous = await resolveRange('last_month');
+
+      expect(range.key).toBe('last_month');
+      expect(range.error).toMatch(/must not be after/i);
+      // Real numbers, not an empty dashboard that reads like a collapse.
+      expect(range.from.getTime()).toBe(previous.from.getTime());
+      expect(range.to.getTime()).toBe(previous.to.getTime());
+    });
+
+    it('refuses a date that does not exist', async () => {
+      // `to_date` would silently roll this to 2 March and report a window
+      // nobody asked for.
+      const range = await resolveRange('custom', undefined, {
+        from: '2099-02-30',
+        to: '2099-03-05',
+        prev: 'today',
+      });
+
+      expect(range.key).toBe('today');
+      expect(range.error).toMatch(/not a real date/i);
+    });
+
+    it('refuses a half-filled range', async () => {
+      const range = await resolveRange('custom', undefined, { from: '2099-04-01', prev: 'today' });
+
+      expect(range.key).toBe('today');
+      expect(range.error).toMatch(/both a start and an end/i);
+    });
+
+    it('falls back to this month when there is nothing to go back to', async () => {
+      const range = await resolveRange('custom', undefined, { from: 'rubbish', to: 'rubbish' });
+      const current = await resolveRange('this_month');
+
+      expect(range.key).toBe('this_month');
+      expect(range.error).not.toBeNull();
+      expect(range.from.getTime()).toBe(current.from.getTime());
+    });
+
+    it('does not let a rejected range echo its dates back into the form', async () => {
+      const range = await resolveRange('custom', undefined, {
+        from: '2099-04-15',
+        to: '2099-04-01',
+        prev: 'today',
+      });
+
+      // The resolved range is `today`, so reporting custom dates alongside it
+      // would label the screen with a window it is not showing.
+      expect(range.customFrom).toBeNull();
+      expect(range.customTo).toBeNull();
+      // But what was typed still comes back, so the admin corrects the field
+      // that was wrong instead of retyping both.
+      expect(range.requestedFrom).toBe('2099-04-15');
+      expect(range.requestedTo).toBe('2099-04-01');
+    });
+
+    it('leaves every preset exactly as it was', async () => {
+      // The regression guard for this feature: a custom range is an addition,
+      // and none of the six windows that already existed may move.
+      const presets = ['today', 'this_month', 'last_month', 'last_3_months', 'last_6_months'] as const;
+
+      for (const key of presets) {
+        const range = await resolveRange(key);
+        expect(range.key).toBe(key);
+        expect(range.error).toBeNull();
+        expect(range.customFrom).toBeNull();
+        expect(range.customTo).toBeNull();
+        // Midnight IST is 18:30 UTC the previous day, for every one of them.
+        expect(range.from.toISOString()).toMatch(/T18:30:00\.000Z$/);
+      }
+
+      const month = await resolveRange('month', '2099-04');
+      expect(month.key).toBe('month');
+      expect(month.from.toISOString()).toBe('2099-03-31T18:30:00.000Z');
+      expect(month.to.toISOString()).toBe('2099-04-30T18:30:00.000Z');
+    });
   });
 });

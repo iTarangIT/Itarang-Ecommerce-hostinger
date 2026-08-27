@@ -188,7 +188,15 @@ export async function GET() {
       ? {
           count: parsedProducts.data.count ?? parsedProducts.data.products.length,
           returned: parsedProducts.data.products.length,
-          unmappedProducts: unmappedProductIds(parsedProducts.data.products.map((p) => p.id)),
+          unmappedProducts: unmappedProductIds(
+            parsedProducts.data.products.map((p) => ({
+              productId: p.id,
+              title: p.title,
+              subtitle: p.subtitle,
+              slug: p.url_handle ?? p.slug ?? p.id,
+              skus: p.variants.map((variant) => variant.sku),
+            })),
+          ),
           variantsWithStock: stockByVariant.size,
         }
       : null,

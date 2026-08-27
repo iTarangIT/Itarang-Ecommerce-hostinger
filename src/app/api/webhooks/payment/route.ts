@@ -1,6 +1,7 @@
-import { NextResponse } from 'next/server';
+import { after, NextResponse } from 'next/server';
 import { orders } from '@/lib/orders/postgres-repository';
 import { paymentProvider } from '@/lib/payments';
+import { drainInventoryQueue } from '@/lib/orders/inventory-push';
 
 export const dynamic = 'force-dynamic';
 
@@ -131,6 +132,32 @@ export async function POST(request: Request) {
     );
 
     await repository.completeWebhookEvent(provider.id, result.eventId);
+
+    // Push the sold units to Hostinger *after* this response is sent.
+    //
+    // `after` is what keeps the gateway's 200 off the critical path: Razorpay
+    // must not wait on Hostinger, and a Hostinger outage must never turn a
+    // successfully applied payment into a 500 that gets retried. The queue is
+    // durable, so anything not drained here is picked up by the next webhook,
+    // the admin button, or the CLI.
+    if (updated?.paymentStatus === 'paid') {
+      after(async () => {
+        try {
+          const outcome = await drainInventoryQueue();
+          if (outcome.claimed > 0) {
+            console.info(
+              `[inventory] drained ${outcome.claimed}: applied=${outcome.applied} ` +
+                `alreadyApplied=${outcome.alreadyApplied} drift=${outcome.drift} ` +
+                `failed=${outcome.failed} skipped=${outcome.skipped}`,
+            );
+          }
+        } catch (error) {
+          // Deliberately swallowed. The payment is already recorded and
+          // acknowledged; the queue keeps the work.
+          console.error(`[inventory] drain failed: ${(error as Error).message}`);
+        }
+      });
+    }
 
     return NextResponse.json({
       ok: true,

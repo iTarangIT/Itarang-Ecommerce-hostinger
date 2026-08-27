@@ -62,14 +62,14 @@ export function Header({ categories }: { categories: NavCategory[] }) {
               <Link
                 key={link.href}
                 href={link.href}
-                className="text-muted-foreground transition-colors hover:text-accent-600"
+                className="text-muted-foreground transition-colors hover:text-primary-600"
               >
                 {link.label}
               </Link>
             ))}
             <a
               href={SITE.phoneHref}
-              className="inline-flex items-center gap-1.5 font-medium text-foreground transition-colors hover:text-accent-600"
+              className="inline-flex items-center gap-1.5 font-medium text-foreground transition-colors hover:text-primary-600"
             >
               <Phone className="h-3.5 w-3.5" />
               {SITE.phone}
@@ -101,7 +101,7 @@ export function Header({ categories }: { categories: NavCategory[] }) {
                 href={link.href}
                 className={cn(
                   'flex h-11 items-center rounded-md px-3 text-sm font-medium transition-colors',
-                  active ? 'text-accent-600' : 'text-foreground hover:text-accent-600',
+                  active ? 'text-primary-600' : 'text-foreground hover:text-primary-600',
                 )}
               >
                 {link.label}

@@ -171,6 +171,46 @@ const COMMITTED_RESERVATIONS = `
 
 /* -------------------------------------------------------- implementation */
 
+/**
+ * Group consumed reservations by variant.
+ *
+ * One order can hold several reservation rows for the same variant; the push
+ * needs one job per variant carrying the total, and the ids of exactly the rows
+ * that total came from.
+ */
+function groupByVariant(
+  rows: Array<{ id: string; variant_id: string; quantity: number }>,
+): Map<string, Array<{ id: string; quantity: number }>> {
+  const grouped = new Map<string, Array<{ id: string; quantity: number }>>();
+  for (const row of rows) {
+    const bucket = grouped.get(row.variant_id) ?? [];
+    bucket.push({ id: row.id, quantity: row.quantity });
+    grouped.set(row.variant_id, bucket);
+  }
+  return grouped;
+}
+
+/**
+ * The Hostinger product id a variant was sold under.
+ *
+ * The write endpoint is addressed by product *and* variant, but
+ * `stock_reservations` only knows the variant. `order_items` already snapshots
+ * both, so the answer is on the order itself and needs no catalogue call —
+ * which matters, because this runs inside the payment transaction.
+ */
+async function productIdForVariant(
+  client: PoolClient,
+  orderId: number,
+  variantId: string,
+): Promise<string | null> {
+  const row = await client.query<{ product_id: string }>(
+    `SELECT product_id FROM order_items
+      WHERE order_id = $1 AND variant_id = $2 LIMIT 1`,
+    [orderId, variantId],
+  );
+  return row.rows[0]?.product_id ?? null;
+}
+
 export class PostgresOrderRepository implements OrderRepository, CustomerAwareRepository {
   /**
    * Load items for orders read on a *transaction* client.
@@ -772,11 +812,46 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
       // Paid means the stock is genuinely gone; abandoned reservations are
       // released by the TTL instead.
       if (status === 'paid') {
-        await client.query(
+        const consumed = await client.query<{ id: string; variant_id: string; quantity: number }>(
           `UPDATE stock_reservations SET state = 'consumed'
-            WHERE order_id = $1 AND state = 'active'`,
+            WHERE order_id = $1 AND state = 'active'
+            RETURNING id, variant_id, quantity`,
           [orderId],
         );
+
+        // Enqueue the Hostinger push in this same transaction — the
+        // transactional outbox. A job cannot exist without the payment, and the
+        // payment cannot commit without the job, so there is no window where a
+        // sale is recorded but the deduction is lost.
+        //
+        // Nothing is sent from here. The queue is drained outside the
+        // transaction, because a 15-second network call has no business
+        // holding a row lock on a paid order, and a Hostinger outage must never
+        // roll back money we have already taken.
+        //
+        // This runs whether or not the push is switched on: the queue is then a
+        // durable record of what is owed upstream, and turning the feature on
+        // later settles the backlog instead of losing it. `RETURNING` is what
+        // makes the job settle exactly the rows it counted, rather than
+        // re-reading by (variant, state) and sweeping up later sales.
+        for (const [variantId, rows] of groupByVariant(consumed.rows)) {
+          const productId = await productIdForVariant(client, orderId, variantId);
+          if (!productId) continue;
+
+          await client.query(
+            `INSERT INTO inventory_sync_jobs
+               (order_id, variant_id, hostinger_product_id, units, reservation_ids)
+             VALUES ($1, $2, $3, $4, $5::bigint[])
+             ON CONFLICT (order_id, variant_id) DO NOTHING`,
+            [
+              orderId,
+              variantId,
+              productId,
+              rows.reduce((sum, row) => sum + row.quantity, 0),
+              rows.map((row) => row.id),
+            ],
+          );
+        }
       }
 
       const [hydrated] = await this.hydrateWithin(client, updated.rows);

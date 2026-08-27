@@ -42,7 +42,7 @@ export function AnnouncementBar() {
 
   return (
     <div
-      className="relative bg-primary text-primary-foreground"
+      className="relative bg-ink-900 text-ink-50"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
     >
@@ -67,7 +67,7 @@ export function AnnouncementBar() {
           }
         }}
         aria-label="Dismiss announcement"
-        className="absolute right-1 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-sm text-primary-foreground/70 transition-colors hover:bg-white/10 hover:text-primary-foreground sm:right-3"
+        className="absolute right-1 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-sm text-ink-50/70 transition-colors hover:bg-white/10 hover:text-ink-50 sm:right-3"
       >
         <X className="h-3.5 w-3.5" />
       </button>

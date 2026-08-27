@@ -185,13 +185,20 @@ export function mapProduct(
   product: HostingerProduct,
   inventory: Map<string, number>,
 ): Product {
-  const enrichment = resolveEnrichment(product.id, product.title, product.subtitle);
+  const slug = product.url_handle ?? product.slug ?? product.id;
+  const enrichment = resolveEnrichment({
+    productId: product.id,
+    title: product.title,
+    subtitle: product.subtitle,
+    slug,
+    skus: product.variants.map((variant) => variant.sku),
+  });
   const subtitle = product.subtitle ?? '';
   const description = htmlToParagraphs(product.description);
 
   return {
     id: product.id,
-    slug: product.url_handle ?? product.slug ?? product.id,
+    slug,
     title: product.title,
     subtitle,
     category: enrichment.category,

@@ -6,6 +6,8 @@ import { currentUser } from '@/lib/auth/session';
 import { orders } from '@/lib/orders/postgres-repository';
 import { allProducts } from '@/lib/catalog/collections';
 import { invalidateCatalogueSnapshot } from '@/lib/commerce/health';
+import { resolveCatalogueAlert, syncCatalogue } from '@/lib/commerce/catalogue-sync';
+import { drainInventoryQueue } from '@/lib/orders/inventory-push';
 import { canTransitionOrder } from '@/lib/orders/state-machine';
 import type { OrderStatus } from '@/lib/orders/types';
 
@@ -56,13 +58,18 @@ export async function updateOrderStatusAction(formData: FormData): Promise<void>
 }
 
 /**
- * Re-mirror Hostinger's stock after the admin has deducted sold units in hPanel.
+ * Re-mirror Hostinger's stock, and refresh the catalogue mirror.
  *
- * Hostinger exposes no inventory write API, so our ledger and the merchant's
- * own figures can only be brought back together by hand. Until this existed
- * nothing ever wrote `inventory_baseline` after the first order for a variant:
- * stock could only ratchet downwards, a restock upstream was invisible, and
- * every reconciled sale went on being subtracted forever.
+ * This began as the manual half of the inventory loop, for a time when nothing
+ * could write to Hostinger at all: the admin deducted sold units by hand in
+ * hPanel and pressed this to re-read them. Automatic pushing now handles that
+ * (`orders/inventory-push.ts`), and this remains as the fallback and as the way
+ * to pick up a restock — a number only ever raised upstream, which no sale of
+ * ours would otherwise reveal.
+ *
+ * Before it existed, nothing wrote `inventory_baseline` after the first order
+ * for a variant: stock could only ratchet downwards, a restock upstream was
+ * invisible, and every reconciled sale went on being subtracted forever.
  *
  * The read is deliberately uncached. The admin has just changed these numbers
  * in hPanel and is asking us to pick the change up, so a snapshot up to
@@ -88,11 +95,87 @@ export async function syncInventoryFromHostingerAction(): Promise<void> {
     return;
   }
 
+  // Mirror the catalogue before reconciling stock.
+  //
+  // This is where duplicate SKUs and slugs are caught: `catalogue_skus.sku` is
+  // a primary key, so a second product cannot claim one that is taken. A
+  // collision that already exists upstream is left on sale and alerted — see
+  // `catalogue-sync.ts` for why a sync must never withdraw a live product —
+  // and only a genuinely new arrival is quarantined.
+  //
+  // Errors are deliberately not swallowed. A mirror that fails quietly would
+  // stop preventing duplicates while still looking healthy — the precise
+  // failure mode `commerce/health.ts` was written to complain about.
+  const mirror = await syncCatalogue(products);
+
+  if (mirror.productsQuarantined > 0) {
+    console.warn(
+      `[admin] catalogue sync quarantined ${mirror.productsQuarantined} new product(s): ` +
+        mirror.quarantined.map((row) => `${row.productId} (${row.reason} ${row.subject})`).join(', '),
+    );
+  }
+
+  if (mirror.productsGrandfathered > 0) {
+    console.warn(
+      `[admin] ${mirror.productsGrandfathered} existing collision(s) left on sale: ` +
+        mirror.grandfathered
+          .map((row) => `${row.productId} (${row.reason} ${row.subject})`)
+          .join(', '),
+    );
+  }
+
   const result = await orders().reconcileInventory(entries);
 
   console.info(
     `[admin] ${actor} resynced inventory from Hostinger: ` +
-      `${result.variants} variant(s), ${result.reservations} sale(s) marked reconciled`,
+      `${result.variants} variant(s), ${result.reservations} sale(s) marked reconciled; ` +
+      `catalogue mirror ${mirror.productsActive} active, ` +
+      `${mirror.productsGrandfathered} colliding but on sale, ` +
+      `${mirror.productsQuarantined} quarantined, ${mirror.alertsRaised} alert(s)`,
+  );
+
+  revalidatePath('/admin');
+}
+
+/**
+ * Acknowledge a catalogue alert.
+ *
+ * Resolving is not fixing. The duplicate still exists upstream in hPanel; this
+ * only records that a human has seen it, so the banner stops competing for
+ * attention with problems nobody has looked at yet. If the same collision is
+ * observed on the next sync the alert re-opens by itself.
+ */
+export async function resolveCatalogueAlertAction(formData: FormData): Promise<void> {
+  const actor = await requireAdminActor();
+
+  const kind = String(formData.get('kind') ?? '');
+  const subject = String(formData.get('subject') ?? '');
+  if (!kind || !subject) return;
+
+  await resolveCatalogueAlert(kind, subject);
+  console.info(`[admin] ${actor} acknowledged catalogue alert ${kind}:${subject}`);
+
+  revalidatePath('/admin');
+}
+
+/**
+ * Push queued stock deductions to Hostinger now.
+ *
+ * The webhook already drains after each payment, so this is for the cases that
+ * did not settle first time: a Hostinger outage, an exhausted retry, or a
+ * backlog built up while the push was switched off. Safe to press repeatedly —
+ * every job re-reads the live quantity and decides again, so a second press
+ * cannot double-decrement.
+ */
+export async function pushInventoryToHostingerAction(): Promise<void> {
+  const actor = await requireAdminActor();
+
+  const outcome = await drainInventoryQueue(50);
+
+  console.info(
+    `[admin] ${actor} drained the inventory queue: claimed=${outcome.claimed} ` +
+      `applied=${outcome.applied} alreadyApplied=${outcome.alreadyApplied} ` +
+      `drift=${outcome.drift} failed=${outcome.failed} skipped=${outcome.skipped}`,
   );
 
   revalidatePath('/admin');

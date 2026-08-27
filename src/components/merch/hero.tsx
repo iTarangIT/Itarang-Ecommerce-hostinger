@@ -65,7 +65,7 @@ export function Hero() {
   return (
     <section
       aria-label="Featured"
-      className="relative overflow-hidden bg-primary text-primary-foreground"
+      className="relative overflow-hidden bg-ink-900 text-ink-50"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
       onFocusCapture={() => setPaused(true)}
@@ -74,7 +74,7 @@ export function Hero() {
       {/* Soft brand wash — kept subtle so product art stays the focus. */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute -right-40 -top-32 h-[34rem] w-[34rem] rounded-full bg-accent/15 blur-3xl"
+        className="pointer-events-none absolute -right-40 -top-32 h-[34rem] w-[34rem] rounded-full bg-primary-400/20 blur-3xl"
       />
       <div
         aria-hidden="true"
@@ -83,11 +83,11 @@ export function Hero() {
 
       <div className="container relative grid items-center gap-8 py-10 sm:py-14 lg:grid-cols-12 lg:gap-12 lg:py-20">
         <div key={index} className="animate-fade-up lg:col-span-6">
-          <p className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5 text-2xs font-semibold uppercase tracking-[0.14em] text-accent">
+          <p className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5 text-2xs font-semibold uppercase tracking-[0.14em] text-primary-300">
             {slide.eyebrow}
           </p>
-          <h1 className="heading-1 mt-4 text-balance text-primary-foreground">{slide.title}</h1>
-          <p className="mt-4 max-w-xl text-pretty text-sm leading-relaxed text-primary-foreground/75 sm:text-base">
+          <h1 className="heading-1 mt-4 text-balance text-ink-50">{slide.title}</h1>
+          <p className="mt-4 max-w-xl text-pretty text-sm leading-relaxed text-ink-50/75 sm:text-base">
             {slide.body}
           </p>
 
@@ -95,9 +95,9 @@ export function Hero() {
             {slide.points.map((point) => (
               <li
                 key={point}
-                className="flex items-center gap-1.5 text-sm text-primary-foreground/85"
+                className="flex items-center gap-1.5 text-sm text-ink-50/85"
               >
-                <Check className="h-4 w-4 shrink-0 text-accent" />
+                <Check className="h-4 w-4 shrink-0 text-primary-300" />
                 {point}
               </li>
             ))}
@@ -112,7 +112,7 @@ export function Hero() {
               href={slide.secondary.href}
               size="lg"
               variant="outline"
-              className="border-white/25 bg-transparent text-primary-foreground hover:border-white/50 hover:bg-white/10"
+              className="border-white/25 bg-transparent text-ink-50 hover:border-white/50 hover:bg-white/10"
             >
               {slide.secondary.label}
             </ButtonLink>
@@ -152,7 +152,7 @@ export function Hero() {
         </div>
         <Link
           href="/search"
-          className="group hidden items-center gap-1.5 text-sm font-medium text-primary-foreground/70 transition-colors hover:text-accent sm:inline-flex"
+          className="group hidden items-center gap-1.5 text-sm font-medium text-ink-50/70 transition-colors hover:text-primary-300 sm:inline-flex"
         >
           Browse the full range
           <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />

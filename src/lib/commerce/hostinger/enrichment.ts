@@ -35,6 +35,22 @@ export interface ProductEnrichment {
   relatedProductIds?: string[];
   /** Lower sorts earlier under "Best selling". */
   popularityRank?: number;
+  /**
+   * Other identities this entry also answers to.
+   *
+   * The record below is keyed by Hostinger product id, and that id is not
+   * stable: recreating a product in hPanel mints a new one and silently
+   * detaches its entry. That has already happened to this catalogue twice, the
+   * second time to all six products at once.
+   *
+   * A SKU is chosen by the merchant and a url handle is derived from the title,
+   * so both usually survive what a product id does not. Listing them here lets
+   * one entry be found by whichever identity outlived the change.
+   */
+  match?: {
+    skus?: string[];
+    slugs?: string[];
+  };
 }
 
 /**
@@ -49,6 +65,36 @@ export interface ProductEnrichment {
  *
  * If a figure here disagrees with hPanel, hPanel is right and this file is
  * stale.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT IS AND IS NOT ATTACHED
+ *
+ * Every product id keyed below was deleted from hPanel when the catalogue was
+ * recreated. The entries themselves are still correct — they are reattached to
+ * the products that replaced them through `match`, by url handle where the SKU
+ * is unusable.
+ *
+ * Three live products are deliberately left to the title fallback:
+ *
+ *   iTarang 900VA Inverter + 150Ah Battery Combo
+ *     Two entries describe a 900VA inverter paired with a 150Ah battery and
+ *     both are filed under combos — `ITG-INV-900VA-150AH` and
+ *     `ITR-CMB-900-150`. Nothing in the live copy separates them, and picking
+ *     one would state a warranty and a price positioning nobody confirmed.
+ *
+ *   Tarang Home Inverter 900VA
+ *     Same pair of candidates, read the other way: `ITG-INV-900VA-150AH` is a
+ *     900VA inverter filed as a combo, `ITR-INV-900-150` is a 900VA inverter
+ *     filed as an inverter. Its title matches the first entry's product almost
+ *     exactly, which is suggestive and not evidence.
+ *
+ *   iTarang Lithium Battery 150Ah
+ *     A duplicate of the 150Ah LiFePO4 product, confirmed by the merchant. It
+ *     gets no entry on purpose; enriching a duplicate would give it the same
+ *     standing in search and facets as the real one.
+ *
+ * Those three keep appearing in the admin's catalogue banner, which is the
+ * correct outcome: the gap is real and a human has to close it.
  */
 export const ENRICHMENT: Record<string, ProductEnrichment> = {
   /* ---------------------------------------------- ITG-INV-900VA-150AH · ₹8,500
@@ -61,6 +107,9 @@ export const ENRICHMENT: Record<string, ProductEnrichment> = {
    * system, which is what the combos category describes.
    */
   prod_01KZXJ4DSGQCSHXW7BME2NJG0B: {
+    // Both taken from the captured payload in `__fixtures__/products.sample.json`,
+    // which is this product as the API actually returned it — not inferred.
+    match: { skus: ['ITG-INV-900VA-150AH'], slugs: ['itarang-inverter-900-va'] },
     category: 'combos',
     subcategory: 'home-combos',
     art: 'combo',
@@ -150,6 +199,9 @@ export const ENRICHMENT: Record<string, ProductEnrichment> = {
    * Warranty 3 years · Waveform pure sine wave.
    */
   prod_01M07VY8GMMNFZNDG1QC4PSEAP: {
+    // The only 1500VA product on either side, so the match is unambiguous.
+    // Handle only: this product carries no SKU upstream at all.
+    match: { slugs: ['itarang-home-inverter-1500va'] },
     category: 'inverters',
     subcategory: 'pure-sine-wave',
     art: 'inverter',
@@ -181,6 +233,15 @@ export const ENRICHMENT: Record<string, ProductEnrichment> = {
    * · Warranty 5 years.
    */
   prod_01M07W4SS5G4Z6ANTD39JQHTFV: {
+    // The live product this belongs to, confirmed by the merchant.
+    //
+    // Handle only, deliberately. Upstream this product carries the SKU
+    // `ITG-CMB-900VA-150AH`, which the 900VA combo also carries — a merchant
+    // data error being fixed separately in hPanel. Keying on it would file a
+    // battery's warranty and specifications against a combo, which is precisely
+    // the mistake the ambiguity guard exists to prevent; that guard only sees
+    // collisions between entries here, not a SKU duplicated upstream.
+    match: { slugs: ['itarang-lithium-battery-150ah-12v-lifepo4'] },
     category: 'batteries',
     subcategory: 'lithium',
     art: 'battery',
@@ -209,6 +270,12 @@ export const ENRICHMENT: Record<string, ProductEnrichment> = {
    * · Warranty 5 years.
    */
   prod_01M07W8R9V3QPTKFDC9B63XZHM: {
+    // The only 200Ah battery on either side, so the match is unambiguous. Its
+    // SKU is unique upstream, so both identities are safe to carry.
+    match: {
+      skus: ['ITG-BAT-LI-200AH-12V'],
+      slugs: ['itarang-lithium-battery-200ah'],
+    },
     category: 'batteries',
     subcategory: 'lithium',
     art: 'battery',
@@ -318,17 +385,53 @@ export interface ResolvedEnrichment extends ProductEnrichment {
   inferred: boolean;
 }
 
-export function resolveEnrichment(
-  productId: string,
-  title: string,
-  subtitle?: string | null,
-): ResolvedEnrichment {
-  const explicit = ENRICHMENT[productId];
-  if (explicit) {
-    return { ...explicit, art: explicit.art ?? DEFAULT_ART[explicit.category], inferred: false };
+/** Everything about a product that can identify its entry. */
+export interface EnrichmentSubject {
+  productId: string;
+  title: string;
+  subtitle?: string | null;
+  /** The storefront handle — `url_handle` upstream. */
+  slug?: string | null;
+  /** Merchant SKUs across this product's variants. Nulls are not SKUs. */
+  skus?: Array<string | null | undefined>;
+}
+
+/**
+ * Build a secondary index, refusing anything ambiguous.
+ *
+ * A key claimed by two entries identifies neither, so it is dropped rather than
+ * resolved arbitrarily. Attaching one product's warranty and installation
+ * commitment to another is worse than falling through to the title guess: the
+ * guess declines to make those claims at all, and a wrong entry states them
+ * confidently.
+ */
+function buildIndex(pick: (entry: ProductEnrichment) => string[] | undefined) {
+  const index = new Map<string, ProductEnrichment>();
+  const ambiguous = new Set<string>();
+
+  for (const entry of Object.values(ENRICHMENT)) {
+    for (const key of pick(entry) ?? []) {
+      const normalised = key.trim().toLowerCase();
+      if (!normalised) continue;
+      if (index.has(normalised) && index.get(normalised) !== entry) ambiguous.add(normalised);
+      index.set(normalised, entry);
+    }
   }
 
-  const haystack = `${title} ${subtitle ?? ''}`;
+  for (const key of ambiguous) index.delete(key);
+  return index;
+}
+
+const BY_SKU = buildIndex((entry) => entry.match?.skus);
+const BY_SLUG = buildIndex((entry) => entry.match?.slugs);
+
+export function resolveEnrichment(subject: EnrichmentSubject): ResolvedEnrichment {
+  const found = findEntry(subject);
+  if (found) {
+    return { ...found, art: found.art ?? DEFAULT_ART[found.category], inferred: false };
+  }
+
+  const haystack = `${subject.title} ${subject.subtitle ?? ''}`;
   const hint =
     CATEGORY_HINTS.find((candidate) => candidate.match.test(haystack)) ??
     CATEGORY_HINTS[CATEGORY_HINTS.length - 1];
@@ -348,7 +451,43 @@ export function resolveEnrichment(
   };
 }
 
-/** Product ids present in the live catalogue with no explicit entry here. */
-export function unmappedProductIds(productIds: string[]): string[] {
-  return productIds.filter((id) => !ENRICHMENT[id]);
+/**
+ * Find the entry for a product, by whichever identity still matches.
+ *
+ * Ordered most specific first. The product id is exact and merchant-independent,
+ * so it wins where it exists; a SKU is the merchant's own identifier and usually
+ * outlives a recreated product; the url handle follows the title and outlives a
+ * re-issued SKU. Only when all three miss does the caller fall back to guessing
+ * from the title.
+ */
+function findEntry(subject: EnrichmentSubject): ProductEnrichment | undefined {
+  const byId = ENRICHMENT[subject.productId];
+  if (byId) return byId;
+
+  for (const sku of subject.skus ?? []) {
+    // A variant with no SKU upstream is not a match key. `mapVariant` falls back
+    // to the variant id so the cart has something to carry, but that id is as
+    // unstable as the product id and must never resolve merchandising.
+    if (!sku) continue;
+    const bySku = BY_SKU.get(sku.trim().toLowerCase());
+    if (bySku) return bySku;
+  }
+
+  if (subject.slug) {
+    const bySlug = BY_SLUG.get(subject.slug.trim().toLowerCase());
+    if (bySlug) return bySlug;
+  }
+
+  return undefined;
+}
+
+/**
+ * Products in the live catalogue that no entry claims.
+ *
+ * Takes whole subjects rather than ids because resolution no longer depends on
+ * the id alone — checking only the id map here would keep reporting products the
+ * storefront had already resolved correctly by SKU or slug.
+ */
+export function unmappedProductIds(subjects: EnrichmentSubject[]): string[] {
+  return subjects.filter((subject) => !findEntry(subject)).map((subject) => subject.productId);
 }

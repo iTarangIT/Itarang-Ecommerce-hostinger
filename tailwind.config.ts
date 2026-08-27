@@ -31,19 +31,39 @@ const config: Config = {
         background: 'hsl(var(--background) / <alpha-value>)',
         foreground: 'hsl(var(--foreground) / <alpha-value>)',
         surface: 'hsl(var(--surface) / <alpha-value>)',
+        /**
+         * Dark chrome surfaces — footer, hero, announcement bar.
+         *
+         * Separate from `primary` on purpose: white on the brand azure is about
+         * 3.6:1, under the AA floor for body text, so the dark grounds that
+         * carry white copy sit on ink instead. It is also the tint under every
+         * shadow below.
+         */
+        ink: {
+          50: 'hsl(var(--ink-50) / <alpha-value>)',
+          100: 'hsl(var(--ink-100) / <alpha-value>)',
+          200: 'hsl(var(--ink-200) / <alpha-value>)',
+          300: 'hsl(var(--ink-300) / <alpha-value>)',
+          400: 'hsl(var(--ink-400) / <alpha-value>)',
+          500: 'hsl(var(--ink-500) / <alpha-value>)',
+          600: 'hsl(var(--ink-600) / <alpha-value>)',
+          700: 'hsl(var(--ink-700) / <alpha-value>)',
+          800: 'hsl(var(--ink-800) / <alpha-value>)',
+          900: 'hsl(var(--ink-900) / <alpha-value>)',
+        },
         primary: {
           DEFAULT: 'hsl(var(--primary) / <alpha-value>)',
           foreground: 'hsl(var(--primary-foreground) / <alpha-value>)',
-          50: 'hsl(var(--navy-50) / <alpha-value>)',
-          100: 'hsl(var(--navy-100) / <alpha-value>)',
-          200: 'hsl(var(--navy-200) / <alpha-value>)',
-          300: 'hsl(var(--navy-300) / <alpha-value>)',
-          400: 'hsl(var(--navy-400) / <alpha-value>)',
-          500: 'hsl(var(--navy-500) / <alpha-value>)',
-          600: 'hsl(var(--navy-600) / <alpha-value>)',
-          700: 'hsl(var(--navy-700) / <alpha-value>)',
-          800: 'hsl(var(--navy-800) / <alpha-value>)',
-          900: 'hsl(var(--navy-900) / <alpha-value>)',
+          50: 'hsl(var(--azure-50) / <alpha-value>)',
+          100: 'hsl(var(--azure-100) / <alpha-value>)',
+          200: 'hsl(var(--azure-200) / <alpha-value>)',
+          300: 'hsl(var(--azure-300) / <alpha-value>)',
+          400: 'hsl(var(--azure-400) / <alpha-value>)',
+          500: 'hsl(var(--azure-500) / <alpha-value>)',
+          600: 'hsl(var(--azure-600) / <alpha-value>)',
+          700: 'hsl(var(--azure-700) / <alpha-value>)',
+          800: 'hsl(var(--azure-800) / <alpha-value>)',
+          900: 'hsl(var(--azure-900) / <alpha-value>)',
         },
         accent: {
           DEFAULT: 'hsl(var(--accent) / <alpha-value>)',
@@ -92,27 +112,31 @@ const config: Config = {
           foreground: 'hsl(var(--destructive-foreground) / <alpha-value>)',
         },
       },
+      /**
+       * Derived so that at --radius: 0.75rem the six steps land exactly on the
+       * parent site's scale — 0.25 / 0.375 / 0.5 / 0.75 / 1 / 1.5rem.
+       */
       borderRadius: {
-        xs: 'calc(var(--radius) - 0.55rem)',
-        sm: 'calc(var(--radius) - 0.4rem)',
+        xs: 'calc(var(--radius) - 0.5rem)',
+        sm: 'calc(var(--radius) - 0.375rem)',
         md: 'calc(var(--radius) - 0.25rem)',
         lg: 'var(--radius)',
-        xl: 'calc(var(--radius) + 0.35rem)',
-        '2xl': 'calc(var(--radius) + 0.7rem)',
+        xl: 'calc(var(--radius) + 0.25rem)',
+        '2xl': 'calc(var(--radius) + 0.75rem)',
       },
       fontFamily: {
-        display: ['var(--font-display)', 'Sora', 'system-ui', 'sans-serif'],
-        sans: ['var(--font-body)', 'Inter', 'system-ui', 'sans-serif'],
+        display: ['var(--font-display)', 'Plus Jakarta Sans', 'system-ui', 'sans-serif'],
+        sans: ['var(--font-body)', 'Plus Jakarta Sans', 'system-ui', 'sans-serif'],
       },
       fontSize: {
         '2xs': ['0.6875rem', { lineHeight: '1rem', letterSpacing: '0.02em' }],
       },
       boxShadow: {
-        card: '0 1px 2px 0 hsl(var(--navy-900) / 0.04), 0 1px 3px 0 hsl(var(--navy-900) / 0.05)',
+        card: '0 1px 2px 0 hsl(var(--ink-900) / 0.04), 0 1px 3px 0 hsl(var(--ink-900) / 0.05)',
         raised:
-          '0 2px 4px -2px hsl(var(--navy-900) / 0.06), 0 8px 20px -6px hsl(var(--navy-900) / 0.12)',
+          '0 2px 4px -2px hsl(var(--ink-900) / 0.06), 0 8px 20px -6px hsl(var(--ink-900) / 0.12)',
         overlay:
-          '0 10px 20px -8px hsl(var(--navy-900) / 0.16), 0 24px 48px -12px hsl(var(--navy-900) / 0.22)',
+          '0 10px 20px -8px hsl(var(--ink-900) / 0.16), 0 24px 48px -12px hsl(var(--ink-900) / 0.22)',
         focus: '0 0 0 3px hsl(var(--ring) / 0.35)',
       },
       transitionTimingFunction: {

@@ -105,7 +105,7 @@ export function CategoryTiles({ categories }: { categories: NavCategory[] }) {
                   </li>
                 ))}
               </ul>
-              <p className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-primary">
+              <p className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-primary-600">
                 {category.total} products
                 <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
               </p>
@@ -153,10 +153,10 @@ export function LoadCalculatorPromo() {
             </ButtonLink>
           </div>
         </div>
-        <div className="relative min-h-[13rem] bg-primary lg:col-span-5">
+        <div className="relative min-h-[13rem] bg-ink-900 lg:col-span-5">
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute -right-16 -top-16 h-64 w-64 rounded-full bg-accent/20 blur-3xl"
+            className="pointer-events-none absolute -right-16 -top-16 h-64 w-64 rounded-full bg-primary-400/25 blur-3xl"
           />
           <Image
             src="/art/inverter-1-detail.svg"

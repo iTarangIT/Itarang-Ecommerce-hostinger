@@ -4,60 +4,98 @@
 
 /* ==========================================================================
    iTarang design tokens
-   Navy + amber identity carried over from the existing iTarang storefront,
-   expanded into full ramps plus semantic state colours.
+   Aligned with the parent site at itarang.com, whose own tokens are the source
+   for the azure primary, the warm neutrals, the border colour and the radius.
    All values are HSL channel triplets so Tailwind can apply <alpha-value>.
+
+   Three places deliberately depart from the parent, because a storefront has
+   to solve problems a marketing site does not:
+
+   1. AMBER SURVIVES, NARROWED. The parent's `accent` is a pale surface tint.
+      Here `accent` is the colour that means "deal" — sale badges, offers, price
+      drops. A shop needs that to be distinct from the colour of every link, so
+      amber keeps its ramp and gives up only `--ring` and general CTA duty,
+      both of which move to azure.
+
+   2. DARK SURFACES STAY INK, NOT AZURE. White on the parent's azure is about
+      3.6:1, under the 4.5:1 AA floor for body text. The footer, hero and
+      announcement bar therefore sit on an ink ground, which also keeps the
+      existing white/N overlay tints working untouched.
+
+   3. THREE VALUES ARE A FEW POINTS DARKER THAN THE PARENT'S, FOR CONTRAST.
+      Hue and saturation are identical; only lightness moves, so they read as
+      the same colours. Measured against the surface each is actually used on:
+
+        --primary            42% -> 38%   white label on the button: 3.77 -> 4.52
+        --muted-foreground   47% -> 44%   secondary copy on card:    4.06 -> 4.55
+        --amber-600          42% -> 35%   deal text on card:         3.34 -> 4.61
+
+      A marketing page can carry a 3.8:1 button; a checkout cannot. Anything
+      lighter fails AA on the labels people have to read to buy something.
    ========================================================================== */
 
 @layer base {
   :root {
-    /* Navy ramp — brand primary */
-    --navy-50: 219 40% 97%;
-    --navy-100: 219 38% 93%;
-    --navy-200: 218 34% 85%;
-    --navy-300: 218 30% 72%;
-    --navy-400: 218 26% 54%;
-    --navy-500: 219 38% 38%;
-    --navy-600: 219 48% 28%;
-    --navy-700: 219 56% 22%;
-    --navy-800: 219 62% 18%;
-    --navy-900: 219 66% 11%;
+    /* Azure ramp — brand primary. The parent's hue and saturation throughout;
+       500 is its --primary taken four points darker, per note 3 above. */
+    --azure-50: 199 78% 96%;
+    --azure-100: 199 76% 91%;
+    --azure-200: 199 74% 82%;
+    --azure-300: 199 76% 68%;
+    --azure-400: 199 80% 54%;
+    --azure-500: 199 83% 38%;
+    --azure-600: 199 85% 35%;
+    --azure-700: 200 84% 28%;
+    --azure-800: 201 80% 23%;
+    --azure-900: 203 72% 16%;
 
-    /* Amber ramp — brand accent */
+    /* Ink ramp — dark chrome surfaces, and the tint under every shadow. */
+    --ink-50: 210 22% 96%;
+    --ink-100: 210 20% 90%;
+    --ink-200: 209 18% 80%;
+    --ink-300: 209 16% 64%;
+    --ink-400: 208 14% 46%;
+    --ink-500: 208 18% 32%;
+    --ink-600: 207 22% 24%;
+    --ink-700: 206 26% 18%;
+    --ink-800: 205 30% 14%;
+    --ink-900: 204 34% 9%;
+
+    /* Amber ramp — commerce accent (sale, offers, deal signalling) */
     --amber-50: 40 100% 96%;
     --amber-100: 40 96% 90%;
     --amber-200: 39 96% 80%;
     --amber-300: 38 96% 68%;
     --amber-400: 37 96% 58%;
     --amber-500: 36 96% 52%;
-    --amber-600: 32 92% 42%;
+    --amber-600: 32 92% 35%;
 
-    /* Semantic surface tokens */
-    --background: 210 40% 99%;
-    --foreground: 218 45% 12%;
-    --surface: 214 32% 96%;
+    /* Semantic surface tokens — warm neutrals, from the parent */
+    --background: 0 0% 100%;
+    --foreground: 30 10% 10%;
+    --surface: 36 24% 96%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 218 45% 12%;
+    --card: 36 33% 98%;
+    --card-foreground: 30 10% 10%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 218 45% 12%;
+    --popover-foreground: 30 10% 10%;
 
-    --primary: 219 62% 18%;
-    --primary-foreground: 40 100% 97%;
+    --primary: 199 83% 38%;
+    --primary-foreground: 0 0% 100%;
 
     --accent: 36 96% 52%;
-    --accent-foreground: 219 62% 14%;
+    --accent-foreground: 30 25% 12%;
 
-    --secondary: 214 32% 95%;
-    --secondary-foreground: 219 62% 18%;
+    --secondary: 199 30% 96%;
+    --secondary-foreground: 199 83% 35%;
 
-    --muted: 214 32% 95%;
-    --muted-foreground: 217 15% 45%;
+    --muted: 199 20% 95%;
+    --muted-foreground: 199 16% 44%;
 
-    --border: 215 25% 89%;
-    --input: 215 25% 86%;
-    --ring: 36 96% 52%;
+    --border: 214 20% 88%;
+    --input: 214 20% 84%;
+    --ring: 199 83% 38%;
 
     /* States */
     --success: 152 56% 30%;
@@ -72,10 +110,10 @@
     --sale-foreground: 0 0% 100%;
     --sale-soft: 350 80% 96%;
 
-    --destructive: 0 72% 46%;
+    --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 98%;
 
-    --radius: 0.9rem;
+    --radius: 0.75rem;
 
     /* Layout rhythm */
     --header-height: 4.5rem;
@@ -83,31 +121,31 @@
   }
 
   .dark {
-    --background: 219 48% 8%;
-    --foreground: 210 30% 96%;
-    --surface: 219 40% 11%;
+    --background: 204 34% 9%;
+    --foreground: 210 22% 96%;
+    --surface: 205 30% 13%;
 
-    --card: 219 44% 11%;
-    --card-foreground: 210 30% 96%;
+    --card: 205 30% 13%;
+    --card-foreground: 210 22% 96%;
 
-    --popover: 219 44% 11%;
-    --popover-foreground: 210 30% 96%;
+    --popover: 205 30% 13%;
+    --popover-foreground: 210 22% 96%;
 
-    --primary: 40 100% 97%;
-    --primary-foreground: 219 62% 14%;
+    --primary: 199 80% 54%;
+    --primary-foreground: 204 34% 9%;
 
     --accent: 36 96% 52%;
-    --accent-foreground: 219 62% 14%;
+    --accent-foreground: 30 25% 12%;
 
-    --secondary: 219 30% 18%;
-    --secondary-foreground: 210 30% 96%;
+    --secondary: 206 24% 20%;
+    --secondary-foreground: 210 22% 96%;
 
-    --muted: 219 30% 18%;
-    --muted-foreground: 215 18% 68%;
+    --muted: 206 24% 20%;
+    --muted-foreground: 209 16% 68%;
 
-    --border: 219 26% 22%;
-    --input: 219 26% 26%;
-    --ring: 36 96% 52%;
+    --border: 206 22% 24%;
+    --input: 206 22% 28%;
+    --ring: 199 80% 54%;
 
     --success: 152 46% 44%;
     --success-soft: 152 40% 15%;
@@ -115,7 +153,7 @@
     --warning-soft: 34 50% 16%;
     --sale: 350 76% 60%;
     --sale-soft: 350 40% 17%;
-    --destructive: 0 62% 52%;
+    --destructive: 0 72% 58%;
   }
 
   * {
@@ -130,7 +168,7 @@
 
   body {
     @apply bg-background text-foreground antialiased;
-    font-family: var(--font-body), Inter, system-ui, sans-serif;
+    font-family: var(--font-body), 'Plus Jakarta Sans', system-ui, sans-serif;
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
     text-rendering: optimizeLegibility;
   }
@@ -139,7 +177,7 @@
   h2,
   h3,
   h4 {
-    font-family: var(--font-display), Sora, system-ui, sans-serif;
+    font-family: var(--font-display), 'Plus Jakarta Sans', system-ui, sans-serif;
     @apply tracking-tight;
   }
 
@@ -180,7 +218,7 @@
   }
 
   .eyebrow {
-    @apply font-display text-2xs font-semibold uppercase tracking-[0.14em] text-accent-600;
+    @apply font-display text-2xs font-semibold uppercase tracking-[0.14em] text-primary-600;
   }
 
   .heading-1 {
@@ -193,6 +231,28 @@
 
   .heading-3 {
     @apply font-display text-lg font-semibold leading-snug sm:text-xl;
+  }
+
+  /**
+   * The <select> chevron.
+   *
+   * A `data:` URI is a separate document, so it cannot read `currentColor` or a
+   * CSS variable — the stroke has to be a literal. What it can do is live here,
+   * beside the token it has to track, instead of inline in the component where
+   * it went stale: the old value was a navy-era grey-blue that no longer
+   * matched anything after the rebrand.
+   *
+   * A mask would let a token supply the colour, but `mask-image` clips the whole
+   * element, so the select's own background and border would go with it. Not
+   * worth a wrapper element for one glyph.
+   *
+   * KEEP #5e7782 IN STEP WITH `--muted-foreground` (199 16% 44%).
+   */
+  .select-chevron {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%235e7782' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.65rem center;
+    background-size: 1.1rem;
   }
 
   /* Horizontal rails: edge-to-edge on mobile, snapped, scrollbar hidden. */

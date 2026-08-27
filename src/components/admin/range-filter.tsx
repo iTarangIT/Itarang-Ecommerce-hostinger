@@ -43,11 +43,34 @@ export function RangeFilter({
   current,
   currentMonth,
   months,
+  basePath = '/admin/analytics',
+  carry,
+  customFrom,
+  customTo,
+  error,
 }: {
   current: RangeKey;
   currentMonth: string | null;
   months: string[];
+  /** Which screen the controls navigate within. Analytics and funnel share them. */
+  basePath?: string;
+  /** Echoed back into the inputs so a rejected pair can be corrected, not retyped. */
+  customFrom?: string | null;
+  customTo?: string | null;
+  /** Why a requested custom range was refused. */
+  error?: string | null;
+  /**
+   * Other query parameters this screen owns, preserved across a range change.
+   *
+   * Without it, choosing a month would silently reset the funnel's segment back
+   * to everyone — the range and the segment are independent choices and neither
+   * should quietly undo the other.
+   */
+  carry?: Record<string, string>;
 }) {
+  const extra = Object.entries(carry ?? {});
+  const suffix = extra.map(([key, value]) => `&${key}=${encodeURIComponent(value)}`).join('');
+
   return (
     <div className="mt-6 space-y-3">
       <div className="flex flex-wrap gap-2">
@@ -56,7 +79,7 @@ export function RangeFilter({
           return (
             <Link
               key={preset.key}
-              href={`/admin/analytics?range=${preset.key}`}
+              href={`${basePath}?range=${preset.key}${suffix}`}
               aria-current={active ? 'page' : undefined}
               className={cn(
                 'rounded-md border px-3 py-2 text-sm font-medium transition-colors',
@@ -72,8 +95,11 @@ export function RangeFilter({
       </div>
 
       {months.length > 0 ? (
-        <form action="/admin/analytics" className="flex flex-wrap items-end gap-2">
+        <form action={basePath} className="flex flex-wrap items-end gap-2">
           <input type="hidden" name="range" value="month" />
+          {extra.map(([key, value]) => (
+            <input key={key} type="hidden" name={key} value={value} />
+          ))}
           <div className="flex flex-col gap-1.5">
             <label htmlFor="month" className="text-xs font-medium text-muted-foreground">
               Or pick a month
@@ -98,6 +124,64 @@ export function RangeFilter({
             Show
           </button>
         </form>
+      ) : null}
+
+      {/* Custom range.
+
+          Rendered unconditionally, unlike the month picker above: that one
+          hides itself when no order has ever been placed, which would leave an
+          empty database with no way to reach any window but a preset. */}
+      <form action={basePath} className="flex flex-wrap items-end gap-2">
+        <input type="hidden" name="range" value="custom" />
+        {/* Where to return to if the pair is rejected, so a mistyped date does
+            not also lose the view the admin was looking at. */}
+        <input type="hidden" name="prev" value={current === 'custom' ? 'this_month' : current} />
+        {extra.map(([key, value]) => (
+          <input key={key} type="hidden" name={key} value={value} />
+        ))}
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="from" className="text-xs font-medium text-muted-foreground">
+            Or a custom range — start
+          </label>
+          <input
+            id="from"
+            name="from"
+            type="date"
+            defaultValue={customFrom ?? ''}
+            aria-invalid={error ? true : undefined}
+            className="h-11 rounded-md border border-input bg-card px-3 text-sm"
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="to" className="text-xs font-medium text-muted-foreground">
+            End (inclusive)
+          </label>
+          <input
+            id="to"
+            name="to"
+            type="date"
+            defaultValue={customTo ?? ''}
+            aria-invalid={error ? true : undefined}
+            className="h-11 rounded-md border border-input bg-card px-3 text-sm"
+          />
+        </div>
+        <button
+          type="submit"
+          className={cn(
+            'h-11 rounded-md border px-4 text-sm font-medium transition-colors',
+            current === 'custom'
+              ? 'border-primary bg-primary text-primary-foreground'
+              : 'border-border bg-card text-foreground hover:bg-secondary',
+          )}
+        >
+          Show
+        </button>
+      </form>
+
+      {error ? (
+        <p role="alert" className="text-sm font-medium text-danger">
+          {error} Showing the previous range instead.
+        </p>
       ) : null}
     </div>
   );

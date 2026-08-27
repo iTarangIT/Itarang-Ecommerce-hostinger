@@ -76,11 +76,15 @@ function Tile({
 export default async function AnalyticsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ range?: string; month?: string }>;
+  searchParams: Promise<{ range?: string; month?: string; from?: string; to?: string; prev?: string }>;
 }) {
   const params = await searchParams;
   const requested = isRangeKey(params.range) ? params.range : 'this_month';
-  const range = await resolveRange(requested, params.month);
+  const range = await resolveRange(requested, params.month, {
+    from: params.from,
+    to: params.to,
+    prev: params.prev,
+  });
 
   const [counts, money, series, months, recent] = await Promise.all([
     fulfilmentCounts(range.from, range.to),
@@ -119,7 +123,14 @@ export default async function AnalyticsPage({
         </span>
       </p>
 
-      <RangeFilter current={range.key} currentMonth={range.month} months={months} />
+      <RangeFilter
+        current={range.key}
+        currentMonth={range.month}
+        months={months}
+        customFrom={range.requestedFrom}
+        customTo={range.requestedTo}
+        error={range.error}
+      />
 
       <p className="mt-4 text-sm font-medium text-foreground">{range.label}</p>
 

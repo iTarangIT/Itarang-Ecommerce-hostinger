@@ -60,6 +60,19 @@ export const LIMITS = {
    * that protects order placement.
    */
   quote: { limit: 120, windowSeconds: 10 * 60 },
+  /**
+   * Funnel beacons, per visitor.
+   *
+   * Loose on purpose: browsing a catalogue legitimately fires a view event per
+   * product page, and throttling a shopper's own analytics would bias the
+   * funnel against the most engaged visitors — the opposite of what it is for.
+   * The bucket exists to stop a script inflating the numbers, not to police
+   * ordinary use, and the duplicate key on `funnel_events` already makes a
+   * replay of the *same* event free.
+   */
+  events: { limit: 300, windowSeconds: 10 * 60 },
+  /** The same beacons per IP, so one address cannot mint endless visitors. */
+  eventsByIp: { limit: 1_200, windowSeconds: 10 * 60 },
 } as const satisfies Record<string, RateLimit>;
 
 /**
