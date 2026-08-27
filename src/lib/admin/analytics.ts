@@ -60,6 +60,7 @@ export const RANGE_KEYS = [
   'last_3_months',
   'last_6_months',
   'month',
+  'custom',
 ] as const;
 export type RangeKey = (typeof RANGE_KEYS)[number];
 
@@ -73,6 +74,30 @@ export interface ResolvedRange {
   to: Date;
   /** For `month`, the `YYYY-MM` that was asked for. */
   month: string | null;
+  /**
+   * For `custom`, the dates actually in force. Null when a request was refused,
+   * so nothing can label the screen with a window it is not showing.
+   */
+  customFrom: string | null;
+  customTo: string | null;
+  /**
+   * What was typed, refused or not.
+   *
+   * Kept apart from the pair above because they answer different questions: one
+   * is what the screen is showing, this is what the admin asked for. Echoing
+   * this back means a rejected range can be corrected in the field that was
+   * wrong rather than retyped from scratch.
+   */
+  requestedFrom: string | null;
+  requestedTo: string | null;
+  /**
+   * Why a requested custom range was refused, if it was.
+   *
+   * Set alongside a *resolved* range rather than instead of one: an admin who
+   * mistypes a date should still be looking at real numbers, not an empty
+   * dashboard that reads like a collapse in trade.
+   */
+  error: string | null;
   label: string;
 }
 
@@ -80,7 +105,69 @@ export function isRangeKey(value: string | undefined): value is RangeKey {
   return RANGE_KEYS.includes(value as RangeKey);
 }
 
-function labelFor(key: RangeKey, from: Date, month: string | null): string {
+/** What a custom range was asked for, straight off the query string. */
+export interface CustomRangeInput {
+  from?: string;
+  to?: string;
+  /** The range in view when the custom form was submitted; restored on error. */
+  prev?: string;
+}
+
+/**
+ * A calendar date, strictly.
+ *
+ * `to_date` is lenient — it turns `2026-02-30` into 2 March without complaint,
+ * which would silently report a window nobody asked for. Round-tripping through
+ * `Date` and comparing the formatting back is what rejects it: only a real
+ * calendar date survives unchanged.
+ */
+function isCalendarDate(value: string | undefined): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+
+  const [year, month, day] = value.split('-').map(Number);
+  // A typo like `0202-08-01` is a plausible slip and a meaningless window.
+  if (year < 2000 || year > 2100) return false;
+
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return (
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day
+  );
+}
+
+/**
+ * Check a requested custom range, without resolving it.
+ *
+ * Returns the message to show, or null when the pair is usable. Kept separate
+ * from `resolveRange` so the rules can be read — and tested — on their own.
+ */
+function customRangeProblem(custom: CustomRangeInput | undefined): string | null {
+  if (!custom?.from || !custom?.to) return 'Enter both a start and an end date.';
+  if (!isCalendarDate(custom.from)) return 'That start date is not a real date.';
+  if (!isCalendarDate(custom.to)) return 'That end date is not a real date.';
+  // Deliberately not swapped: silently reinterpreting the request would hide a
+  // typo behind numbers that look plausible.
+  if (custom.from > custom.to) return 'The start date must not be after the end date.';
+  return null;
+}
+
+/**
+ * The range as query parameters, for building a link that keeps it.
+ *
+ * Exists because the range is serialised into a URL in more than one place —
+ * the filter control and the funnel's segment links. Two hand-rolled copies is
+ * how one of them ends up quietly dropping a custom range.
+ */
+export function rangeParams(range: ResolvedRange): URLSearchParams {
+  const params = new URLSearchParams({ range: range.key });
+  if (range.month) params.set('month', range.month);
+  if (range.customFrom) params.set('from', range.customFrom);
+  if (range.customTo) params.set('to', range.customTo);
+  return params;
+}
+
+function labelFor(key: RangeKey, from: Date, to: Date, month: string | null): string {
   const asMonth = new Intl.DateTimeFormat('en-IN', {
     month: 'long',
     year: 'numeric',
@@ -106,6 +193,15 @@ function labelFor(key: RangeKey, from: Date, month: string | null): string {
       return `Last 6 months · from ${asMonth.format(from)}`;
     case 'month':
       return month ? asMonth.format(from) : 'Selected month';
+    case 'custom': {
+      // `to` is exclusive, so the last day the admin actually asked for is the
+      // day before it. Showing the exclusive bound would read as one day more
+      // than was selected.
+      const lastDay = new Date(to.getTime() - 1);
+      const start = asDay.format(from);
+      const end = asDay.format(lastDay);
+      return start === end ? `${start}` : `${start} — ${end}`;
+    }
   }
 }
 
@@ -115,12 +211,28 @@ function labelFor(key: RangeKey, from: Date, month: string | null): string {
  * Half-open deliberately: an order placed at exactly midnight IST belongs to
  * the day starting then, and to exactly one bucket.
  */
-export async function resolveRange(key: RangeKey, month?: string): Promise<ResolvedRange> {
+export async function resolveRange(
+  key: RangeKey,
+  month?: string,
+  custom?: CustomRangeInput,
+): Promise<ResolvedRange> {
   const normalisedMonth = key === 'month' && month && /^\d{4}-\d{2}$/.test(month) ? month : null;
+
+  // A custom range that cannot be honoured falls back to whatever was on screen
+  // when it was asked for, so the admin keeps their place while they fix the
+  // date. `prev` is carried by the form; anything unusable lands on this_month.
+  const problem = key === 'custom' ? customRangeProblem(custom) : null;
+  const fallback: RangeKey =
+    custom?.prev && isRangeKey(custom.prev) && custom.prev !== 'custom' ? custom.prev : 'this_month';
 
   // `month` without a valid YYYY-MM is meaningless. Fall back rather than let
   // `to_timestamp` improvise a date out of junk.
-  const effective: RangeKey = key === 'month' && !normalisedMonth ? 'this_month' : key;
+  const effective: RangeKey =
+    key === 'month' && !normalisedMonth ? 'this_month' : problem ? fallback : key;
+
+  // Only ever bound when the pair has already been validated above.
+  const customFrom = effective === 'custom' ? (custom?.from ?? null) : null;
+  const customTo = effective === 'custom' ? (custom?.to ?? null) : null;
 
   const row = await queryOne<{ from_ts: Date; to_ts: Date }>(
     `WITH start_local AS (
@@ -131,20 +243,28 @@ export async function resolveRange(key: RangeKey, month?: string): Promise<Resol
          WHEN 'last_3_months' THEN date_trunc('month', timezone($3, now())) - interval '2 months'
          WHEN 'last_6_months' THEN date_trunc('month', timezone($3, now())) - interval '5 months'
          WHEN 'month'         THEN to_timestamp($2 || '-01', 'YYYY-MM-DD')::timestamp
+         WHEN 'custom'        THEN to_date($4, 'YYYY-MM-DD')::timestamp
        END AS s
      ),
      span AS (
        SELECT s,
-              s + CASE $1
-                    WHEN 'today'         THEN interval '1 day'
-                    WHEN 'last_3_months' THEN interval '3 months'
-                    WHEN 'last_6_months' THEN interval '6 months'
-                    ELSE interval '1 month'
-                  END AS e
+              CASE $1
+                -- The end date is INCLUSIVE to the admin, so the exclusive
+                -- bound is the start of the following day. Every other branch
+                -- adds a span to the start; this one is the only one that
+                -- computes its end independently.
+                WHEN 'custom' THEN to_date($5, 'YYYY-MM-DD')::timestamp + interval '1 day'
+                ELSE s + CASE $1
+                           WHEN 'today'         THEN interval '1 day'
+                           WHEN 'last_3_months' THEN interval '3 months'
+                           WHEN 'last_6_months' THEN interval '6 months'
+                           ELSE interval '1 month'
+                         END
+              END AS e
          FROM start_local
      )
      SELECT timezone($3, s) AS from_ts, timezone($3, e) AS to_ts FROM span`,
-    [effective, normalisedMonth, IST],
+    [effective, normalisedMonth, IST, customFrom, customTo],
   );
 
   if (!row) throw new Error(`Could not resolve the analytics range "${key}".`);
@@ -154,7 +274,12 @@ export async function resolveRange(key: RangeKey, month?: string): Promise<Resol
     from: row.from_ts,
     to: row.to_ts,
     month: normalisedMonth,
-    label: labelFor(effective, row.from_ts, normalisedMonth),
+    customFrom,
+    customTo,
+    requestedFrom: key === 'custom' ? (custom?.from ?? null) : null,
+    requestedTo: key === 'custom' ? (custom?.to ?? null) : null,
+    error: problem,
+    label: labelFor(effective, row.from_ts, row.to_ts, normalisedMonth),
   };
 }
 

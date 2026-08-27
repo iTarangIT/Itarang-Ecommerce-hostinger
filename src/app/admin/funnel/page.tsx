@@ -9,7 +9,7 @@ import {
   UserSearch,
   Users,
 } from 'lucide-react';
-import { availableMonths, isRangeKey, resolveRange } from '@/lib/admin/analytics';
+import { availableMonths, isRangeKey, rangeParams, resolveRange } from '@/lib/admin/analytics';
 import {
   FUNNEL_SEGMENTS,
   FUNNEL_STAGES,
@@ -88,11 +88,15 @@ function anonymousTiles(
 export default async function FunnelPage({
   searchParams,
 }: {
-  searchParams: Promise<{ range?: string; month?: string; segment?: string }>;
+  searchParams: Promise<{ range?: string; month?: string; segment?: string; from?: string; to?: string; prev?: string }>;
 }) {
   const params = await searchParams;
   const requested = isRangeKey(params.range) ? params.range : 'this_month';
-  const range = await resolveRange(requested, params.month);
+  const range = await resolveRange(requested, params.month, {
+    from: params.from,
+    to: params.to,
+    prev: params.prev,
+  });
 
   // `all` is the default, and with it every query below is the one that shipped.
   // Choosing a segment narrows the view; it never rewrites the baseline.
@@ -169,6 +173,9 @@ export default async function FunnelPage({
         current={range.key}
         currentMonth={range.month}
         months={months}
+        customFrom={range.requestedFrom}
+        customTo={range.requestedTo}
+        error={range.error}
         basePath="/admin/funnel"
         carry={segment === 'all' ? undefined : { segment }}
       />
@@ -181,8 +188,11 @@ export default async function FunnelPage({
         </span>
         {FUNNEL_SEGMENTS.map((option) => {
           const active = segment === option;
-          const query = new URLSearchParams({ range: range.key });
-          if (range.month) query.set('month', range.month);
+          // `rangeParams` rather than rebuilding the range by hand: this is the
+          // second place the range is serialised into a URL, and the first one
+          // to be forgotten is how a custom range silently reverts to a preset
+          // the moment somebody switches segment.
+          const query = rangeParams(range);
           if (option !== 'all') query.set('segment', option);
           return (
             <Link

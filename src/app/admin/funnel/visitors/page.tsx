@@ -38,11 +38,15 @@ const IST_DATETIME = new Intl.DateTimeFormat('en-IN', {
 export default async function AnonymousVisitorsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ range?: string; month?: string }>;
+  searchParams: Promise<{ range?: string; month?: string; from?: string; to?: string; prev?: string }>;
 }) {
   const params = await searchParams;
   const requested = isRangeKey(params.range) ? params.range : 'this_month';
-  const range = await resolveRange(requested, params.month);
+  const range = await resolveRange(requested, params.month, {
+    from: params.from,
+    to: params.to,
+    prev: params.prev,
+  });
 
   const [visitors, months] = await Promise.all([
     anonymousVisitors(range.from, range.to, 100),
@@ -81,6 +85,9 @@ export default async function AnonymousVisitorsPage({
         current={range.key}
         currentMonth={range.month}
         months={months}
+        customFrom={range.requestedFrom}
+        customTo={range.requestedTo}
+        error={range.error}
         basePath="/admin/funnel/visitors"
       />
 
