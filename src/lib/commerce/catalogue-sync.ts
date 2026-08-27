@@ -325,7 +325,15 @@ export async function syncCatalogue(products: Product[]): Promise<CatalogueSyncR
 
     // The same signal the admin banner already shows, now durable. A product
     // filed by title matching has lost its taxonomy and needs a human.
-    const unmapped = unmappedProductIds(ordered.map((product) => product.id));
+    const unmapped = unmappedProductIds(
+      ordered.map((product) => ({
+        productId: product.id,
+        title: product.title,
+        subtitle: product.subtitle,
+        slug: product.slug,
+        skus: product.variants.map((variant) => variant.sku),
+      })),
+    );
     for (const productId of unmapped) {
       const product = ordered.find((candidate) => candidate.id === productId);
       await raiseAlert(client, 'unmapped_enrichment', productId, {

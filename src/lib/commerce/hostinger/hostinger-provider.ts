@@ -117,7 +117,18 @@ export class HostingerCatalogProvider implements CatalogProvider {
       products,
       engine: new CatalogEngine(products, facetIdsForCategory),
       fetchedAt: Date.now(),
-      unmapped: unmappedProductIds(raw.map((product) => product.id)),
+      // Whole products, not ids: an entry can now be found by SKU or url handle
+      // as well, and checking only the id would keep reporting products the
+      // storefront had already resolved.
+      unmapped: unmappedProductIds(
+        raw.map((product) => ({
+          productId: product.id,
+          title: product.title,
+          subtitle: product.subtitle,
+          slug: product.url_handle ?? product.slug ?? product.id,
+          skus: product.variants.map((variant) => variant.sku),
+        })),
+      ),
     };
 
     if (snapshot.unmapped.length > 0) {

@@ -10,6 +10,7 @@ import {
   popularityRankFor,
   toPaise,
 } from './map';
+import { unmappedProductIds } from './enrichment';
 
 /**
  * Mapping tests run against `products.sample.json` — the real `/products`
@@ -141,10 +142,99 @@ describe('mapProduct', () => {
   });
 });
 
+describe('enrichment identity', () => {
+  /**
+   * The failure these cover: a Hostinger product id is not stable. Recreating a
+   * product in hPanel mints a new one, its entry stops matching, and the product
+   * silently loses its warranty, installation commitment, taxonomy and every
+   * facet. That has happened to this catalogue twice.
+   */
+
+  it('finds an entry by SKU when the product id has changed', () => {
+    const recreated = mapProduct({ ...source, id: 'prod_brand_new_id' }, new Map());
+
+    expect(recreated.category).toBe('combos');
+    expect(recreated.subcategory).toBe('home-combos');
+    expect(recreated.warrantyMonths).toBe(36);
+    expect(recreated.installationIncluded).toBe(true);
+  });
+
+  it('finds an entry by url handle when both the id and the SKU have changed', () => {
+    const recreated = mapProduct(
+      {
+        ...source,
+        id: 'prod_brand_new_id',
+        variants: [{ ...source.variants[0], sku: 'SOME-NEW-SKU' }],
+      },
+      new Map(),
+    );
+
+    expect(recreated.subcategory).toBe('home-combos');
+    expect(recreated.warrantyMonths).toBe(36);
+  });
+
+  it('prefers the product id over the other identities', () => {
+    // A SKU pointing at a different entry must not override an exact id match.
+    const conflicting = mapProduct(
+      { ...source, variants: [{ ...source.variants[0], sku: 'ITR-BAT-LI-200' }] },
+      new Map(),
+    );
+
+    expect(conflicting.id).toBe('prod_01KZXJ4DSGQCSHXW7BME2NJG0B');
+    expect(conflicting.subcategory).toBe('home-combos');
+  });
+
+  it('never resolves an entry from a variant id standing in for a missing SKU', () => {
+    // `mapVariant` falls back to the variant id so the cart has something to
+    // carry. That id is as unstable as the product id and must never decide
+    // merchandising — a warranty claim cannot rest on it.
+    const noSku = mapProduct(
+      {
+        ...source,
+        id: 'prod_brand_new_id',
+        url_handle: 'a-handle-nobody-claims',
+        slug: null,
+        variants: [{ ...source.variants[0], sku: null }],
+      },
+      new Map(),
+    );
+
+    expect(noSku.variants[0].sku).toBe(source.variants[0].id);
+    expect(noSku.warrantyMonths).toBeUndefined();
+    expect(noSku.installationIncluded).toBe(false);
+  });
+
+  it('stops reporting a product as unmapped once another identity finds it', () => {
+    const subject = {
+      productId: 'prod_brand_new_id',
+      title: source.title,
+      subtitle: source.subtitle,
+      slug: 'itarang-inverter-900-va',
+      skus: [source.variants[0].sku],
+    };
+
+    expect(unmappedProductIds([subject])).toEqual([]);
+    // And a product nothing claims is still reported.
+    expect(
+      unmappedProductIds([{ ...subject, slug: 'nobody', skus: [null] }]),
+    ).toEqual(['prod_brand_new_id']);
+  });
+});
+
 describe('enrichment fallback', () => {
   it('files an unmapped product by title rather than dropping it', () => {
     const unknown = mapProduct(
-      { ...source, id: 'prod_unknown', title: 'iTarang TallTube 150 Battery', subtitle: '150Ah tubular' },
+      // Every identity cleared, not just the id: an entry is now also found by
+      // SKU and url handle, so a product still carrying those is not unmapped.
+      {
+        ...source,
+        id: 'prod_unknown',
+        url_handle: 'talltube-150-battery',
+        slug: null,
+        title: 'iTarang TallTube 150 Battery',
+        subtitle: '150Ah tubular',
+        variants: [{ ...source.variants[0], sku: 'ITG-BAT-TT-150' }],
+      },
       new Map(),
     );
     expect(unknown.category).toBe('batteries');
@@ -152,7 +242,17 @@ describe('enrichment fallback', () => {
 
   it('states no warranty for a product it cannot vouch for', () => {
     const unknown = mapProduct(
-      { ...source, id: 'prod_unknown', title: 'iTarang TallTube 150 Battery', subtitle: '150Ah tubular' },
+      // Every identity cleared, not just the id: an entry is now also found by
+      // SKU and url handle, so a product still carrying those is not unmapped.
+      {
+        ...source,
+        id: 'prod_unknown',
+        url_handle: 'talltube-150-battery',
+        slug: null,
+        title: 'iTarang TallTube 150 Battery',
+        subtitle: '150Ah tubular',
+        variants: [{ ...source.variants[0], sku: 'ITG-BAT-TT-150' }],
+      },
       new Map(),
     );
     // An invented warranty is a commercial promise nobody made.

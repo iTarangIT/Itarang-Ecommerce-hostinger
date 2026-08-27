@@ -16,8 +16,13 @@ import type { Product } from './types';
  * already has orders against it.
  */
 
+// Subjects rather than ids: an entry is now found by SKU or url handle as well,
+// so `unmappedProductIds` needs the whole product to answer. The stand-in keeps
+// the same convention — a product id prefixed `unmapped_` is the one nothing
+// claims — so every case below still reads the same way.
 vi.mock('./hostinger/enrichment', () => ({
-  unmappedProductIds: (ids: string[]) => ids.filter((id) => id.startsWith('unmapped_')),
+  unmappedProductIds: (subjects: Array<{ productId: string }>) =>
+    subjects.filter((subject) => subject.productId.startsWith('unmapped_')).map((s) => s.productId),
 }));
 
 function targetsRemote(): boolean {
