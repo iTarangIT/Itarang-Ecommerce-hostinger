@@ -204,6 +204,79 @@ describe('enrichment identity', () => {
     expect(noSku.installationIncluded).toBe(false);
   });
 
+  it('reattaches the live products by url handle', () => {
+    // The catalogue was recreated and every id changed. These three are matched
+    // by handle because their SKUs cannot be trusted: one is duplicated across
+    // two products upstream and two live products carry no SKU at all.
+    const cases = [
+      { slug: 'itarang-lithium-battery-150ah-12v-lifepo4', subcategory: 'lithium' },
+      { slug: 'itarang-lithium-battery-200ah', subcategory: 'lithium' },
+      { slug: 'itarang-home-inverter-1500va', subcategory: 'pure-sine-wave' },
+    ];
+
+    for (const expected of cases) {
+      const live = mapProduct(
+        {
+          ...source,
+          id: `prod_live_${expected.slug}`,
+          url_handle: expected.slug,
+          slug: null,
+          variants: [{ ...source.variants[0], sku: null }],
+        },
+        new Map(),
+      );
+
+      expect(live.subcategory).toBe(expected.subcategory);
+      // A real entry states a warranty; the title fallback never does.
+      expect(live.warrantyMonths).toBeGreaterThan(0);
+    }
+  });
+
+  it('never lends an entry to another product sharing its SKU upstream', () => {
+    // The 150Ah LiFePO4 battery and the 900VA combo both carry
+    // `ITG-CMB-900VA-150AH` in hPanel. That SKU is deliberately not a match key,
+    // so the combo must fall through to the title guess rather than inherit a
+    // battery's warranty, chemistry and box contents.
+    const combo = mapProduct(
+      {
+        ...source,
+        id: 'prod_live_combo',
+        url_handle: 'itarang-900va-inverter-150ah-battery-combo',
+        slug: null,
+        title: 'iTarang 900VA Inverter + 150Ah Battery Combo',
+        subtitle: null,
+        variants: [{ ...source.variants[0], sku: 'ITG-CMB-900VA-150AH' }],
+      },
+      new Map(),
+    );
+
+    expect(combo.subcategory).not.toBe('lithium');
+    expect(combo.warrantyMonths).toBeUndefined();
+    expect(combo.installationIncluded).toBe(false);
+    expect(combo.boxContents).toEqual([]);
+  });
+
+  it('leaves the duplicate 150Ah battery to the fallback', () => {
+    // Confirmed by the merchant as a duplicate of the LiFePO4 product. Giving it
+    // an entry would give a duplicate the same standing in search and facets as
+    // the product it duplicates.
+    const duplicate = mapProduct(
+      {
+        ...source,
+        id: 'prod_live_duplicate',
+        url_handle: 'itarang-lithium-battery-150ah',
+        slug: null,
+        title: 'iTarang Lithium Battery 150Ah',
+        subtitle: null,
+        variants: [{ ...source.variants[0], sku: 'ITG-BAT-LI-150AH-12V' }],
+      },
+      new Map(),
+    );
+
+    expect(duplicate.warrantyMonths).toBeUndefined();
+    expect(duplicate.facets.batteryAh).toBeUndefined();
+  });
+
   it('stops reporting a product as unmapped once another identity finds it', () => {
     const subject = {
       productId: 'prod_brand_new_id',

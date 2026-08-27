@@ -65,6 +65,36 @@ export interface ProductEnrichment {
  *
  * If a figure here disagrees with hPanel, hPanel is right and this file is
  * stale.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT IS AND IS NOT ATTACHED
+ *
+ * Every product id keyed below was deleted from hPanel when the catalogue was
+ * recreated. The entries themselves are still correct — they are reattached to
+ * the products that replaced them through `match`, by url handle where the SKU
+ * is unusable.
+ *
+ * Three live products are deliberately left to the title fallback:
+ *
+ *   iTarang 900VA Inverter + 150Ah Battery Combo
+ *     Two entries describe a 900VA inverter paired with a 150Ah battery and
+ *     both are filed under combos — `ITG-INV-900VA-150AH` and
+ *     `ITR-CMB-900-150`. Nothing in the live copy separates them, and picking
+ *     one would state a warranty and a price positioning nobody confirmed.
+ *
+ *   Tarang Home Inverter 900VA
+ *     Same pair of candidates, read the other way: `ITG-INV-900VA-150AH` is a
+ *     900VA inverter filed as a combo, `ITR-INV-900-150` is a 900VA inverter
+ *     filed as an inverter. Its title matches the first entry's product almost
+ *     exactly, which is suggestive and not evidence.
+ *
+ *   iTarang Lithium Battery 150Ah
+ *     A duplicate of the 150Ah LiFePO4 product, confirmed by the merchant. It
+ *     gets no entry on purpose; enriching a duplicate would give it the same
+ *     standing in search and facets as the real one.
+ *
+ * Those three keep appearing in the admin's catalogue banner, which is the
+ * correct outcome: the gap is real and a human has to close it.
  */
 export const ENRICHMENT: Record<string, ProductEnrichment> = {
   /* ---------------------------------------------- ITG-INV-900VA-150AH · ₹8,500
@@ -169,6 +199,9 @@ export const ENRICHMENT: Record<string, ProductEnrichment> = {
    * Warranty 3 years · Waveform pure sine wave.
    */
   prod_01M07VY8GMMNFZNDG1QC4PSEAP: {
+    // The only 1500VA product on either side, so the match is unambiguous.
+    // Handle only: this product carries no SKU upstream at all.
+    match: { slugs: ['itarang-home-inverter-1500va'] },
     category: 'inverters',
     subcategory: 'pure-sine-wave',
     art: 'inverter',
@@ -200,6 +233,15 @@ export const ENRICHMENT: Record<string, ProductEnrichment> = {
    * · Warranty 5 years.
    */
   prod_01M07W4SS5G4Z6ANTD39JQHTFV: {
+    // The live product this belongs to, confirmed by the merchant.
+    //
+    // Handle only, deliberately. Upstream this product carries the SKU
+    // `ITG-CMB-900VA-150AH`, which the 900VA combo also carries — a merchant
+    // data error being fixed separately in hPanel. Keying on it would file a
+    // battery's warranty and specifications against a combo, which is precisely
+    // the mistake the ambiguity guard exists to prevent; that guard only sees
+    // collisions between entries here, not a SKU duplicated upstream.
+    match: { slugs: ['itarang-lithium-battery-150ah-12v-lifepo4'] },
     category: 'batteries',
     subcategory: 'lithium',
     art: 'battery',
@@ -228,6 +270,12 @@ export const ENRICHMENT: Record<string, ProductEnrichment> = {
    * · Warranty 5 years.
    */
   prod_01M07W8R9V3QPTKFDC9B63XZHM: {
+    // The only 200Ah battery on either side, so the match is unambiguous. Its
+    // SKU is unique upstream, so both identities are safe to carry.
+    match: {
+      skus: ['ITG-BAT-LI-200AH-12V'],
+      slugs: ['itarang-lithium-battery-200ah'],
+    },
     category: 'batteries',
     subcategory: 'lithium',
     art: 'battery',
