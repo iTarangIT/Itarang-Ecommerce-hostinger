@@ -188,7 +188,7 @@ export function SearchOverlay() {
                         <button
                           type="button"
                           onClick={() => rememberAndGo(r)}
-                          className="rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground transition-colors hover:border-accent/50 hover:text-accent-600"
+                          className="rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground transition-colors hover:border-accent/50 hover:text-primary-600"
                         >
                           {r}
                         </button>
@@ -208,7 +208,7 @@ export function SearchOverlay() {
                       <button
                         type="button"
                         onClick={() => rememberAndGo(p)}
-                        className="rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground transition-colors hover:border-accent/50 hover:text-accent-600"
+                        className="rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground transition-colors hover:border-accent/50 hover:text-primary-600"
                       >
                         {p}
                       </button>

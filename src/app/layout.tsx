@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from 'next';
-import { Inter, Sora } from 'next/font/google';
+import { Plus_Jakarta_Sans } from 'next/font/google';
 import './globals.css';
 import { SITE } from '@/lib/site';
 import { buildNavigation } from '@/lib/navigation';
@@ -7,16 +7,27 @@ import { Providers } from './providers';
 import { SiteChromeBottom, SiteChromeTop } from '@/components/layout/site-chrome';
 import { Footer } from '@/components/layout/footer';
 
-const sora = Sora({
+/**
+ * One family for everything, matching the parent site.
+ *
+ * itarang.com declares a serif for `--font-display` but never applies it — its
+ * own hero renders in Plus Jakarta Sans — so a single sans is what actually
+ * makes the two sites look related. Both CSS variables point at the same face;
+ * they are kept separate because every heading rule and `.heading-*` class
+ * already reads `--font-display`, and collapsing them would touch call sites
+ * for no gain.
+ */
+const jakarta = Plus_Jakarta_Sans({
   subsets: ['latin'],
   weight: ['400', '500', '600', '700', '800'],
-  variable: '--font-display',
+  variable: '--font-body',
   display: 'swap',
 });
 
-const inter = Inter({
+const jakartaDisplay = Plus_Jakarta_Sans({
   subsets: ['latin'],
-  variable: '--font-body',
+  weight: ['600', '700', '800'],
+  variable: '--font-display',
   display: 'swap',
 });
 
@@ -49,9 +60,13 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
+  // Kept in step with the ink ramp in `globals.css` — #12181D is --ink-900 and
+  // #1A2229 is --ink-800. These used to be navy values that only approximated
+  // the tokens they were meant to mirror, so the browser chrome never quite
+  // matched the header it sat above.
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#11213e' },
-    { media: '(prefers-color-scheme: dark)', color: '#0a1424' },
+    { media: '(prefers-color-scheme: light)', color: '#12181d' },
+    { media: '(prefers-color-scheme: dark)', color: '#12181d' },
   ],
   width: 'device-width',
   initialScale: 1,
@@ -89,7 +104,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const categories = await buildNavigation();
 
   return (
-    <html lang="en-IN" className={`${sora.variable} ${inter.variable}`} suppressHydrationWarning>
+    <html lang="en-IN" className={`${jakarta.variable} ${jakartaDisplay.variable}`} suppressHydrationWarning>
       <body className="flex min-h-screen flex-col">
         <script
           type="application/ld+json"

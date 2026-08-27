@@ -24,7 +24,7 @@ export function BottomNav() {
   const itemClass = (active: boolean) =>
     cn(
       'flex min-h-[3.25rem] flex-1 flex-col items-center justify-center gap-1 text-[0.6875rem] font-medium transition-colors',
-      active ? 'text-accent-600' : 'text-muted-foreground',
+      active ? 'text-primary-600' : 'text-muted-foreground',
     );
 
   return (

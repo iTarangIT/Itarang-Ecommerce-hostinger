@@ -60,7 +60,7 @@ export function Accordion({
                 <ChevronDown
                   className={cn(
                     'h-5 w-5 shrink-0 text-muted-foreground transition-transform duration-200',
-                    isOpen && 'rotate-180 text-accent-600',
+                    isOpen && 'rotate-180 text-primary-600',
                   )}
                 />
               </button>

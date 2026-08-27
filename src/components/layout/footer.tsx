@@ -16,7 +16,7 @@ export function Footer() {
   const [email, setEmail] = React.useState('');
 
   return (
-    <footer className="mt-16 border-t border-border bg-primary text-primary-foreground">
+    <footer className="mt-16 border-t border-border bg-ink-900 text-ink-50">
       {/* Support strip */}
       <div className="border-b border-white/10">
         <div className="container grid gap-4 py-6 sm:grid-cols-3">
@@ -24,20 +24,20 @@ export function Footer() {
             href={SITE.phoneHref}
             className="flex items-start gap-3 rounded-md p-2 transition-colors hover:bg-white/5"
           >
-            <Phone className="mt-0.5 h-5 w-5 shrink-0 text-accent" />
+            <Phone className="mt-0.5 h-5 w-5 shrink-0 text-primary-300" />
             <span>
               <span className="block text-sm font-semibold">{SITE.phone}</span>
-              <span className="block text-xs text-primary-foreground/60">{SITE.supportHours}</span>
+              <span className="block text-xs text-ink-50/60">{SITE.supportHours}</span>
             </span>
           </a>
           <a
             href={`mailto:${SITE.email}`}
             className="flex items-start gap-3 rounded-md p-2 transition-colors hover:bg-white/5"
           >
-            <Mail className="mt-0.5 h-5 w-5 shrink-0 text-accent" />
+            <Mail className="mt-0.5 h-5 w-5 shrink-0 text-primary-300" />
             <span>
               <span className="block text-sm font-semibold">{SITE.email}</span>
-              <span className="block text-xs text-primary-foreground/60">
+              <span className="block text-xs text-ink-50/60">
                 Orders, warranty and service
               </span>
             </span>
@@ -46,10 +46,10 @@ export function Footer() {
             href={SITE.whatsapp}
             className="flex items-start gap-3 rounded-md p-2 transition-colors hover:bg-white/5"
           >
-            <MessageCircle className="mt-0.5 h-5 w-5 shrink-0 text-accent" />
+            <MessageCircle className="mt-0.5 h-5 w-5 shrink-0 text-primary-300" />
             <span>
               <span className="block text-sm font-semibold">WhatsApp support</span>
-              <span className="block text-xs text-primary-foreground/60">
+              <span className="block text-xs text-ink-50/60">
                 Send a photo of your setup for faster help
               </span>
             </span>
@@ -60,7 +60,7 @@ export function Footer() {
       <div className="container grid gap-10 py-12 lg:grid-cols-12">
         <div className="lg:col-span-4">
           <Logo tone="inverse" />
-          <p className="mt-4 max-w-xs text-sm leading-relaxed text-primary-foreground/70">
+          <p className="mt-4 max-w-xs text-sm leading-relaxed text-ink-50/70">
             {SITE.description}
           </p>
 
@@ -90,13 +90,13 @@ export function Footer() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
-                className="border-white/20 bg-white/10 text-primary-foreground placeholder:text-primary-foreground/50 hover:border-white/40"
+                className="border-white/20 bg-white/10 text-ink-50 placeholder:text-ink-50/50 hover:border-white/40"
               />
               <Button type="submit" variant="accent" className="shrink-0">
                 Subscribe
               </Button>
             </div>
-            <p className="mt-2 text-xs text-primary-foreground/50">
+            <p className="mt-2 text-xs text-ink-50/50">
               No more than one email a month. Unsubscribe any time.
             </p>
           </form>
@@ -105,7 +105,7 @@ export function Footer() {
         <div className="grid gap-8 sm:grid-cols-3 lg:col-span-8">
           {FOOTER_COLUMNS.map((column) => (
             <nav key={column.label} aria-label={column.label}>
-              <h2 className="font-display text-sm font-semibold uppercase tracking-widest text-accent">
+              <h2 className="font-display text-sm font-semibold uppercase tracking-widest text-primary-300">
                 {column.label}
               </h2>
               <ul className="mt-4 space-y-2.5">
@@ -113,7 +113,7 @@ export function Footer() {
                   <li key={child.href}>
                     <Link
                       href={child.href}
-                      className="text-sm text-primary-foreground/75 transition-colors hover:text-accent"
+                      className="text-sm text-ink-50/75 transition-colors hover:text-primary-300"
                     >
                       {child.label}
                     </Link>
@@ -128,18 +128,18 @@ export function Footer() {
       <div className="border-t border-white/10">
         <div className="container flex flex-col gap-4 py-5">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-primary-foreground/50">We accept</span>
+            <span className="text-xs text-ink-50/50">We accept</span>
             {PAYMENT_METHODS.map((method) => (
               <span
                 key={method}
-                className="rounded-sm border border-white/15 bg-white/5 px-2 py-1 text-2xs font-medium text-primary-foreground/70"
+                className="rounded-sm border border-white/15 bg-white/5 px-2 py-1 text-2xs font-medium text-ink-50/70"
               >
                 {method}
               </span>
             ))}
           </div>
 
-          <div className="flex flex-col gap-3 border-t border-white/10 pt-4 text-xs text-primary-foreground/55 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-3 border-t border-white/10 pt-4 text-xs text-ink-50/55 sm:flex-row sm:items-center sm:justify-between">
             <p className="flex items-center gap-1.5">
               <MapPin className="h-3.5 w-3.5" />
               {SITE.address}
@@ -147,7 +147,7 @@ export function Footer() {
             <ul className="flex flex-wrap gap-x-4 gap-y-1">
               {POLICY_LINKS.map((link) => (
                 <li key={link.href}>
-                  <Link href={link.href} className="transition-colors hover:text-accent">
+                  <Link href={link.href} className="transition-colors hover:text-primary-300">
                     {link.label}
                   </Link>
                 </li>
@@ -155,7 +155,7 @@ export function Footer() {
             </ul>
           </div>
 
-          <p className="text-xs text-primary-foreground/45">
+          <p className="text-xs text-ink-50/45">
             © {new Date().getFullYear()} {SITE.name}. All rights reserved. Prices include GST; a GST
             invoice is issued with every order.
           </p>

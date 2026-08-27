@@ -115,7 +115,7 @@ export function MobileNav({ categories }: { categories: NavCategory[] }) {
                 onClick={close}
                 className="flex min-h-[3.5rem] items-center gap-2.5 px-4 text-sm font-medium text-foreground"
               >
-                <link.icon className="h-4.5 w-4.5 shrink-0 text-accent-600" />
+                <link.icon className="h-4.5 w-4.5 shrink-0 text-primary-600" />
                 {link.label}
               </Link>
             </li>
@@ -147,9 +147,9 @@ export function MobileNav({ categories }: { categories: NavCategory[] }) {
 
         <a
           href={SITE.phoneHref}
-          className="flex min-h-[3.5rem] items-center gap-3 px-4 text-sm font-semibold text-primary"
+          className="flex min-h-[3.5rem] items-center gap-3 px-4 text-sm font-semibold text-primary-600"
         >
-          <Phone className="h-4.5 w-4.5 text-accent-600" />
+          <Phone className="h-4.5 w-4.5 text-primary-600" />
           <span>
             {SITE.phone}
             <span className="block text-xs font-normal text-muted-foreground">

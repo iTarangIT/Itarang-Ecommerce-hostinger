@@ -19,7 +19,7 @@ export function Breadcrumbs({ items, className }: { items: Crumb[]; className?: 
               {item.href && !isLast ? (
                 <Link
                   href={item.href}
-                  className="shrink-0 transition-colors hover:text-accent-600 hover:underline"
+                  className="shrink-0 transition-colors hover:text-primary-600 hover:underline"
                 >
                   {item.label}
                 </Link>

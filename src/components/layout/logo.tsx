@@ -1,9 +1,25 @@
+import Image from 'next/image';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
+import { SITE } from '@/lib/site';
 
 /**
- * iTarang wordmark. The bolt mark and amber full stop carry over from the
- * existing storefront's identity.
+ * The official iTarang wordmark.
+ *
+ * The asset is the parent site's own file, copied byte for byte — the mark is a
+ * layered wave (*tarang* is "wave") in a rounded square, beside the wordmark.
+ * What stood here before was a hand-drawn approximation: a Lucide `Zap` bolt on
+ * a tinted tile with the name set as live text. It resembled nothing on
+ * itarang.com, and no real asset had ever been committed to this repository.
+ *
+ * Two variants ship because the wordmark is baked into the artwork rather than
+ * inheriting colour: `dark` is the near-black lettering for light chrome,
+ * `light` is the white lettering for the ink footer. That is exactly the
+ * distinction `tone` already drew, so no caller changes.
+ *
+ * Rendered at a fixed height with `width: auto`, so the 995 x 251 source scales
+ * by its own aspect ratio; at ~4x the displayed size it stays crisp on dense
+ * screens without art direction.
  */
 export function Logo({
   className,
@@ -12,41 +28,28 @@ export function Logo({
   className?: string;
   tone?: 'default' | 'inverse';
 }) {
+  const inverse = tone === 'inverse';
+
   return (
     <Link
       href="/"
-      aria-label="iTarang Products — home"
-      className={cn('group inline-flex items-center gap-2.5', className)}
+      aria-label={`${SITE.name} — home`}
+      className={cn(
+        'inline-flex items-center rounded-sm transition-opacity hover:opacity-90',
+        className,
+      )}
     >
-      <span
-        className={cn(
-          'grid h-9 w-9 place-items-center rounded-md transition-colors',
-          tone === 'inverse' ? 'bg-accent text-primary-900' : 'bg-primary text-accent',
-        )}
-      >
-        <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true" fill="currentColor">
-          <path d="M13.4 2.1a.55.55 0 0 1 .96.5l-1.9 5.9a.6.6 0 0 0 .57.79h5.1a.85.85 0 0 1 .64 1.4l-8.9 10.2a.55.55 0 0 1-.95-.5l1.9-5.9a.6.6 0 0 0-.57-.79H5.2a.85.85 0 0 1-.64-1.4z" />
-        </svg>
-      </span>
-      <span className="flex flex-col leading-none">
-        <span
-          className={cn(
-            'font-display text-lg font-bold tracking-tight',
-            tone === 'inverse' ? 'text-primary-foreground' : 'text-foreground',
-          )}
-        >
-          iTarang
-          <span className="text-accent">.</span>
-        </span>
-        <span
-          className={cn(
-            'mt-0.5 hidden text-[0.6rem] font-medium uppercase tracking-[0.18em] sm:block',
-            tone === 'inverse' ? 'text-primary-foreground/60' : 'text-muted-foreground',
-          )}
-        >
-          Power Products
-        </span>
-      </span>
+      <Image
+        src={inverse ? '/images/logo-wordmark-light.png' : '/images/logo-wordmark-dark.png'}
+        alt={SITE.name}
+        width={995}
+        height={251}
+        // The header mark is above the fold on every route, so it is worth
+        // preloading; the footer copy is not.
+        priority={!inverse}
+        sizes="(min-width: 640px) 160px, 132px"
+        className="h-8 w-auto sm:h-9"
+      />
     </Link>
   );
 }

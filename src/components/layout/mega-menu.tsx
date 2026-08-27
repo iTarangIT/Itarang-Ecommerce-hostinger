@@ -71,7 +71,7 @@ export function MegaMenu({ categories }: { categories: NavCategory[] }) {
               }}
               className={cn(
                 'relative flex h-11 items-center gap-1.5 rounded-md px-3 text-sm font-medium transition-colors',
-                isOpen ? 'text-accent-600' : 'text-foreground hover:text-accent-600',
+                isOpen ? 'text-primary-600' : 'text-foreground hover:text-primary-600',
               )}
             >
               {category.shortName}
@@ -111,7 +111,7 @@ export function MegaMenu({ categories }: { categories: NavCategory[] }) {
                     </ul>
                     <Link
                       href={category.href}
-                      className="group mt-5 inline-flex items-center gap-1.5 text-sm font-semibold text-primary transition-colors hover:text-accent-600"
+                      className="group mt-5 inline-flex items-center gap-1.5 text-sm font-semibold text-primary transition-colors hover:text-primary-600"
                     >
                       View all {category.total} products
                       <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
@@ -127,7 +127,7 @@ export function MegaMenu({ categories }: { categories: NavCategory[] }) {
                             href={sub.href}
                             className="group flex flex-col gap-0.5 rounded-md p-3 transition-colors hover:bg-secondary"
                           >
-                            <span className="flex items-center gap-2 text-sm font-semibold text-foreground group-hover:text-accent-600">
+                            <span className="flex items-center gap-2 text-sm font-semibold text-foreground group-hover:text-primary-600">
                               {sub.name}
                               <span className="tabular text-xs font-normal text-muted-foreground">
                                 {sub.count}
@@ -159,7 +159,7 @@ export function MegaMenu({ categories }: { categories: NavCategory[] }) {
                           />
                         </div>
                         <div className="p-3">
-                          <p className="line-clamp-2 text-sm font-semibold text-foreground group-hover:text-accent-600">
+                          <p className="line-clamp-2 text-sm font-semibold text-foreground group-hover:text-primary-600">
                             {category.featured.title}
                           </p>
                           <p className="mt-1.5 flex items-baseline gap-2">
