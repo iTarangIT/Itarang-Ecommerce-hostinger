@@ -2,19 +2,13 @@
 
 import * as React from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import {
-  BadgeCheck,
-  Check,
-  GitCompare,
-  Heart,
-  Loader2,
-  PackageCheck,
-  ShieldCheck,
-  ShoppingCart,
-} from 'lucide-react';
-import type { Product, ProductVariant } from '@/lib/commerce/types';
+import { Check, GitCompare, Heart, Loader2, PackageCheck, ShoppingCart } from 'lucide-react';
+import type { Paise, Product, ProductOption, ProductVariant } from '@/lib/commerce/types';
 import { discountPercent, formatPrice } from '@/lib/catalog/pricing';
+import { PURCHASE_DISABLED_NOTE, PURCHASE_ENABLED } from '@/lib/commerce/purchase';
+import { SITE } from '@/lib/site';
 import { useCart, useCompare, useRecentlyViewed, useWishlist } from '@/lib/store/hooks';
 import { useUI } from '@/lib/store/ui-provider';
 import { track } from '@/lib/analytics/track';
@@ -22,6 +16,8 @@ import { Button } from '@/components/ui/button';
 import { QuantityStepper } from '@/components/cart/quantity-stepper';
 import { PriceBlock } from './price-block';
 import { DeliveryCheck } from './delivery-check';
+import { PurchaseButton } from './purchase-button';
+import { ServiceStrip } from './service-strip';
 import { cn } from '@/lib/utils';
 
 /** Pick the variant matching a full option selection. */
@@ -30,6 +26,30 @@ function findVariant(product: Product, selection: Record<string, string>): Produ
     Object.entries(selection).every(([key, value]) => variant.optionValues[key] === value),
   );
   return match ?? product.variants[0];
+}
+
+/**
+ * The cheapest price reachable by picking `value` for `optionId`.
+ *
+ * Shown beside an option value only when the values are not all one price —
+ * otherwise the figure repeats the headline price on every pill and reads as
+ * noise. Uses the cheapest rather than the current combination's price because
+ * the shopper is being told what the choice would cost them at best, before
+ * they have narrowed the other options.
+ */
+function priceForValue(product: Product, optionId: string, value: string): Paise | null {
+  const prices = product.variants
+    .filter((variant) => variant.optionValues[optionId] === value)
+    .map((variant) => variant.price.selling);
+  return prices.length > 0 ? Math.min(...prices) : null;
+}
+
+/** True when an option's values span more than one price. */
+function optionHasPriceSpread(product: Product, option: ProductOption): boolean {
+  const prices = option.values
+    .map((value) => priceForValue(product, option.id, value))
+    .filter((price): price is Paise => price !== null);
+  return new Set(prices).size > 1;
 }
 
 export function BuyBox({ product }: { product: Product }) {
@@ -45,6 +65,9 @@ export function BuyBox({ product }: { product: Product }) {
     return { ...first.optionValues };
   });
   const [quantity, setQuantity] = React.useState(1);
+  // One visible note serves both disabled buttons, so both point at this id
+  // rather than each minting a hidden copy of the same sentence.
+  const noteId = React.useId();
 
   const variant = findVariant(product, selection);
   const soldOut = variant.availability === 'out-of-stock';
@@ -131,41 +154,89 @@ export function BuyBox({ product }: { product: Product }) {
       />
 
       {/* Variant selection — unavailable combinations are disabled, never hidden. */}
-      {product.options.map((option) => (
-        <fieldset key={option.id}>
-          <legend className="text-sm font-semibold text-foreground">
-            {option.name}
-            <span className="ml-2 font-normal text-muted-foreground">
-              {selection[option.id]}
-            </span>
-          </legend>
-          <div className="mt-2.5 flex flex-wrap gap-2">
-            {option.values.map((value) => {
-              const selected = selection[option.id] === value;
-              const available = isValueAvailable(option.id, value);
-              return (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setSelection((s) => ({ ...s, [option.id]: value }))}
-                  aria-pressed={selected}
-                  disabled={!available}
-                  className={cn(
-                    'inline-flex min-h-[2.75rem] items-center gap-2 rounded-md border px-4 text-sm font-medium transition-colors',
-                    selected
-                      ? 'border-primary bg-primary text-primary-foreground'
-                      : 'border-border bg-card text-foreground hover:border-accent/60',
-                    !available && 'cursor-not-allowed opacity-45 line-through',
-                  )}
-                >
-                  {selected ? <Check className="h-4 w-4" /> : null}
-                  {value}
-                </button>
-              );
-            })}
-          </div>
-        </fieldset>
-      ))}
+      {product.options.map((option) => {
+        const showPrices = optionHasPriceSpread(product, option);
+        const isColor = option.kind === 'color';
+
+        return (
+          <fieldset key={option.id}>
+            <legend className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              {option.name}:{' '}
+              <span className="normal-case text-foreground">{selection[option.id]}</span>
+            </legend>
+
+            <div className={cn('mt-2.5 flex flex-wrap', isColor ? 'gap-3' : 'gap-2')}>
+              {option.values.map((value) => {
+                const selected = selection[option.id] === value;
+                const available = isValueAvailable(option.id, value);
+                const swatch = option.swatches?.find((entry) => entry.value === value);
+                const price = showPrices ? priceForValue(product, option.id, value) : null;
+
+                if (isColor) {
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setSelection((s) => ({ ...s, [option.id]: value }))}
+                      aria-pressed={selected}
+                      aria-label={available ? value : `${value} — out of stock`}
+                      title={value}
+                      disabled={!available}
+                      className={cn(
+                        'relative h-10 w-10 overflow-hidden rounded-full border border-border transition-all',
+                        selected && 'ring-2 ring-primary ring-offset-2 ring-offset-background',
+                        !available && 'cursor-not-allowed opacity-40',
+                      )}
+                      style={swatch?.hex ? { backgroundColor: swatch.hex } : undefined}
+                    >
+                      {swatch?.image ? (
+                        <Image src={swatch.image} alt="" fill sizes="40px" className="object-cover" />
+                      ) : null}
+                      {/* No hex and no image: fall back to the value's initial so
+                          the chip is never a blank circle. */}
+                      {!swatch?.hex && !swatch?.image ? (
+                        <span className="grid h-full w-full place-items-center text-sm font-semibold text-foreground">
+                          {value.charAt(0)}
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                }
+
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setSelection((s) => ({ ...s, [option.id]: value }))}
+                    aria-pressed={selected}
+                    disabled={!available}
+                    className={cn(
+                      'inline-flex min-h-[2.75rem] items-center gap-2 rounded-md border px-4 text-sm font-medium transition-colors',
+                      selected
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : 'border-border bg-card text-foreground hover:border-accent/60',
+                      !available && 'cursor-not-allowed opacity-45 line-through',
+                    )}
+                  >
+                    {selected ? <Check className="h-4 w-4" /> : null}
+                    {value}
+                    {price !== null ? (
+                      <span
+                        className={cn(
+                          'tabular text-xs',
+                          selected ? 'text-primary-foreground/80' : 'text-muted-foreground',
+                        )}
+                      >
+                        {formatPrice(price)}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          </fieldset>
+        );
+      })}
 
       {/* Availability */}
       <div className="flex flex-wrap items-center gap-3 text-sm">
@@ -192,34 +263,63 @@ export function BuyBox({ product }: { product: Product }) {
         {!soldOut ? (
           <div className="flex items-center gap-3">
             <span className="text-sm font-medium text-foreground">Quantity</span>
-            <QuantityStepper value={quantity} onChange={setQuantity} max={Math.max(1, variant.stock)} />
+            <QuantityStepper
+              value={quantity}
+              onChange={setQuantity}
+              max={Math.max(1, variant.stock)}
+              disabled={!PURCHASE_ENABLED}
+            />
           </div>
         ) : null}
 
+        {/* Purchase is switched off site-wide; the buttons stay, disabled, with
+            the reason stated below them. See lib/commerce/purchase.ts. */}
         <div className="flex flex-col gap-2 sm:flex-row">
-          <Button
+          <PurchaseButton
             onClick={addToCart}
             disabled={soldOut}
+            describedBy={PURCHASE_ENABLED ? undefined : noteId}
             variant="primary"
             size="lg"
             fullWidth
-            className="sm:flex-1"
+            wrapperClassName="sm:flex-1"
           >
             <ShoppingCart className="h-4.5 w-4.5" />
             {soldOut ? 'Out of stock' : 'Add to cart'}
-          </Button>
-          <Button
+          </PurchaseButton>
+          <PurchaseButton
             onClick={buyNow}
             disabled={soldOut || navigating}
+            describedBy={PURCHASE_ENABLED ? undefined : noteId}
             variant="accent"
             size="lg"
             fullWidth
-            className="sm:flex-1"
+            wrapperClassName="sm:flex-1"
           >
             {navigating ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             Buy now
-          </Button>
+          </PurchaseButton>
         </div>
+
+        {!PURCHASE_ENABLED ? (
+          <p id={noteId} className="text-xs text-muted-foreground">
+            {PURCHASE_DISABLED_NOTE} Meanwhile you can{' '}
+            <Link
+              href="/tools/load-calculator"
+              className="font-semibold text-primary underline-offset-4 hover:underline"
+            >
+              size your system
+            </Link>{' '}
+            or{' '}
+            <a
+              href={`mailto:${SITE.email}?subject=${encodeURIComponent(`Enquiry: ${product.title}`)}`}
+              className="font-semibold text-primary underline-offset-4 hover:underline"
+            >
+              enquire about this product
+            </a>
+            .
+          </p>
+        ) : null}
 
         <div className="flex gap-2">
           <Button
@@ -259,32 +359,20 @@ export function BuyBox({ product }: { product: Product }) {
         </div>
       </div>
 
-      {/* Assurances — omitted entirely when the catalogue supports neither claim. */}
-      {product.warrantyMonths !== undefined || product.installationIncluded ? (
-        <ul className="grid gap-2 rounded-lg border border-border bg-surface p-4 sm:grid-cols-2">
-          {product.warrantyMonths !== undefined ? (
-            <li className="flex items-start gap-2 text-sm text-foreground">
-              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-success" />
-              {Math.round(product.warrantyMonths / 12)}-year warranty, documented
-            </li>
-          ) : null}
-          {product.installationIncluded ? (
-            <li className="flex items-start gap-2 text-sm text-foreground">
-              <BadgeCheck className="mt-0.5 h-4 w-4 shrink-0 text-success" />
-              Certified installation included
-            </li>
-          ) : null}
-        </ul>
-      ) : null}
-
+      {/* Delivery date, then the service promises. The warranty and
+          installation assurances that used to sit here are stated by the
+          service strip and again in the specification grid — three times on
+          one page was two too many. */}
       <DeliveryCheck installationIncluded={product.installationIncluded} />
 
-      <StickyBuyBar
-        product={product}
-        variant={variant}
-        onAdd={addToCart}
-        soldOut={soldOut}
+      <ServiceStrip
+        installationIncluded={product.installationIncluded}
+        returnWindowDays={product.returnWindowDays}
       />
+
+      {/* Rendered whether or not purchase is enabled, so the page behaves the
+          same on scroll either way; the button inside carries the gate. */}
+      <StickyBuyBar product={product} variant={variant} onAdd={addToCart} soldOut={soldOut} />
     </div>
   );
 }
@@ -319,11 +407,14 @@ function StickyBuyBar({
       )}
       aria-hidden={!visible}
     >
+      {/* On a phone the bar is the button — the price and title are already on
+          screen above it, and a full-width target is the easier one to hit.
+          From `sm` up there is room to restate what is being added. */}
       <div className="container flex items-center gap-3 py-2.5">
         <div className="relative hidden h-12 w-12 shrink-0 overflow-hidden rounded-md border border-border bg-surface sm:block">
           <Image src={product.images[0]} alt="" fill sizes="48px" className="object-contain p-1" />
         </div>
-        <div className="min-w-0 flex-1">
+        <div className="hidden min-w-0 flex-1 sm:block">
           <p className="truncate text-sm font-semibold text-foreground">{product.title}</p>
           <p className="tabular text-sm font-bold text-foreground">
             {formatPrice(variant.price.selling)}
@@ -334,18 +425,18 @@ function StickyBuyBar({
             ) : null}
           </p>
         </div>
-        <Button
+        <PurchaseButton
           onClick={onAdd}
           disabled={soldOut}
           variant="accent"
-          size="md"
-          className="shrink-0"
+          size="lg"
+          fullWidth
+          wrapperClassName="flex-1 sm:w-auto sm:flex-none"
           tabIndex={visible ? 0 : -1}
         >
           <ShoppingCart className="h-4 w-4" />
-          <span className="hidden xs:inline">{soldOut ? 'Out of stock' : 'Add to cart'}</span>
-          <span className="xs:hidden">{soldOut ? 'Sold out' : 'Add'}</span>
-        </Button>
+          {soldOut ? 'Out of stock' : 'Add to Cart'}
+        </PurchaseButton>
       </div>
     </div>
   );

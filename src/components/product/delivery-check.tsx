@@ -1,30 +1,38 @@
 'use client';
 
 import * as React from 'react';
-import { AlertCircle, CheckCircle2, MapPin, Wallet, Wrench } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Pencil, Truck, Wallet, Wrench } from 'lucide-react';
 import { checkPincode, type ServiceabilityResult } from '@/lib/support/serviceability';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/field';
 
+/** The range quoted before a pincode narrows it. */
+const DEFAULT_DAYS = '3 – 5 days';
+
 /**
- * Pincode delivery check.
+ * Delivery date, with a pincode check to sharpen it.
  *
- * Answers the three questions a shopper has before committing: does it reach
- * me, when, and can I pay on delivery.
+ * Leads with an answer rather than an empty field: a shopper who never types
+ * anything still learns roughly when the product arrives, and entering a
+ * pincode replaces the range with a real date window for that address.
  */
 export function DeliveryCheck({ installationIncluded }: { installationIncluded: boolean }) {
   const [pincode, setPincode] = React.useState('');
   const [result, setResult] = React.useState<ServiceabilityResult | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
+  const serviceable = result && result.serviceable ? result : null;
+
   return (
-    <div className="rounded-lg border border-border bg-card p-4">
-      <div className="flex items-center gap-2">
-        <MapPin className="h-4.5 w-4.5 text-accent-600" />
-        <h3 className="font-display text-sm font-semibold text-foreground">
-          Delivery &amp; installation
-        </h3>
-      </div>
+    <div className="border-y border-border py-4">
+      <p className="flex items-center gap-2.5 text-sm text-foreground">
+        <Truck className="h-5 w-5 shrink-0 text-accent-600" />
+        <span className="h-5 w-px shrink-0 bg-border" />
+        Reaching your home in{' '}
+        <strong className="font-semibold">
+          {serviceable ? `${serviceable.deliveryDays} – ${serviceable.deliveryDays + 1} days` : DEFAULT_DAYS}
+        </strong>
+      </p>
 
       <form
         className="mt-3 flex gap-2"
@@ -40,19 +48,22 @@ export function DeliveryCheck({ installationIncluded }: { installationIncluded: 
           }
         }}
       >
-        <Input
-          inputMode="numeric"
-          maxLength={6}
-          value={pincode}
-          onChange={(e) => {
-            setPincode(e.target.value.replace(/\D/g, ''));
-            setError(null);
-          }}
-          placeholder="Enter pincode"
-          aria-label="Delivery pincode"
-          aria-invalid={Boolean(error)}
-          className="tabular"
-        />
+        <div className="relative flex-1">
+          <Input
+            inputMode="numeric"
+            maxLength={6}
+            value={pincode}
+            onChange={(e) => {
+              setPincode(e.target.value.replace(/\D/g, ''));
+              setError(null);
+            }}
+            placeholder="Enter Pincode to get accurate date"
+            aria-label="Delivery pincode"
+            aria-invalid={Boolean(error)}
+            className="tabular pr-9"
+          />
+          <Pencil className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        </div>
         <Button type="submit" variant="outline" className="shrink-0">
           Check
         </Button>
@@ -71,11 +82,7 @@ export function DeliveryCheck({ installationIncluded }: { installationIncluded: 
             <li className="flex items-start gap-2">
               <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" />
               <span className="text-foreground">
-                Delivers to <span className="tabular font-semibold">{result.pincode}</span> in{' '}
-                <strong>
-                  {result.deliveryDays}–{result.deliveryDays + 1} working days
-                </strong>
-                .
+                Delivers to <span className="tabular font-semibold">{result.pincode}</span>.
               </span>
             </li>
             {installationIncluded ? (
@@ -105,10 +112,6 @@ export function DeliveryCheck({ installationIncluded }: { installationIncluded: 
           </p>
         )
       ) : null}
-
-      <p className="mt-3 border-t border-border pt-3 text-xs text-muted-foreground">
-        Free standard delivery on orders above ₹4,999. Batteries ship in protective crates.
-      </p>
     </div>
   );
 }

@@ -8,13 +8,15 @@ export function Skeleton({ className }: { className?: string }) {
 export function ProductCardSkeleton() {
   return (
     <div className="flex flex-col overflow-hidden rounded-lg border border-border bg-card">
-      <Skeleton className="aspect-square w-full rounded-none" />
-      <div className="flex flex-col gap-2.5 p-4">
-        <Skeleton className="h-3 w-20" />
+      <Skeleton className="aspect-[4/5] w-full rounded-none" />
+      <div className="flex flex-col gap-2 p-4">
+        {/* Lead spec, two title lines, price, discount pill, colour row, CTA. */}
+        <Skeleton className="h-5 w-24" />
         <Skeleton className="h-4 w-full" />
         <Skeleton className="h-4 w-3/5" />
-        <Skeleton className="h-3 w-24" />
         <Skeleton className="mt-1 h-6 w-32" />
+        <Skeleton className="h-4 w-16" />
+        <Skeleton className="h-3 w-24" />
         <Skeleton className="mt-2 h-11 w-full" />
       </div>
     </div>

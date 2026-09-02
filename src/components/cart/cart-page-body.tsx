@@ -8,6 +8,8 @@ import {
   Bookmark,
   Info,
   Lock,
+  Mail,
+  Phone,
   ShieldCheck,
   ShoppingBag,
   Trash2,
@@ -15,6 +17,8 @@ import {
 } from 'lucide-react';
 import type { ProductSummary } from '@/lib/commerce/summary';
 import { formatPrice } from '@/lib/catalog/pricing';
+import { PURCHASE_ENABLED } from '@/lib/commerce/purchase';
+import { SITE } from '@/lib/site';
 import { useCart } from '@/lib/store/hooks';
 import { useUI } from '@/lib/store/ui-provider';
 import { Breadcrumbs } from '@/components/ui/breadcrumbs';
@@ -137,28 +141,60 @@ export function CartPageBody({
                   <OrderSummary totals={cart.totals} showGst />
                 </div>
 
-                <ButtonLink
-                  href={signedIn ? '/checkout' : '/login?next=%2Fcheckout'}
-                  variant="accent"
-                  size="lg"
-                  fullWidth
-                  className="mt-5"
-                >
-                  <Lock className="h-4 w-4" />
-                  {signedIn ? 'Proceed to checkout' : 'Sign in to check out'}
-                </ButtonLink>
+                {/* Purchase is switched off site-wide; see lib/commerce/purchase.ts.
+                    The route and everything behind it are untouched — this is the
+                    door, not the machinery. */}
+                {PURCHASE_ENABLED ? (
+                  <>
+                    <ButtonLink
+                      href={signedIn ? '/checkout' : '/login?next=%2Fcheckout'}
+                      variant="accent"
+                      size="lg"
+                      fullWidth
+                      className="mt-5"
+                    >
+                      <Lock className="h-4 w-4" />
+                      {signedIn ? 'Proceed to checkout' : 'Sign in to check out'}
+                    </ButtonLink>
 
-                {signedIn ? null : (
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Your cart is saved on this device and will still be here after you sign in.
-                  </p>
+                    {signedIn ? null : (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Your cart is saved on this device and will still be here after you sign in.
+                      </p>
+                    )}
+
+                    <p className="mt-2 flex items-start gap-1.5 text-xs text-muted-foreground">
+                      <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      Test mode — checkout runs against a local database with a simulated payment
+                      step. Nothing is charged.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <Button variant="accent" size="lg" fullWidth className="mt-5" disabled>
+                      <Lock className="h-4 w-4" />
+                      Checkout unavailable
+                    </Button>
+
+                    <p className="mt-2 flex items-start gap-1.5 text-xs text-muted-foreground">
+                      <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      Online purchasing is switched off while the store is being finished. Your
+                      cart is saved on this device. To buy any of these, call or email us and we
+                      will take it from there.
+                    </p>
+
+                    <div className="mt-3 flex flex-col gap-2">
+                      <ButtonLink href={SITE.phoneHref} variant="outline" fullWidth>
+                        <Phone className="h-4 w-4" />
+                        {SITE.phone}
+                      </ButtonLink>
+                      <ButtonLink href={`mailto:${SITE.email}`} variant="outline" fullWidth>
+                        <Mail className="h-4 w-4" />
+                        {SITE.email}
+                      </ButtonLink>
+                    </div>
+                  </>
                 )}
-
-                <p className="mt-2 flex items-start gap-1.5 text-xs text-muted-foreground">
-                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  Test mode — checkout runs against a local database with a simulated payment
-                  step. Nothing is charged.
-                </p>
 
                 <ul className="mt-4 space-y-2 border-t border-border pt-4 text-xs text-muted-foreground">
                   <li className="flex items-center gap-2">

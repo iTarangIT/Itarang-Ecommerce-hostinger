@@ -29,10 +29,20 @@ export function Reviews({
   summary,
   reviews,
   productTitle,
+  layout = 'wide',
 }: {
   summary: RatingSummary | null;
   reviews: Review[];
   productTitle: string;
+  /**
+   * `'column'` stacks the distribution above the list.
+   *
+   * The side-by-side split needs roughly full page width; inside the product
+   * page's buy column it squeezes the star bars and the sort control into
+   * something unreadable. Tailwind's breakpoints answer the *viewport*, not
+   * the container, so the caller has to say which it is.
+   */
+  layout?: 'wide' | 'column';
 }) {
   const { toast } = useUI();
   const [sort, setSort] = React.useState<SortId>('helpful');
@@ -73,9 +83,9 @@ export function Reviews({
   const total = summary.count;
 
   return (
-    <div className="grid gap-8 lg:grid-cols-12">
+    <div className={cn('grid gap-8', layout === 'wide' && 'lg:grid-cols-12')}>
       {/* Summary + distribution */}
-      <div className="lg:col-span-4">
+      <div className={cn(layout === 'wide' && 'lg:col-span-4')}>
         <div className="rounded-lg border border-border bg-card p-5">
           <div className="flex items-center gap-4">
             <p className="tabular font-display text-4xl font-bold text-foreground">
@@ -145,7 +155,7 @@ export function Reviews({
       </div>
 
       {/* List */}
-      <div className="lg:col-span-8">
+      <div className={cn(layout === 'wide' && 'lg:col-span-8')}>
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
           <div className="flex flex-wrap items-center gap-2">
             {starFilter ? (

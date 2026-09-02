@@ -1,22 +1,34 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ArrowRight, Calculator, PackageOpen, ShieldCheck, Wrench } from 'lucide-react';
+import { ArrowRight, Calculator, FlaskConical } from 'lucide-react';
 import { catalog } from '@/lib/commerce';
+import {
+  DEMO_PRODUCT,
+  DEMO_PRODUCT_SLUG,
+  DEMO_REVIEWS,
+  isDemoSlug,
+} from '@/lib/commerce/demo/demo-product';
+import { DemoBatterySections } from '@/components/product/demo-battery-sections';
 import { CATEGORY_BY_SLUG } from '@/lib/commerce/mock/categories';
 import { offersForCategory } from '@/lib/commerce/mock/offers';
 import { allProducts, productsByIds } from '@/lib/catalog/collections';
-import { toProductSummary } from '@/lib/commerce/summary';
+import { toProductSummary, type ProductSummary } from '@/lib/commerce/summary';
+import type { Review } from '@/lib/commerce/types';
 import { displayPrice, formatPrice } from '@/lib/catalog/pricing';
 import { SITE } from '@/lib/site';
 import { BreadcrumbJsonLd, Breadcrumbs } from '@/components/ui/breadcrumbs';
-import { Accordion } from '@/components/ui/accordion';
 import { RatingSummaryInline } from '@/components/ui/rating';
 import { ButtonLink } from '@/components/ui/button';
 import { Gallery } from '@/components/product/gallery';
+import { attributePairs } from '@/components/product/key-attributes';
 import { BuyBox } from '@/components/product/buy-box';
+import { CollapsibleCard } from '@/components/product/collapsible-card';
+import { ProductSpecs } from '@/components/product/product-specs';
 import { OfferStack } from '@/components/product/offer-stack';
-import { SpecTable } from '@/components/product/spec-table';
+import { SizeChart } from '@/components/product/size-chart';
+import { SellerDetail } from '@/components/product/seller-info';
+import { BulkOrderBanner } from '@/components/product/bulk-order-banner';
 import { Reviews } from '@/components/product/reviews';
 import { FrequentlyBought } from '@/components/product/frequently-bought';
 import { RecentlyViewed } from '@/components/product/recently-viewed';
@@ -26,15 +38,39 @@ interface PageProps {
   params: Promise<{ slug: string }>;
 }
 
-/** Prerender whatever the *active* provider is serving. */
+/**
+ * Prerender whatever the *active* provider is serving, plus the demo product.
+ *
+ * The demo slug is appended here rather than inside `allProducts()` on purpose.
+ * `allProducts()` feeds `syncInventoryFromHostingerAction`, which mirrors the
+ * catalogue into the database and reconciles inventory — so a demo product
+ * added there would be written into `catalogue_products` / `catalogue_skus`.
+ * Adding it to this route's params list keeps it a purely presentational
+ * fixture that the commerce layer never sees.
+ */
 export async function generateStaticParams() {
   const products = await allProducts();
-  return products.map((product) => ({ slug: product.slug }));
+  return [...products.map((product) => ({ slug: product.slug })), { slug: DEMO_PRODUCT_SLUG }];
 }
+
+/** The demo fixture, or the real catalogue. Never both. */
+async function loadProduct(slug: string) {
+  return isDemoSlug(slug) ? DEMO_PRODUCT : await catalog().getProduct(slug);
+}
+
+/**
+ * The demo product's relations.
+ *
+ * Its reviews come from the same fixture file as the rest of it — invented,
+ * and fenced behind `isDemoSlug()` so no provider ever serves them. Companions
+ * and related products stay empty: those would have to be *real* catalogue
+ * products, and the demo must not reach into the live catalogue.
+ */
+const DEMO_RELATIONS: [Review[], ProductSummary[], ProductSummary[]] = [DEMO_REVIEWS, [], []];
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { slug } = await params;
-  const product = await catalog().getProduct(slug);
+  const product = await loadProduct(slug);
   if (!product) return { title: 'Product not found' };
 
   const price = displayPrice(product);
@@ -61,8 +97,9 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 
 export default async function ProductPage({ params }: PageProps) {
   const { slug } = await params;
+  const isDemo = isDemoSlug(slug);
   const provider = catalog();
-  const product = await provider.getProduct(slug);
+  const product = await loadProduct(slug);
   if (!product) notFound();
 
   const category = CATEGORY_BY_SLUG.get(product.category);
@@ -71,11 +108,16 @@ export default async function ProductPage({ params }: PageProps) {
   // shape looked parallel but was not: an array literal evaluates its elements
   // in order, so reviews had to resolve before the companion and related
   // lookups were even started.
-  const [reviews, companions, related] = await Promise.all([
-    provider.getReviews(product.id),
-    productsByIds(product.frequentlyBoughtWith),
-    productsByIds(product.relatedProductIds),
-  ]);
+  //
+  // The demo product skips all three lookups: it is a presentational fixture
+  // and must not reach into the live catalogue for reviews or companions.
+  const [reviews, companions, related] = isDemo
+    ? DEMO_RELATIONS
+    : await Promise.all([
+        provider.getReviews(product.id),
+        productsByIds(product.frequentlyBoughtWith),
+        productsByIds(product.relatedProductIds),
+      ]);
 
   const subcategory = category?.subcategories.find((s) => s.slug === product.subcategory);
   const offers = offersForCategory(product.category);
@@ -123,126 +165,10 @@ export default async function ProductPage({ params }: PageProps) {
   // Narrowed once here so the conditional blocks below read cleanly.
   const warrantyMonths = product.warrantyMonths;
 
-  const accordionItems = [
-    {
-      id: 'description',
-      title: 'Description',
-      defaultOpen: true,
-      children: (
-        <div className="rich-text max-w-3xl">
-          {product.description.map((paragraph, index) => (
-            <p key={index}>{paragraph}</p>
-          ))}
-        </div>
-      ),
-    },
-    {
-      id: 'specifications',
-      title: 'Specifications',
-      children: <SpecTable groups={product.specGroups} />,
-    },
-    {
-      id: 'box',
-      title: 'What is in the box',
-      children: (
-        <ul className="space-y-2">
-          {product.boxContents.map((entry) => (
-            <li key={entry} className="flex items-start gap-2 text-sm text-muted-foreground">
-              <PackageOpen className="mt-0.5 h-4 w-4 shrink-0 text-accent-600" />
-              {entry}
-            </li>
-          ))}
-        </ul>
-      ),
-    },
-    {
-      id: 'installation',
-      title: 'Installation & service',
-      children: (
-        <div className="rich-text max-w-3xl">
-          <p>
-            {product.installationIncluded
-              ? 'Installation by a certified iTarang technician is included in the price. Your slot is booked after the order is confirmed, and the technician commissions the system, sets the correct charger profile for your battery chemistry and runs a load test before leaving.'
-              : 'Installation is not included in this product’s price. If you would like a certified iTarang technician to install and commission it, our support team can arrange a visit from the network covering your pincode.'}
-          </p>
-          <p>
-            Service requests are raised in the Owner Centre. You receive a reference number and a
-            technician is assigned from the network covering your pincode.
-          </p>
-          <ul>
-            <li>
-              <Link href="/support/installation" className="font-medium text-primary underline-offset-4 hover:underline">
-                Book an installation slot
-              </Link>
-            </li>
-            <li>
-              <Link href="/support/dealers" className="font-medium text-primary underline-offset-4 hover:underline">
-                Find a technician near you
-              </Link>
-            </li>
-          </ul>
-        </div>
-      ),
-    },
-    // Only shown when the catalogue states a warranty. A product with no
-    // stated term gets no warranty panel rather than an invented one.
-    ...(warrantyMonths !== undefined
-      ? [
-          {
-            id: 'warranty',
-            title: 'Warranty',
-            meta: `${Math.round(warrantyMonths / 12)} years`,
-            children: (
-              <div className="rich-text max-w-3xl">
-                <p>
-                  This product carries a{' '}
-                  <strong>
-                    {warrantyMonths}-month ({Math.round(warrantyMonths / 12)}-year) warranty
-                  </strong>{' '}
-                  from the date of installation. The written terms ship with the product and are
-                  also available from support.
-                </p>
-                <p>
-                  Registering your serial number in the Owner Centre means a future claim never
-                  depends on locating the original invoice.
-                </p>
-                <ul>
-                  <li>
-                    <Link
-                      href="/support/warranty-registration"
-                      className="font-medium text-primary underline-offset-4 hover:underline"
-                    >
-                      Register this product&rsquo;s warranty
-                    </Link>
-                  </li>
-                </ul>
-              </div>
-            ),
-          },
-        ]
-      : []),
-    ...(product.faqs.length > 0
-      ? [
-          {
-            id: 'faqs',
-            title: 'Questions about this product',
-            meta: `${product.faqs.length}`,
-            children: (
-              <dl className="space-y-4">
-                {product.faqs.map((faq) => (
-                  <div key={faq.question}>
-                    <dt className="text-sm font-semibold text-foreground">{faq.question}</dt>
-                    <dd className="mt-1 text-sm leading-relaxed text-muted-foreground">
-                      {faq.answer}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            ),
-          },
-        ]
-      : []),
-  ];
+  // The headline figures for the gallery's overlay tile. Computed here so the
+  // gallery — a client component — receives five strings rather than the whole
+  // product.
+  const highlightPairs = attributePairs(product);
 
   return (
     <>
@@ -260,97 +186,188 @@ export default async function ProductPage({ params }: PageProps) {
 
       <div className="container py-6 lg:py-10">
         <div className="grid gap-8 lg:grid-cols-12 lg:gap-12">
-          <div className="lg:col-span-7">
-            <Gallery images={product.images} title={product.title} badges={product.badges} />
+          <div className="min-w-0 lg:col-span-7">
+            <Gallery
+              images={product.images}
+              title={product.title}
+              badges={product.badges}
+              highlights={highlightPairs}
+            />
           </div>
 
-          <div className="lg:col-span-5">
-            <p className="eyebrow">
-              {category?.name}
-              {subcategory ? ` · ${subcategory.name}` : ''}
-            </p>
-            <h1 className="heading-1 mt-1.5 text-balance">{product.title}</h1>
-            <p className="mt-2 text-sm text-muted-foreground sm:text-base">{product.subtitle}</p>
+          {/* Everything else lives in this column, top to bottom: the product
+              is decided on here, so the facts that decide it are here too
+              rather than scattered down a page the shopper has to leave the
+              buy controls to reach.
 
-            <div className="mt-3">
-              {product.rating ? (
-                <RatingSummaryInline
-                  average={product.rating.average}
-                  count={product.rating.count}
-                  size="md"
-                  href="#reviews"
-                />
-              ) : (
-                <span className="text-sm text-muted-foreground">No reviews yet</span>
-              )}
+              `min-w-0` is load-bearing: a grid item defaults to
+              `min-width: auto`, so the size chart's `min-w-[30rem]` would
+              otherwise widen this column past the viewport instead of
+              scrolling inside its own container. */}
+          <div className="min-w-0 space-y-6 lg:col-span-5">
+            {/* Demo fixture — see lib/commerce/demo/demo-product.ts. */}
+            {isDemo ? (
+              <div className="mb-4 rounded-lg border border-warning/40 bg-warning-soft p-3.5">
+                <p className="flex items-center gap-2 font-display text-sm font-semibold text-warning">
+                  <FlaskConical className="h-4 w-4 shrink-0" />
+                  Demonstration product
+                </p>
+                <p className="mt-1.5 text-sm leading-relaxed text-foreground/80">
+                  This page exists to demonstrate the product-page design. Every
+                  specification, figure and price on it is illustrative sample data — it does
+                  not come from the iTarang catalogue and does not describe a product on sale.
+                </p>
+              </div>
+            ) : null}
+
+            <div>
+              <p className="eyebrow">
+                {category?.name}
+                {subcategory ? ` · ${subcategory.name}` : ''}
+              </p>
+              <h1 className="heading-1 mt-1.5 text-balance">{product.title}</h1>
+              <p className="mt-2 text-sm text-muted-foreground sm:text-base">{product.subtitle}</p>
+              <div className="mt-3">
+                {product.rating ? (
+                  <RatingSummaryInline
+                    average={product.rating.average}
+                    count={product.rating.count}
+                    size="md"
+                    href="#reviews"
+                  />
+                ) : (
+                  <span className="text-sm text-muted-foreground">No reviews yet</span>
+                )}
+              </div>
             </div>
 
-            <div className="mt-6">
-              <BuyBox product={product} />
-            </div>
+            {/* Price, selectors, buy controls, delivery and the service row. */}
+            <BuyBox product={product} />
 
-            <div className="mt-6">
-              <OfferStack offers={offers} />
-            </div>
-          </div>
-        </div>
+            <ProductSpecs product={product} />
 
-        {/* Highlights */}
-        {product.highlights.length > 0 ? (
-          <section aria-labelledby="highlights-heading" className="mt-10 lg:mt-14">
-            <h2 id="highlights-heading" className="heading-3">
-              Why this one
-            </h2>
-            <ul className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {product.highlights.map((highlight) => (
-                <li
-                  key={highlight}
-                  className="rounded-lg border border-border bg-card p-4 text-sm leading-relaxed text-foreground"
+            {/* The selling points, as the bullet list a retail page opens its
+                description with. The prose sits in the panel below. */}
+            {product.highlights.length > 0 ? (
+              <section aria-labelledby="about-heading">
+                <h2 id="about-heading" className="heading-3">
+                  About the product
+                </h2>
+                <ul className="mt-4 space-y-2">
+                  {product.highlights.map((highlight) => (
+                    <li
+                      key={highlight}
+                      className="flex gap-2.5 text-sm leading-relaxed text-muted-foreground"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent"
+                      />
+                      {highlight}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+
+            {product.sizeChart ? <SizeChart chart={product.sizeChart} /> : null}
+
+            {/* The reference stack. Reviews open by default; the rest are
+                reference material a shopper opens only when they want it. */}
+            <div className="space-y-3">
+              <CollapsibleCard
+                title="Ratings & Reviews"
+                meta={product.rating ? `${product.rating.average.toFixed(1)} ★` : undefined}
+                defaultOpen
+              >
+                <div id="reviews" className="scroll-mt-28">
+                  <Reviews
+                    summary={product.rating}
+                    reviews={reviews}
+                    productTitle={product.title}
+                    layout="column"
+                  />
+                </div>
+              </CollapsibleCard>
+
+              <CollapsibleCard title="Product Description">
+                <div className="rich-text">
+                  {product.description.map((paragraph, index) => (
+                    <p key={index}>{paragraph}</p>
+                  ))}
+                </div>
+              </CollapsibleCard>
+
+              {product.faqs.length > 0 ? (
+                <CollapsibleCard
+                  title="Frequently asked Questions"
+                  meta={String(product.faqs.length)}
                 >
-                  {highlight}
-                </li>
-              ))}
-            </ul>
-          </section>
-        ) : null}
+                  <dl className="space-y-4">
+                    {product.faqs.map((faq) => (
+                      <div key={faq.question}>
+                        <dt className="text-sm font-semibold text-foreground">
+                          <span className="text-accent-600">Q: </span>
+                          {faq.question}
+                        </dt>
+                        <dd className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                          <span className="font-semibold text-accent-600">A: </span>
+                          {faq.answer}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                </CollapsibleCard>
+              ) : null}
 
-        {/* Details */}
-        <section aria-labelledby="details-heading" className="mt-10 lg:mt-14">
-          <h2 id="details-heading" className="heading-3">
-            Full details
-          </h2>
-          <div className="mt-4 grid gap-6 lg:grid-cols-12">
-            <div className="lg:col-span-8">
-              <Accordion items={accordionItems} />
-            </div>
+              <CollapsibleCard title="All Offers" meta={offers.length ? String(offers.length) : undefined}>
+                {offers.length > 0 ? (
+                  <OfferStack offers={offers} />
+                ) : (
+                  <p className="text-sm text-muted-foreground">No active offers at the moment.</p>
+                )}
+              </CollapsibleCard>
 
-            <aside className="lg:col-span-4">
-              <div className="space-y-3">
-                {warrantyMonths !== undefined ? (
-                  <div className="rounded-lg border border-border bg-card p-4">
-                    <h3 className="flex items-center gap-2 font-display text-sm font-semibold text-foreground">
-                      <ShieldCheck className="h-4.5 w-4.5 text-success" />
-                      Warranty
-                    </h3>
-                    <p className="mt-1.5 text-sm text-muted-foreground">
-                      {Math.round(warrantyMonths / 12)} years, documented in writing and honoured
-                      through our service network.
-                    </p>
-                  </div>
-                ) : null}
-                <div className="rounded-lg border border-border bg-card p-4">
-                  <h3 className="flex items-center gap-2 font-display text-sm font-semibold text-foreground">
-                    <Wrench className="h-4.5 w-4.5 text-success" />
-                    Installation
-                  </h3>
-                  <p className="mt-1.5 text-sm text-muted-foreground">
+              <CollapsibleCard title="Warranty, installation &amp; service">
+                <div className="rich-text">
+                  <p>
                     {product.installationIncluded
-                      ? 'Included. A certified technician commissions the system and runs a load test.'
-                      : 'Not included in the price. Our team can arrange a certified technician for your pincode.'}
+                      ? 'Installation by a certified iTarang technician is included in the price. Your slot is booked after the order is confirmed, and the technician commissions the system, sets the correct charger profile for your battery chemistry and runs a load test before leaving.'
+                      : 'Installation is not included in this product’s price. If you would like a certified iTarang technician to install and commission it, our support team can arrange a visit from the network covering your pincode.'}
                   </p>
+                  {/* Only stated when the catalogue gives a term. A product with
+                      no stated warranty gets no warranty paragraph. */}
+                  {warrantyMonths !== undefined ? (
+                    <p>
+                      This product carries a{' '}
+                      <strong>
+                        {warrantyMonths}-month ({Math.round(warrantyMonths / 12)}-year) warranty
+                      </strong>{' '}
+                      from the date of installation. The written terms ship with the product and
+                      are also available from support. Keep your invoice and the serial number on
+                      the unit.
+                    </p>
+                  ) : null}
+                  <p>
+                    Service requests are raised in the Owner Centre. You receive a reference
+                    number and a technician is assigned from the network covering your pincode.
+                  </p>
+                  {/* Installation booking and technician lookup have been
+                      withdrawn from the after-sales navigation; complaint
+                      registration is the one action offered. */}
+                  <ul>
+                    <li>
+                      <Link
+                        href="/support/complaint"
+                        className="font-medium text-primary underline-offset-4 hover:underline"
+                      >
+                        Register a complaint
+                      </Link>
+                    </li>
+                  </ul>
                 </div>
 
-                <div className="rounded-lg border border-accent/30 bg-accent-50 p-4">
+                <div className="mt-4 rounded-lg border border-accent/30 bg-accent-50 p-4">
                   <h3 className="flex items-center gap-2 font-display text-sm font-semibold text-foreground">
                     <Calculator className="h-4.5 w-4.5 text-accent-600" />
                     Not sure this fits your load?
@@ -369,10 +386,40 @@ export default async function ProductPage({ params }: PageProps) {
                     <ArrowRight className="h-3.5 w-3.5" />
                   </ButtonLink>
                 </div>
-              </div>
-            </aside>
+              </CollapsibleCard>
+
+              {product.seller ? (
+                <CollapsibleCard title="Manufacturer Detail">
+                  <SellerDetail seller={product.seller} />
+                </CollapsibleCard>
+              ) : null}
+
+              {product.returnWindowDays !== undefined ? (
+                <CollapsibleCard title={`Free Returns Within ${product.returnWindowDays} Days`}>
+                  <p className="text-sm leading-relaxed text-muted-foreground">
+                    The return window is open for {product.returnWindowDays} days after delivery.
+                    Products must be unused, in their original packing and with all tags, and
+                    installed products are covered by the warranty instead of the return policy.{' '}
+                    <Link
+                      href="/support/faq#returns"
+                      className="font-semibold text-primary underline-offset-4 hover:underline"
+                    >
+                      Read the returns policy
+                    </Link>
+                    .
+                  </p>
+                </CollapsibleCard>
+              ) : null}
+            </div>
+
+            <BulkOrderBanner productTitle={product.title} />
           </div>
-        </section>
+        </div>
+
+
+        {/* Demo-only battery sections. Real catalogue products never render
+            these — nothing is invented for a product we actually sell. */}
+        {isDemo ? <DemoBatterySections /> : null}
 
         {/* Frequently bought together */}
         {companions.length > 0 ? (
@@ -381,18 +428,6 @@ export default async function ProductPage({ params }: PageProps) {
           </section>
         ) : null}
 
-        {/* Reviews */}
-        <section id="reviews" aria-labelledby="reviews-heading" className="mt-10 scroll-mt-28 lg:mt-14">
-          <h2 id="reviews-heading" className="heading-2">
-            Customer reviews
-          </h2>
-          <p className="mt-1.5 text-sm text-muted-foreground">
-            Published from verified orders only — including the critical ones.
-          </p>
-          <div className="mt-6">
-            <Reviews summary={product.rating} reviews={reviews} productTitle={product.title} />
-          </div>
-        </section>
       </div>
 
       {related.length > 0 ? (

@@ -26,6 +26,7 @@ import { summaryToCartItem, useCart } from '@/lib/store/hooks';
 import { useUI } from '@/lib/store/ui-provider';
 import { Button, ButtonLink } from '@/components/ui/button';
 import { ProductCard } from '@/components/product/product-card';
+import { PurchaseButton } from '@/components/product/purchase-button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
@@ -361,7 +362,9 @@ export function LoadCalculator() {
                   <div className="mt-3">
                     <ProductCard product={recommendation.combo} />
                   </div>
-                  <Button
+                  {/* Purchase is switched off site-wide; the button stays,
+                      disabled. See lib/commerce/purchase.ts. */}
+                  <PurchaseButton
                     variant="accent"
                     fullWidth
                     className="mt-3"
@@ -376,7 +379,7 @@ export function LoadCalculator() {
                     }}
                   >
                     Add this system to cart
-                  </Button>
+                  </PurchaseButton>
                 </div>
               ) : null}
 

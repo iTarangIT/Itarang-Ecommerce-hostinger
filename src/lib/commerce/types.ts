@@ -69,10 +69,30 @@ export interface ProductVariant {
   stock: number;
 }
 
+/**
+ * Presentation hint for a single option value.
+ *
+ * Only meaningful on a `kind: 'color'` option, where the buy box draws a
+ * circular chip instead of a text pill. `hex` paints the chip directly; `image`
+ * wins when the finish is a texture a flat colour cannot honestly stand in for.
+ */
+export interface OptionSwatch {
+  value: string;
+  hex?: string;
+  image?: string;
+}
+
 export interface ProductOption {
   id: string;
   name: string;
   values: string[];
+  /**
+   * How the value list is drawn. Absent means `'text'`, which is what every
+   * option in the catalogue was before swatches existed.
+   */
+  kind?: 'text' | 'color';
+  /** One entry per value, in any order. Missing entries fall back to text. */
+  swatches?: OptionSwatch[];
 }
 
 export interface SpecGroup {
@@ -83,6 +103,32 @@ export interface SpecGroup {
 export interface ProductFaq {
   question: string;
   answer: string;
+}
+
+/**
+ * A free-form comparison table shown under "What is in the box".
+ *
+ * Deliberately untyped beyond strings: the columns differ per category (a
+ * battery compares capacity against weight and backup, a combo compares its
+ * bundled parts), and inventing a shared schema for that would fit neither.
+ */
+export interface SizeChart {
+  title: string;
+  /** First column heads the merged group cell, e.g. ['Size','Includes','Measurement']. */
+  columns: string[];
+  /**
+   * One entry per group. `label` fills the first column across the group's
+   * rows as a single merged cell, so a size that includes three parts states
+   * its name once rather than three times.
+   */
+  groups: Array<{ label: string; rows: string[][] }>;
+}
+
+/** Legal Metrology seller block. Absent unless the catalogue states one. */
+export interface SellerInfo {
+  name: string;
+  address: string;
+  packedBy?: string;
 }
 
 export interface RatingSummary {
@@ -122,6 +168,17 @@ export interface Product {
   description: string[];
   specGroups: SpecGroup[];
   boxContents: string[];
+  /**
+   * The four sections below are optional for the same reason `warrantyMonths`
+   * is: they are claims a customer can act on. A product whose source
+   * catalogue states none of them renders no care block, no size chart, no
+   * seller panel and no return window — never a plausible-looking default.
+   */
+  careInstructions?: string[];
+  sizeChart?: SizeChart;
+  seller?: SellerInfo;
+  /** Return window in days, e.g. 7. */
+  returnWindowDays?: number;
   faqs: ProductFaq[];
   /**
    * Warranty length in months, or `undefined` when the source catalogue does

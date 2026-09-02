@@ -10,6 +10,7 @@ export function QuantityStepper({
   min = 1,
   size = 'md',
   label = 'Quantity',
+  disabled = false,
 }: {
   value: number;
   onChange: (next: number) => void;
@@ -17,6 +18,8 @@ export function QuantityStepper({
   min?: number;
   size?: 'sm' | 'md';
   label?: string;
+  /** Shown but inert — used while purchase is switched off. */
+  disabled?: boolean;
 }) {
   const atMax = value >= max;
   const btn = cn(
@@ -31,7 +34,7 @@ export function QuantityStepper({
         type="button"
         className={btn}
         onClick={() => onChange(value - 1)}
-        disabled={value <= min}
+        disabled={disabled || value <= min}
         aria-label={`Decrease ${label.toLowerCase()}`}
       >
         <Minus className="h-4 w-4" />
@@ -49,7 +52,7 @@ export function QuantityStepper({
         type="button"
         className={btn}
         onClick={() => onChange(value + 1)}
-        disabled={atMax}
+        disabled={disabled || atMax}
         aria-label={`Increase ${label.toLowerCase()}`}
         title={atMax ? `Only ${max} available` : undefined}
       >

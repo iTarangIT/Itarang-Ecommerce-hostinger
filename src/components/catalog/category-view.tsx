@@ -2,7 +2,8 @@ import { Suspense } from 'react';
 import Link from 'next/link';
 import { catalog } from '@/lib/commerce';
 import type { Category, CategorySlug, Subcategory } from '@/lib/commerce/types';
-import { parseProductQuery, type SearchParamsInput } from '@/lib/catalog/query';
+import { activeFilterCount, parseProductQuery, type SearchParamsInput } from '@/lib/catalog/query';
+import { DEMO_PRODUCT } from '@/lib/commerce/demo/demo-product';
 import { SITE } from '@/lib/site';
 import { BreadcrumbJsonLd, Breadcrumbs } from '@/components/ui/breadcrumbs';
 import { Listing } from '@/components/catalog/listing';
@@ -161,6 +162,27 @@ export async function CategoryView({
   );
 }
 
+/**
+ * Should the demo battery be shown at the head of this listing?
+ *
+ * Only on the unrefined first page of the batteries category. The demo product
+ * is a presentational fixture that never passes through `CatalogEngine`, so it
+ * cannot honour a facet filter, a price range, a sort or a search term —
+ * showing it under any of those would put a product in a result set it was
+ * never matched against. Restricting it to the unfiltered first page keeps
+ * every refined view strictly truthful.
+ */
+function showsDemoProduct(query: ReturnType<typeof parseProductQuery>): boolean {
+  return (
+    query.category === 'batteries' &&
+    query.subcategory === undefined &&
+    query.page === 1 &&
+    query.search === undefined &&
+    query.minRating === undefined &&
+    activeFilterCount(query) === 0
+  );
+}
+
 async function CategoryListing({
   query,
   basePath,
@@ -169,7 +191,15 @@ async function CategoryListing({
   basePath: string;
 }) {
   const result = await catalog().listProducts(query);
-  return <Listing result={result} query={query} basePath={basePath} />;
+
+  // The demo product is injected here, after the provider has answered, and is
+  // never passed back into the commerce layer. See the warning in
+  // `lib/commerce/demo/demo-product.ts` for why it must stay out of `catalog()`.
+  const listed = showsDemoProduct(query)
+    ? { ...result, items: [DEMO_PRODUCT, ...result.items], total: result.total + 1 }
+    : result;
+
+  return <Listing result={listed} query={query} basePath={basePath} />;
 }
 
 function ListingSkeleton() {

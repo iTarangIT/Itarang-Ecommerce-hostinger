@@ -8,8 +8,8 @@ import type { ProductSummary } from '@/lib/commerce/summary';
 import { formatPrice } from '@/lib/catalog/pricing';
 import { summaryToCartItem, useCart } from '@/lib/store/hooks';
 import { useUI } from '@/lib/store/ui-provider';
-import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/field';
+import { PurchaseButton } from './purchase-button';
 
 /**
  * Frequently bought together.
@@ -127,10 +127,12 @@ export function FrequentlyBought({
                 You save {formatPrice(savings)} against MRP
               </p>
             ) : null}
-            <Button variant="accent" fullWidth className="mt-3" onClick={addAll}>
+            {/* Purchase is switched off site-wide; the button stays, disabled.
+                See lib/commerce/purchase.ts. */}
+            <PurchaseButton variant="accent" fullWidth className="mt-3" onClick={addAll}>
               <ShoppingCart className="h-4 w-4" />
               Add {items.length} to cart
-            </Button>
+            </PurchaseButton>
           </div>
         </div>
       </div>

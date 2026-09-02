@@ -4,6 +4,7 @@ import * as React from 'react';
 import Link from 'next/link';
 import { ShoppingBag } from 'lucide-react';
 import type { ProductSummary } from '@/lib/commerce/summary';
+import { PURCHASE_ENABLED } from '@/lib/commerce/purchase';
 import { useCart } from '@/lib/store/hooks';
 import { useUI } from '@/lib/store/ui-provider';
 import { Drawer } from '@/components/ui/overlay';
@@ -59,7 +60,8 @@ export function CartDrawer() {
           <div className="space-y-3">
             <OrderSummary totals={cart.totals} showGst />
             <ButtonLink href="/cart" variant="accent" size="lg" fullWidth onClick={close}>
-              Review cart & checkout
+              {/* Purchase is switched off site-wide; see lib/commerce/purchase.ts. */}
+              {PURCHASE_ENABLED ? 'Review cart & checkout' : 'Review cart'}
             </ButtonLink>
             <button
               type="button"
