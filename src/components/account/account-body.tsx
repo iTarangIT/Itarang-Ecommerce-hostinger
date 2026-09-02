@@ -117,8 +117,8 @@ export function AccountBody({
           <AccountPlaceholder
             icon={<ShieldCheck className="h-6 w-6" />}
             title="Your registered warranties will appear here"
-            description="Register a product now and the record will be attached to your account when accounts go live."
-            action={{ label: 'Register a warranty', href: '/support/warranty-registration' }}
+            description="Once accounts are live, the warranty on every product you buy will be recorded here automatically. If something is faulty in the meantime, raise a complaint and you will get a reference number to follow up on."
+            action={{ label: 'Register a complaint', href: '/support/complaint' }}
           />
         ) : null}
         {tab === 'reviews' ? (
@@ -270,13 +270,15 @@ function Overview({
           <p className="mt-1 text-xs text-muted-foreground">Kept on this device</p>
         </button>
 
+        {/* Warranty registration has been withdrawn from the after-sales
+            navigation; its route is untouched. */}
         <Link
-          href="/support/warranty-registration"
+          href="/support/complaint"
           className="rounded-lg border border-border bg-card p-5 transition-colors hover:border-accent/40"
         >
           <ClipboardCheck className="h-5 w-5 text-accent-600" />
           <p className="mt-3 font-display text-sm font-semibold text-foreground">
-            Register a warranty
+            Register a complaint
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
             Takes a minute and does not need an account.

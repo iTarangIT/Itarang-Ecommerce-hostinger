@@ -2,17 +2,12 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import {
   ArrowRight,
-  Calculator,
-  ClipboardCheck,
   Clock,
   Headphones,
   HelpCircle,
   Mail,
-  MapPin,
   MessageCircle,
-  Package,
   Phone,
-  Wrench,
 } from 'lucide-react';
 import { SITE } from '@/lib/site';
 import { FAQ_SECTIONS } from '@/lib/support/faqs';
@@ -26,44 +21,21 @@ export const metadata: Metadata = {
   alternates: { canonical: '/support' },
 };
 
+/**
+ * Owner Centre self-service actions.
+ *
+ * Reduced to complaint registration only. Warranty registration, installation
+ * booking, technician lookup and order tracking have been withdrawn from the
+ * after-sales navigation — every one of those routes, pages and forms is still
+ * in place and still works when visited directly; they are simply no longer
+ * advertised here.
+ */
 const SELF_SERVICE = [
-  {
-    icon: ClipboardCheck,
-    title: 'Register your warranty',
-    description:
-      'Record your serial number so a future claim never depends on finding the original invoice.',
-    href: '/support/warranty-registration',
-  },
-  {
-    icon: Wrench,
-    title: 'Book an installation',
-    description:
-      'Choose a slot for a certified technician to install and commission your system.',
-    href: '/support/installation',
-  },
   {
     icon: Headphones,
     title: 'Register a complaint',
     description: 'Log a fault and have a technician assigned for your pincode.',
     href: '/support/complaint',
-  },
-  {
-    icon: MapPin,
-    title: 'Find a technician',
-    description: 'Check whether our service network covers your pincode.',
-    href: '/support/dealers',
-  },
-  {
-    icon: Package,
-    title: 'Track your order',
-    description: 'Follow your order from confirmation through to delivery.',
-    href: '/track',
-  },
-  {
-    icon: Calculator,
-    title: 'Size a system',
-    description: 'Work out the inverter VA and battery Ah your home needs.',
-    href: '/tools/load-calculator',
   },
 ];
 
@@ -133,7 +105,7 @@ export default function SupportPage() {
           title="Do it yourself, right now"
           description="No phone queue and no account required — each of these takes about a minute."
         />
-        <ul className="grid gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
+        <ul className="grid gap-3 sm:max-w-md sm:gap-4">
           {SELF_SERVICE.map((item) => (
             <li key={item.href}>
               <Link

@@ -72,15 +72,13 @@ export const FOOTER_COLUMNS: NavGroup[] = [
     ],
   },
   {
+    // Reduced to complaint registration only. Warranty registration,
+    // installation booking, technician lookup and order tracking have been
+    // withdrawn from the after-sales navigation; their routes still exist and
+    // still work when visited directly.
     label: 'Owner centre',
     href: '/support',
-    children: [
-      { label: 'Register warranty', href: '/support/warranty-registration' },
-      { label: 'Book installation', href: '/support/installation' },
-      { label: 'Register a complaint', href: '/support/complaint' },
-      { label: 'Find a technician', href: '/support/dealers' },
-      { label: 'Track your order', href: '/track' },
-    ],
+    children: [{ label: 'Register a complaint', href: '/support/complaint' }],
   },
   {
     label: 'Help',

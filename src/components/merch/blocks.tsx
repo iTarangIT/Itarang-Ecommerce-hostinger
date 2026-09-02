@@ -4,9 +4,7 @@ import {
   ArrowRight,
   BadgeCheck,
   Calculator,
-  ClipboardCheck,
   Headphones,
-  MapPin,
   ShieldCheck,
   Truck,
   Wallet,
@@ -286,30 +284,20 @@ export function LoadGuide() {
 
 /* ---------------------------------------------------------- owner centre */
 
+/**
+ * Owner Centre actions.
+ *
+ * Reduced to complaint registration only. Warranty registration, installation
+ * booking and technician lookup have been withdrawn from the after-sales
+ * navigation — their routes, pages and forms are all still in place and still
+ * work when visited directly; they are simply not advertised here.
+ */
 const OWNER_ACTIONS = [
-  {
-    icon: ClipboardCheck,
-    title: 'Register your warranty',
-    description: 'Record your serial number so a claim never depends on finding the invoice.',
-    href: '/support/warranty-registration',
-  },
-  {
-    icon: Wrench,
-    title: 'Book an installation',
-    description: 'Pick a slot for a certified technician to install and commission your system.',
-    href: '/support/installation',
-  },
   {
     icon: Headphones,
     title: 'Register a complaint',
     description: 'Log a fault and get a reference number you can track.',
     href: '/support/complaint',
-  },
-  {
-    icon: MapPin,
-    title: 'Find a technician',
-    description: 'Search our service network by pincode.',
-    href: '/support/dealers',
   },
 ];
 
@@ -320,10 +308,10 @@ export function OwnerCentre() {
         <SectionHeader
           eyebrow="Owner centre"
           title="Everything after the sale"
-          description="Warranty, installation, service and support — in one place, without a phone queue."
+          description="Something not working as it should? Log it here and get a reference number you can follow up on."
           action={{ label: 'Visit the support hub', href: '/support' }}
         />
-        <ul className="grid gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
+        <ul className="grid gap-3 sm:max-w-md sm:gap-4">
           {OWNER_ACTIONS.map((action) => (
             <li key={action.href}>
               <Link

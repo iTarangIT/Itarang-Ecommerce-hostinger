@@ -1,14 +1,18 @@
 import Link from 'next/link';
-import { ClipboardCheck, Headphones, HelpCircle, Mail, MapPin, Phone, Wrench } from 'lucide-react';
+import { Headphones, Mail, Phone } from 'lucide-react';
 import { SITE } from '@/lib/site';
 import { Breadcrumbs } from '@/components/ui/breadcrumbs';
 
+/**
+ * Owner Centre sidebar links.
+ *
+ * Reduced to complaint registration only. Warranty registration, installation
+ * booking, technician lookup and the FAQ entry have been withdrawn from the
+ * after-sales navigation — those routes and pages are untouched and still work
+ * when visited directly.
+ */
 const OWNER_LINKS = [
-  { href: '/support/warranty-registration', label: 'Register warranty', icon: ClipboardCheck },
-  { href: '/support/installation', label: 'Book installation', icon: Wrench },
   { href: '/support/complaint', label: 'Register a complaint', icon: Headphones },
-  { href: '/support/dealers', label: 'Find a technician', icon: MapPin },
-  { href: '/support/faq', label: 'Frequently asked questions', icon: HelpCircle },
 ];
 
 /**

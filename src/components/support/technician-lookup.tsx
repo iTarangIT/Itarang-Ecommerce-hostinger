@@ -84,16 +84,12 @@ export function TechnicianLookup() {
                 {result.installationDays}–{result.installationDays + 2} working days.
               </li>
             </ul>
+            {/* Installation booking has been withdrawn from the after-sales
+                navigation; complaint registration is the one action offered. */}
             <div className="mt-4 flex flex-wrap gap-2">
               <Link
-                href="/support/installation"
-                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground"
-              >
-                Book an installation
-              </Link>
-              <Link
                 href="/support/complaint"
-                className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-sm font-medium text-foreground"
+                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground"
               >
                 Register a complaint
               </Link>
