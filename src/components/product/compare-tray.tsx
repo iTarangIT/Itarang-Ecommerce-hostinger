@@ -5,6 +5,7 @@ import { GitCompare, X } from 'lucide-react';
 import { useCompare } from '@/lib/store/hooks';
 import { ButtonLink } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { PRODUCT_PREFIX } from '@/lib/routes';
 
 /**
  * Floating compare tray.
@@ -19,7 +20,7 @@ export function CompareTray() {
   if (compare.ids.length === 0 || pathname === '/compare') return null;
 
   // Product pages carry their own sticky buy bar, so the tray sits above it.
-  const onProductPage = pathname.startsWith('/p/');
+  const onProductPage = pathname.startsWith(`${PRODUCT_PREFIX}/`);
 
   return (
     <div

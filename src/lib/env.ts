@@ -23,7 +23,12 @@ const schema = z
     NEXT_PUBLIC_SITE_URL: z.string().url().default('http://localhost:3000'),
 
     /* ------------------------------------------------------- catalogue */
-    COMMERCE_PROVIDER: z.enum(['mock', 'hostinger']).default('mock'),
+    /**
+     * `db` serves the catalogue we own — our Postgres, our admin panel, our
+     * ids. `hostinger` and `mock` are unchanged and still selectable; nothing
+     * about either was redesigned to make room for the third.
+     */
+    COMMERCE_PROVIDER: z.enum(['mock', 'hostinger', 'db']).default('mock'),
     HOSTINGER_ECOMMERCE_API_URL: z.string().url().default('https://api-ecommerce.hostinger.com'),
     /** Public sales channel id, `scha_…`. Configuration, not a secret. */
     HOSTINGER_SALES_CHANNEL_ID: z.string().startsWith('scha_').optional(),
@@ -55,6 +60,28 @@ const schema = z
     /** Validated in depth by `src/lib/db/guard.ts` before any connection. */
     DATABASE_URL: z.string().optional(),
 
+    /* --------------------------------------------------- product media */
+    /**
+     * Supabase Storage holds the product image binaries; Postgres holds only
+     * the object key. Deliberately not Hostinger: the catalogue's content —
+     * images included — is ours, and an image that lives in the merchant's CDN
+     * disappears when the merchant's product does.
+     *
+     * The project URL, e.g. https://abcdefgh.supabase.co. Not a secret: the
+     * public object URL derived from it is what a browser fetches.
+     */
+    SUPABASE_URL: z.string().url().optional(),
+    /**
+     * SECRET, and a more dangerous one than the Razorpay keys: the service role
+     * bypasses row-level security on every table in the project. It is used
+     * only server-side, only to write objects into the bucket below, and
+     * `src/lib/security.test.ts` greps the built client bundle to keep it that
+     * way. There is deliberately no NEXT_PUBLIC_ variant.
+     */
+    SUPABASE_SERVICE_ROLE_KEY: z.string().min(20).optional(),
+    /** Public bucket the product images live in. */
+    SUPABASE_STORAGE_BUCKET: z.string().min(1).default('product-media'),
+
     /* --------------------------------------------------------- payment */
     PAYMENT_PROVIDER: z.enum(['mock', 'razorpay-test']).default('mock'),
     /** Only ever a TEST key. A live key is rejected below. */
@@ -83,6 +110,24 @@ const schema = z
     SMTP_PASSWORD: z.string().optional(),
     EMAIL_FROM: z.string().optional(),
 
+    /* ------------------------------------------------------------- otp */
+    /**
+     * Keys the digest of every one-time sign-in code.
+     *
+     * Optional here and demanded at the point of use, not at boot: an
+     * installation that has not turned customer sign-in on yet should still
+     * start. `otpPepper()` in `lib/auth/otp.ts` throws if a code is ever
+     * hashed without it, so the failure lands on the feature rather than on
+     * the whole application.
+     *
+     * A six-digit code has only a million possible values, so an unkeyed
+     * digest of one is reversible the instant the table leaks. This is the
+     * secret that makes that infeasible, which is why it lives outside the
+     * database. Rotating it invalidates every code in flight — harmless, they
+     * last ten minutes.
+     */
+    AUTH_OTP_PEPPER: z.string().min(32).optional(),
+
     /* ------------------------------------------------------------- gst */
     SELLER_GSTIN: z.string().optional(),
     SELLER_STATE_CODE: z.string().optional(),
@@ -94,6 +139,33 @@ const schema = z
         path: ['HOSTINGER_SALES_CHANNEL_ID'],
         message: 'COMMERCE_PROVIDER=hostinger requires HOSTINGER_SALES_CHANNEL_ID.',
       });
+    }
+
+    // Serving our own catalogue needs the database it lives in and the storage
+    // project its images live in. Both are checked at boot rather than at the
+    // first request: a storefront that starts and then serves every product
+    // without an image is a worse failure than one that refuses to start.
+    //
+    // The service-role key is NOT required here. Reading the catalogue only
+    // needs the project URL to build public object URLs; the key is needed to
+    // *write* an object, and `products/media.ts` demands it at that point.
+    if (value.COMMERCE_PROVIDER === 'db') {
+      const missing = (
+        [
+          ['DATABASE_URL', value.DATABASE_URL],
+          ['SUPABASE_URL', value.SUPABASE_URL],
+        ] as const
+      )
+        .filter(([, v]) => !v)
+        .map(([k]) => k);
+
+      if (missing.length > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['COMMERCE_PROVIDER'],
+          message: `COMMERCE_PROVIDER=db requires ${missing.join(', ')}.`,
+        });
+      }
     }
 
     // Pushing stock needs all three together. A half-configured push would
@@ -178,6 +250,18 @@ const schema = z
 
 export type Env = z.infer<typeof schema>;
 
+/**
+ * An empty environment variable is an unset one.
+ *
+ * `.env.example` documents optional settings as bare `NAME=` lines, so anyone
+ * who copies it has them defined as `''`. zod sees a set value and applies the
+ * whole rule — `.url()`, `.min(20)` — and the application refuses to start over
+ * a variable the operator has deliberately left blank.
+ */
+function blank(value: string | undefined): string | undefined {
+  return value === undefined || value.trim() === '' ? undefined : value;
+}
+
 let cached: Env | null = null;
 
 export function env(): Env {
@@ -194,6 +278,14 @@ export function env(): Env {
     HOSTINGER_STORE_ID: process.env.HOSTINGER_STORE_ID,
     HOSTINGER_INVENTORY_PUSH: process.env.HOSTINGER_INVENTORY_PUSH,
     DATABASE_URL: process.env.DATABASE_URL,
+    // `blank()` rather than the raw value: copying `.env.example` leaves these
+    // present-but-empty, and an empty string is a *set* variable as far as zod
+    // is concerned — it would fail `.url()` and `.min(20)` and refuse to boot,
+    // which is a hostile way to greet someone who has not configured storage
+    // yet. Absent and blank mean the same thing here.
+    SUPABASE_URL: blank(process.env.SUPABASE_URL),
+    SUPABASE_SERVICE_ROLE_KEY: blank(process.env.SUPABASE_SERVICE_ROLE_KEY),
+    SUPABASE_STORAGE_BUCKET: blank(process.env.SUPABASE_STORAGE_BUCKET),
     PAYMENT_PROVIDER: process.env.PAYMENT_PROVIDER,
     RAZORPAY_KEY_ID: process.env.RAZORPAY_KEY_ID,
     RAZORPAY_KEY_SECRET: process.env.RAZORPAY_KEY_SECRET,
@@ -207,6 +299,7 @@ export function env(): Env {
     SMTP_USER: process.env.SMTP_USER,
     SMTP_PASSWORD: process.env.SMTP_PASSWORD,
     EMAIL_FROM: process.env.EMAIL_FROM,
+    AUTH_OTP_PEPPER: blank(process.env.AUTH_OTP_PEPPER),
     SELLER_GSTIN: process.env.SELLER_GSTIN,
     SELLER_STATE_CODE: process.env.SELLER_STATE_CODE,
   });

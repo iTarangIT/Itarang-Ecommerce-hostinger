@@ -27,6 +27,7 @@ import { Field, Input } from '@/components/ui/field';
 import { StateBlock } from '@/components/ui/states';
 import { ProductRail } from '@/components/merch/product-rail';
 import { CartLineItem, CouponField, FreeShipMeter, OrderSummary } from './cart-pieces';
+import { categoryPath, productPath } from '@/lib/routes';
 
 const GSTIN_PATTERN = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
 
@@ -66,7 +67,7 @@ export function CartPageBody({
             description="Add an inverter, a battery or a ready-matched combo. If you are not sure what size you need, the load calculator will work it out from your appliances."
             actions={
               <>
-                <ButtonLink href="/c/combos" variant="primary">
+                <ButtonLink href={categoryPath('combos')} variant="primary">
                   Shop combos
                 </ButtonLink>
                 <ButtonLink href="/tools/load-calculator" variant="outline">
@@ -299,7 +300,7 @@ function SavedForLater() {
         {cart.savedForLater.map((item) => (
           <li key={item.id} className="flex gap-3 py-4">
             <Link
-              href={`/p/${item.slug}`}
+              href={productPath(item.slug)}
               className="relative h-20 w-20 shrink-0 overflow-hidden rounded-md border border-border bg-secondary"
             >
               <Image src={item.image} alt="" fill sizes="80px" className="object-contain p-1.5" />
@@ -307,7 +308,7 @@ function SavedForLater() {
             <div className="flex min-w-0 flex-1 flex-col justify-between">
               <div>
                 <Link
-                  href={`/p/${item.slug}`}
+                  href={productPath(item.slug)}
                   className="line-clamp-2 text-sm font-semibold text-foreground hover:text-accent-600"
                 >
                   {item.title}

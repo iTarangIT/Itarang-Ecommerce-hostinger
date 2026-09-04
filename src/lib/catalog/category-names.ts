@@ -33,6 +33,8 @@ export const SUBCATEGORY_NAMES: Record<string, string> = {
   'tall-tubular': 'Tall Tubular Batteries',
   'short-tubular': 'Short Tubular Batteries',
   'flat-plate-smf': 'Flat Plate & SMF Batteries',
+  'ev-2-wheeler': '2-Wheeler EV Batteries',
+  'ev-3-wheeler': '3-Wheeler & E-Rickshaw Batteries',
   'home-ups': 'Home & Office UPS',
   'online-ups': 'Online (Double Conversion) UPS',
   'home-combos': 'Home Combos',

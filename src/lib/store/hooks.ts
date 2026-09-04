@@ -3,6 +3,10 @@
 import * as React from 'react';
 import type { Product, ProductVariant } from '@/lib/commerce/types';
 import type { ProductSummary } from '@/lib/commerce/summary';
+import {
+  addWishlistItemAction,
+  removeWishlistItemAction,
+} from '@/lib/account/wishlist-actions';
 import { useStore } from './store-provider';
 import { MAX_COMPARE } from './types';
 import type { AppliedCoupon, CartItem } from './types';
@@ -88,18 +92,73 @@ export function useCompare() {
   );
 }
 
+/**
+ * Saved products.
+ *
+ * Local state is updated first and the server is told afterwards, so a heart
+ * fills in the instant it is tapped rather than after a round trip. That is not
+ * only a nicety: the wishlist has to keep working signed out, where there is no
+ * server to wait for, so the local list is the one path that always exists and
+ * the server call is the addition.
+ *
+ * The server call is deliberately fire-and-forget. It answers `signedIn: false`
+ * for a visitor with no account, in which case there is nothing to do and the
+ * local list stands on its own; and if it fails outright, the customer still
+ * sees what they saved. `<WishlistSync />` reconciles from the server on the
+ * next page load, so a dropped write costs one refresh, not a lost product.
+ */
 export function useWishlist() {
   const { state, dispatch } = useStore();
+  const syncedFor = state.wishlistSyncedFor;
 
-  return React.useMemo(
-    () => ({
+  return React.useMemo(() => {
+    const persist = (productId: string, saving: boolean) => {
+      // Only when this browser knows it is signed in. Signed out there is no
+      // account to write to, and calling anyway would be a wasted request on
+      // every heart tap by every visitor.
+      if (syncedFor === null) return;
+      void (saving
+        ? addWishlistItemAction(productId)
+        : removeWishlistItemAction(productId)
+      ).catch(() => {
+        /* Reconciled by <WishlistSync /> on the next load. */
+      });
+    };
+
+    return {
       ids: state.wishlist,
       hydrated: state.hydrated,
       has: (productId: string) => state.wishlist.includes(productId),
-      toggle: (productId: string) => dispatch({ type: 'wishlist/toggle', productId }),
-    }),
-    [state.wishlist, state.hydrated, dispatch],
-  );
+      toggle: (productId: string) => {
+        const saving = !state.wishlist.includes(productId);
+        dispatch({ type: 'wishlist/toggle', productId });
+        persist(productId, saving);
+      },
+      remove: (productId: string) => {
+        if (!state.wishlist.includes(productId)) return;
+        dispatch({ type: 'wishlist/toggle', productId });
+        persist(productId, false);
+      },
+    };
+  }, [state.wishlist, state.hydrated, syncedFor, dispatch]);
+}
+
+/**
+ * Drop the signed-in account's saved products from this browser.
+ *
+ * Called as part of signing out. `logoutAction` redirects with a *client-side*
+ * navigation, so the app never remounts and `<WishlistSync />` — whose effect
+ * runs once per full page load — would not fire again. Without this, one
+ * customer's saved products would stay on screen for whoever used the device
+ * next, which on a shared or borrowed machine is exactly the thing "sign out"
+ * is supposed to prevent.
+ *
+ * Clears the marker as well as the list, so the next person to sign in gets a
+ * clean first merge rather than inheriting a stale one.
+ */
+export function useForgetWishlist() {
+  const { dispatch } = useStore();
+  return React.useCallback(() => dispatch({ type: 'wishlist/forget' }), [dispatch]);
 }
 
 export function useRecentlyViewed() {

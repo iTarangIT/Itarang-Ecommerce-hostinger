@@ -116,7 +116,12 @@ describe('Hostinger stays read-only except for one module', () => {
 });
 
 describe('no payment secret can reach the browser', () => {
-  const clientChunks = join(ROOT, '.next/static');
+  // Follows `NEXT_DIST_DIR` for the same reason `next.config.mjs` honours it:
+  // when a verification build is written somewhere other than `.next`, this
+  // assertion must grep *that* bundle. Reading a fixed `.next` would quietly
+  // inspect whatever a dev server last left there and report a pass for a
+  // production bundle it never opened.
+  const clientChunks = join(ROOT, process.env.NEXT_DIST_DIR ?? '.next', 'static');
 
   it('the built client bundle contains no gateway key or secret', () => {
     if (!existsSync(clientChunks)) {
@@ -151,6 +156,17 @@ describe('no payment secret can reach the browser', () => {
       expect(bundle.text, `${bundle.path} references the Hostinger token`).not.toContain(
         'HOSTINGER_API_TOKEN',
       );
+      // The Supabase service role bypasses row-level security on every table in
+      // the project, not merely the storage bucket it is used for. It is the
+      // one credential here that could read every customer's address.
+      expect(bundle.text, `${bundle.path} references the Supabase service key`).not.toContain(
+        'SUPABASE_SERVICE_ROLE_KEY',
+      );
+      // Supabase issues JWTs for both the anon and the service role, and they
+      // are indistinguishable by shape. Neither belongs in a client bundle.
+      expect(bundle.text, `${bundle.path} contains a Supabase JWT`).not.toMatch(
+        /eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\./,
+      );
     }
   });
 
@@ -170,6 +186,9 @@ describe('no payment secret can reach the browser', () => {
       );
       expect(file.text, `${file.path} exposes the Hostinger token publicly`).not.toMatch(
         /NEXT_PUBLIC_HOSTINGER/,
+      );
+      expect(file.text, `${file.path} exposes the Supabase service key publicly`).not.toMatch(
+        /NEXT_PUBLIC_SUPABASE_SERVICE/,
       );
     }
   });
@@ -341,6 +360,56 @@ describe('abuse-prone endpoints are rate limited', () => {
     ]) {
       expect(text, `no rate-limit bucket for ${marker}`).toContain(marker);
     }
+  });
+
+  it('the customer account offers no password affordance', () => {
+    // Customers authenticate by one-time code. An account created that way
+    // holds an unusable sentinel hash, so `/change-password` — which asks for
+    // the current password first — can never be completed from the account
+    // page. Linking it offered a dead end.
+    //
+    // The route and `changePasswordAction` are untouched and still serve the
+    // accounts that do have a password; this only asserts that the customer
+    // surface stops advertising it.
+    const text = readFileSync(
+      join(ROOT, 'src', 'components', 'account', 'account-body.tsx'),
+      'utf8',
+    );
+    const withoutComments = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+    expect(withoutComments, 'the account page links to /change-password again').not.toContain(
+      '/change-password',
+    );
+  });
+
+  it('every one-time-code action counts against a limit', () => {
+    // The customer sign-in path lives in its own module, so the guarantee above
+    // would otherwise stop at the file boundary and quietly cover nothing.
+    //
+    // Codes need this more than passwords do, not less: six digits is a
+    // million possibilities, and the request side sends real mail to an
+    // address the caller chose, which is a mail-bombing amplifier if it is
+    // free to call.
+    const text = readFileSync(join(ROOT, 'src', 'lib', 'auth', 'otp-actions.ts'), 'utf8');
+    for (const marker of ['otp-request:', 'otp-request:ip:', 'otp-verify:']) {
+      expect(text, `no rate-limit bucket for ${marker}`).toContain(marker);
+    }
+  });
+
+  it('the per-code attempt cap is enforced in the database, not by the limiter', () => {
+    // `consume()` fails open on a database error, by design — an outage must
+    // not lock every customer out. That makes it the wrong and only-line
+    // defence for a guessable secret, so the real cap is a column.
+    const otp = readFileSync(join(ROOT, 'src', 'lib', 'auth', 'otp.ts'), 'utf8');
+    expect(otp, 'the attempt counter is not incremented in SQL').toMatch(/SET attempts = \$2/);
+    expect(otp, 'a burnt code is not invalidated in SQL').toContain('invalidated_at');
+
+    const migration = readFileSync(
+      join(ROOT, 'db', 'migrations', '0014_customer_identity.sql'),
+      'utf8',
+    );
+    expect(migration, 'auth_otps has no attempt ceiling').toMatch(
+      /max_attempts\s+integer NOT NULL/,
+    );
   });
 
   it('the guest order lookup is limited', () => {
@@ -592,6 +661,100 @@ describe('server actions authorize independently of any layout', () => {
         body.slice(0, body.indexOf('\n}')),
         `${name} does not establish the caller is an admin`,
       ).toMatch(/requireAdminActor|currentUser/);
+    }
+  });
+});
+
+describe('purchasing is on, and confined to the catalogue we own', () => {
+  /**
+   * Tripwires, not unit tests.
+   *
+   * Purchasing was switched on deliberately, under a rule that is narrower than
+   * "on": only the eight real products in our own database may be sold, cash on
+   * delivery stays closed, and no live payment credential may be used. Each of
+   * those is one edit away from being lost by accident, so each is asserted
+   * against the source rather than assumed.
+   *
+   * Nothing here says the rule may never change. It says changing it must be a
+   * deliberate act that also edits this test.
+   */
+  const purchaseSource = () =>
+    readFileSync(join(ROOT, 'src', 'lib', 'commerce', 'purchase.ts'), 'utf8');
+
+  it('PURCHASE_ENABLED is defined in exactly one place', () => {
+    // A second definition — a duplicate constant, an env override — would mean
+    // nothing else in this block describes what the storefront actually does.
+    const all = readAll(join(ROOT, 'src'), ['.ts', '.tsx']);
+    const definitions = all.filter(
+      (file) =>
+        !file.path.includes('security.test') &&
+        /(?:const|let|var)\s+PURCHASE_ENABLED\s*(?::[^=]+)?=/.test(file.text),
+    );
+
+    expect(definitions.map((file) => file.path)).toEqual([
+      join(ROOT, 'src', 'lib', 'commerce', 'purchase.ts'),
+    ]);
+  });
+
+  it('only the database catalogue is purchasable', () => {
+    // The one provider whose products may be sold. Selling a Hostinger product
+    // or a development fixture would take changing this line.
+    expect(purchaseSource()).toMatch(/export const PURCHASABLE_PROVIDER = 'db';/);
+  });
+
+  it('the server quote enforces the provider and the per-variant rule', () => {
+    // The client gate in the buy box is a courtesy. This is the protection, and
+    // a quote that stopped consulting either check would price something the
+    // business has not approved for sale.
+    const quote = readFileSync(join(ROOT, 'src', 'lib', 'orders', 'quote.ts'), 'utf8');
+    expect(quote, 'buildQuote no longer checks which catalogue it is quoting').toMatch(
+      /activeProviderName\(\) === PURCHASABLE_PROVIDER/,
+    );
+    expect(quote, 'buildQuote no longer applies the per-variant purchase rule').toMatch(
+      /purchaseBlockFor\(product, variant\)/,
+    );
+    // A refusal that is not blocking would be a refusal in name only.
+    expect(quote).toMatch(/const blocking = new Set<QuoteIssueCode>\(\[[\s\S]*?'not_purchasable'/);
+  });
+
+  it('the unpriced and demo cases fail closed in the shared rule', () => {
+    const source = purchaseSource();
+    expect(source, 'the demo fixture is no longer excluded').toMatch(/isDemoSlug\(product\.slug\)/);
+    expect(source, 'an unpriced variant is no longer excluded').toMatch(
+      /variant\.price\.selling <= 0/,
+    );
+  });
+
+  it('cash on delivery is refused by its own route, not only by the quote', () => {
+    const cod = readFileSync(
+      join(ROOT, 'src', 'app', 'api', 'checkout', 'cod', 'route.ts'),
+      'utf8',
+    );
+    expect(cod, 'the COD route no longer refuses when COD_ENABLED is false').toMatch(
+      /if\s*\(!env\(\)\.COD_ENABLED\)/,
+    );
+  });
+
+  it('no live payment credential can be accepted', () => {
+    // The env schema is what makes "test mode only" a property of the build
+    // rather than of whoever wrote .env.local.
+    const envSource = readFileSync(join(ROOT, 'src', 'lib', 'env.ts'), 'utf8');
+    expect(envSource).toMatch(/startsWith\('rzp_test_'\)/);
+    expect(envSource, 'PAYMENT_PROVIDER can now select a live gateway').toMatch(
+      /PAYMENT_PROVIDER: z\.enum\(\['mock', 'razorpay-test'\]\)/,
+    );
+  });
+
+  it('the checkout, payment and order modules are still present', () => {
+    for (const relative of [
+      join('src', 'lib', 'payments', 'razorpay-test-provider.ts'),
+      join('src', 'lib', 'orders', 'place-order.ts'),
+      join('src', 'lib', 'orders', 'inventory-push.ts'),
+      join('src', 'app', 'api', 'checkout', 'order', 'route.ts'),
+      join('src', 'app', 'api', 'checkout', 'verify', 'route.ts'),
+      join('src', 'app', 'api', 'webhooks', 'payment', 'route.ts'),
+    ]) {
+      expect(existsSync(join(ROOT, relative)), `${relative} has been removed`).toBe(true);
     }
   });
 });

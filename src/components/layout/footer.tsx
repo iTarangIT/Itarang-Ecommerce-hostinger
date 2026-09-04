@@ -9,7 +9,19 @@ import { Input } from '@/components/ui/field';
 import { useUI } from '@/lib/store/ui-provider';
 import { Logo } from './logo';
 
-const PAYMENT_METHODS = ['UPI', 'Visa', 'Mastercard', 'RuPay', 'Net banking', 'EMI', 'Cash on delivery'];
+/**
+ * What checkout actually accepts.
+ *
+ * The four Razorpay methods and nothing else. "Cash on delivery" was listed
+ * while `COD_ENABLED` is false and both the quote and the COD route refuse it —
+ * a payment method advertised on every page of the site that no order could
+ * use. "EMI" went with it: `emiEnabled` is false on all eight products and no
+ * lender terms have been agreed.
+ *
+ * This list is a claim about checkout, so it has to be kept beside checkout. If
+ * COD is switched on later this is one of the places that has to say so.
+ */
+const PAYMENT_METHODS = ['UPI', 'Visa', 'Mastercard', 'RuPay', 'Net banking'];
 
 export function Footer() {
   const { toast } = useUI();

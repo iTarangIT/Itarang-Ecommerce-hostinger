@@ -6,6 +6,7 @@ import { CATEGORIES } from '@/lib/commerce/mock/categories';
 import { Breadcrumbs } from '@/components/ui/breadcrumbs';
 import { Listing } from '@/components/catalog/listing';
 import { SearchAgainField } from '@/components/catalog/search-again-field';
+import { categoryPath } from '@/lib/routes';
 
 export const metadata: Metadata = {
   title: 'Search',
@@ -91,7 +92,7 @@ export default async function SearchPage({
               {CATEGORIES.map((category) => (
                 <li key={category.slug}>
                   <Link
-                    href={`/c/${category.slug}`}
+                    href={categoryPath(category.slug)}
                     className="flex h-full flex-col rounded-lg border border-border bg-card p-5 transition-all hover:-translate-y-0.5 hover:shadow-raised"
                   >
                     <span className="font-display text-base font-bold text-foreground">

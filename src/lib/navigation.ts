@@ -4,6 +4,7 @@ import { CATEGORIES } from '@/lib/commerce/mock/categories';
 import { displayPrice } from '@/lib/catalog/pricing';
 import { allProducts } from '@/lib/catalog/collections';
 import type { ProductArtKind } from '@/lib/commerce/types';
+import { categoryPath, productPath, subcategoryPath } from '@/lib/routes';
 
 /**
  * Serialisable navigation model.
@@ -72,12 +73,12 @@ export const buildNavigation = cache(async (): Promise<NavCategory[]> => {
       name: category.name,
       shortName: category.shortName,
       tagline: category.tagline,
-      href: `/c/${category.slug}`,
+      href: categoryPath(category.slug),
       icon: category.icon,
       highlights: category.highlights,
       subcategories: category.subcategories.map((sub) => ({
         name: sub.name,
-        href: `/c/${category.slug}/${sub.slug}`,
+        href: subcategoryPath(category.slug, sub.slug),
         description: sub.description,
         count: inCategory.filter((p) => p.subcategory === sub.slug).length,
       })),
@@ -86,7 +87,7 @@ export const buildNavigation = cache(async (): Promise<NavCategory[]> => {
           ? {
               title: featuredProduct.title,
               subtitle: featuredProduct.subtitle,
-              href: `/p/${featuredProduct.slug}`,
+              href: productPath(featuredProduct.slug),
               image: featuredProduct.images[0] ?? '',
               price: price.selling,
               mrp: price.mrp,

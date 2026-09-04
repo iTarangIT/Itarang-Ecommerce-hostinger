@@ -20,11 +20,16 @@ import {
   TrustRow,
 } from '@/components/merch/blocks';
 import { SupportTeaser } from '@/components/support/support-teaser';
+import { categoryPath } from '@/lib/routes';
 
 export const metadata: Metadata = {
   title: 'Home Inverters, Batteries & UPS Systems',
+  // Says what the catalogue holds. It used to end "with certified installation
+  // and documented warranty": `installationIncluded` is false on all eight
+  // products and six of the eight state no warranty, so both halves were
+  // claims the catalogue contradicts — in the one sentence search engines quote.
   description:
-    'Pure sine wave home inverters, lithium and tubular batteries, UPS systems and ready-matched combos — with certified installation and documented warranty.',
+    'Lithium iron phosphate home storage batteries and EV traction packs from Trontek, with the full manufacturer specification on every product page.',
   alternates: { canonical: '/' },
 };
 
@@ -46,13 +51,18 @@ export default async function HomePage() {
 
       <CategoryTiles categories={categories} />
 
+      {/* `popularityRank` is an editorial ordering — `to-domain.ts` says so in
+          as many words — not a count of anything sold. This rail read "Most
+          bought", "Best sellers this month" and "the systems our customers
+          choose most often": three sales statistics, and there have been no
+          sales. */}
       <div className="container section-tight">
         <ProductRail
           products={popular}
-          eyebrow="Most bought"
-          title="Best sellers this month"
-          description="The systems our customers choose most often, across every category."
-          action={{ label: 'See all products', href: '/search?sort=best-selling' }}
+          eyebrow="Where to start"
+          title="Across the range"
+          description="A cross-section of what we stock, from home storage to traction packs."
+          action={{ label: 'See all products', href: '/search' }}
         />
       </div>
 
@@ -64,7 +74,7 @@ export default async function HomePage() {
           eyebrow="Matched systems"
           title="Inverter + battery, sized and ready"
           description="Charger profile pre-matched to the chemistry, one warranty, one installation visit — and priced below the parts bought separately."
-          action={{ label: 'All combos', href: '/c/combos' }}
+          action={{ label: 'All combos', href: categoryPath('combos') }}
         />
       </div>
 
@@ -75,7 +85,7 @@ export default async function HomePage() {
       <div className="container section-tight">
         <ProductRail
           products={latest}
-          eyebrow="Just landed"
+          eyebrow="Recently listed"
           title="New in the range"
           action={{ label: 'See what is new', href: '/search?sort=newest' }}
         />

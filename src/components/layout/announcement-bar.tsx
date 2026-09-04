@@ -6,11 +6,22 @@ import { ArrowRight, X } from 'lucide-react';
 
 const STORAGE_KEY = 'itarang.announcement.dismissed.v1';
 
-const MESSAGES = [
-  { text: 'Free delivery on orders above ₹4,999', href: '/offers' },
-  { text: 'No-cost EMI available from ₹5,000', href: '/offers#emi' },
-  { text: '₹1,500 off inverter + battery combos with COMBO1500', href: '/c/combos' },
-];
+/**
+ * Only offers that exist.
+ *
+ * Two were removed. "No-cost EMI available from ₹5,000" — `emiEnabled` is false
+ * on every product and `DbCatalogProvider.listOffers()` returns nothing, so the
+ * bar advertised an arrangement no lender has agreed to and linked to an empty
+ * page. "₹1,500 off inverter + battery combos with COMBO1500" — the catalogue
+ * holds no combos and the coupon is a development fixture, so the link landed
+ * on an empty category with a code that buys nothing.
+ *
+ * The delivery line stays: unlike those two it is implemented, by
+ * `FREE_SHIPPING_THRESHOLD` in `lib/store/totals.ts`, and the cart applies it.
+ * Whether the business wants to offer it is a separate question, recorded under
+ * business confirmation rather than answered here.
+ */
+const MESSAGES = [{ text: 'Free delivery on orders above ₹4,999', href: '/offers' }];
 
 /**
  * Rotating announcement bar. Dismissal is remembered so it does not nag on

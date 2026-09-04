@@ -4,12 +4,12 @@ import * as React from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Check, GitCompare, Heart, Loader2, PackageCheck, ShoppingCart } from 'lucide-react';
+import { Check, Heart, Loader2, PackageCheck, ShoppingCart } from 'lucide-react';
 import type { Paise, Product, ProductOption, ProductVariant } from '@/lib/commerce/types';
 import { discountPercent, formatPrice } from '@/lib/catalog/pricing';
-import { PURCHASE_DISABLED_NOTE, PURCHASE_ENABLED } from '@/lib/commerce/purchase';
+import { PURCHASE_BLOCK_NOTE, purchaseBlockFor } from '@/lib/commerce/purchase';
 import { SITE } from '@/lib/site';
-import { useCart, useCompare, useRecentlyViewed, useWishlist } from '@/lib/store/hooks';
+import { useCart, useRecentlyViewed, useWishlist } from '@/lib/store/hooks';
 import { useUI } from '@/lib/store/ui-provider';
 import { track } from '@/lib/analytics/track';
 import { Button } from '@/components/ui/button';
@@ -55,7 +55,6 @@ function optionHasPriceSpread(product: Product, option: ProductOption): boolean 
 export function BuyBox({ product }: { product: Product }) {
   const cart = useCart();
   const wishlist = useWishlist();
-  const compare = useCompare();
   const recentlyViewed = useRecentlyViewed();
   const { toast, open } = useUI();
   const router = useRouter();
@@ -71,6 +70,15 @@ export function BuyBox({ product }: { product: Product }) {
 
   const variant = findVariant(product, selection);
   const soldOut = variant.availability === 'out-of-stock';
+  /**
+   * Why this variant may not be bought, or null.
+   *
+   * Recomputed per selected variant, not per product: a product can have one
+   * variant in stock and another not, and the buttons follow the selection.
+   * `null` here is not permission — the server re-runs the same rule against
+   * the live row before it prices anything.
+   */
+  const block = purchaseBlockFor(product, variant);
   const discount = discountPercent(variant.price);
 
   React.useEffect(() => {
@@ -89,7 +97,7 @@ export function BuyBox({ product }: { product: Product }) {
 
   // The funnel's product-view stage.
   //
-  // Fired from the client, not the server, on purpose: /p/[slug] is
+  // Fired from the client, not the server, on purpose: /products/[slug] is
   // prerendered with `dynamicParams: false`, and recording this in the page
   // would force it dynamic and cost the whole route its static generation.
   // The event is worth far less than the page speed.
@@ -149,7 +157,9 @@ export function BuyBox({ product }: { product: Product }) {
         mrp={variant.price.mrp}
         discount={discount}
         size="lg"
-        showEmi
+        // Only when the catalogue states it. Passing this unconditionally is
+        // what put a no-cost EMI offer on every product over ₹5,000.
+        showEmi={product.emiEnabled === true}
         showTaxNote
       />
 
@@ -267,18 +277,22 @@ export function BuyBox({ product }: { product: Product }) {
               value={quantity}
               onChange={setQuantity}
               max={Math.max(1, variant.stock)}
-              disabled={!PURCHASE_ENABLED}
+              disabled={block !== null}
             />
           </div>
         ) : null}
 
-        {/* Purchase is switched off site-wide; the buttons stay, disabled, with
-            the reason stated below them. See lib/commerce/purchase.ts. */}
+        {/* Disabled for anything this product's own values say may not be sold
+            — the demo fixture, an unpriced variant, an out-of-stock one — with
+            the reason stated below. `purchaseBlockFor` is the same rule the
+            server applies in `lib/orders/quote.ts`; this copy is a courtesy so
+            a shopper is not sent to a checkout that would refuse them, and is
+            never the protection. See lib/commerce/purchase.ts. */}
         <div className="flex flex-col gap-2 sm:flex-row">
           <PurchaseButton
             onClick={addToCart}
-            disabled={soldOut}
-            describedBy={PURCHASE_ENABLED ? undefined : noteId}
+            disabled={block !== null}
+            describedBy={block === null ? undefined : noteId}
             variant="primary"
             size="lg"
             fullWidth
@@ -289,8 +303,8 @@ export function BuyBox({ product }: { product: Product }) {
           </PurchaseButton>
           <PurchaseButton
             onClick={buyNow}
-            disabled={soldOut || navigating}
-            describedBy={PURCHASE_ENABLED ? undefined : noteId}
+            disabled={block !== null || navigating}
+            describedBy={block === null ? undefined : noteId}
             variant="accent"
             size="lg"
             fullWidth
@@ -301,9 +315,9 @@ export function BuyBox({ product }: { product: Product }) {
           </PurchaseButton>
         </div>
 
-        {!PURCHASE_ENABLED ? (
+        {block !== null && block !== 'out-of-stock' ? (
           <p id={noteId} className="text-xs text-muted-foreground">
-            {PURCHASE_DISABLED_NOTE} Meanwhile you can{' '}
+            {PURCHASE_BLOCK_NOTE[block]} Meanwhile you can{' '}
             <Link
               href="/tools/load-calculator"
               className="font-semibold text-primary underline-offset-4 hover:underline"
@@ -321,42 +335,26 @@ export function BuyBox({ product }: { product: Product }) {
           </p>
         ) : null}
 
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            fullWidth
-            onClick={() => {
-              wishlist.toggle(product.id);
-              toast({
-                title: wishlist.has(product.id) ? 'Removed from saved' : 'Saved for later',
-                tone: 'info',
-              });
-            }}
-            className={cn(wishlist.has(product.id) && 'border-sale/40 text-sale')}
-          >
-            <Heart className={cn('h-4 w-4', wishlist.has(product.id) && 'fill-current')} />
-            {wishlist.has(product.id) ? 'Saved' : 'Save'}
-          </Button>
-          <Button
-            variant="outline"
-            fullWidth
-            onClick={() => {
-              if (!compare.has(product.id) && compare.isFull) {
-                toast({
-                  title: 'Compare list is full',
-                  description: `You can compare up to ${compare.max} products.`,
-                  tone: 'error',
-                });
-                return;
-              }
-              compare.toggle(product.id);
-            }}
-            className={cn(compare.has(product.id) && 'border-accent/50 text-accent-600')}
-          >
-            <GitCompare className="h-4 w-4" />
-            {compare.has(product.id) ? 'Comparing' : 'Compare'}
-          </Button>
-        </div>
+        {/* Save is the only secondary action here now. "Compare" sat beside it
+            and has been withdrawn from the product page; the comparison system
+            itself — the store, the tray and `/compare` — is untouched and still
+            reachable from the product cards in the listing grids, which is
+            where a shopper is actually choosing between products. */}
+        <Button
+          variant="outline"
+          fullWidth
+          onClick={() => {
+            wishlist.toggle(product.id);
+            toast({
+              title: wishlist.has(product.id) ? 'Removed from saved' : 'Saved for later',
+              tone: 'info',
+            });
+          }}
+          className={cn(wishlist.has(product.id) && 'border-sale/40 text-sale')}
+        >
+          <Heart className={cn('h-4 w-4', wishlist.has(product.id) && 'fill-current')} />
+          {wishlist.has(product.id) ? 'Saved' : 'Save'}
+        </Button>
       </div>
 
       {/* Delivery date, then the service promises. The warranty and

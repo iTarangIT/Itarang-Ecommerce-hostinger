@@ -1,5 +1,8 @@
 node_modules/
 .next/
+# Verification builds made with NEXT_DIST_DIR, so a production build and a
+# running dev server do not overwrite each other.
+.next-*/
 out/
 build/
 .DS_Store

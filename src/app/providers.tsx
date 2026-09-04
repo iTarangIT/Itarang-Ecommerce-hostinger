@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import { StoreProvider } from '@/lib/store/store-provider';
+import { WishlistSync } from '@/lib/store/wishlist-sync';
 import { UIProvider } from '@/lib/store/ui-provider';
 import { track } from '@/lib/analytics/track';
 
@@ -31,6 +32,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <UIProvider>
       <StoreProvider>
         <VisitBeacon />
+        {/* Folds this browser's saved products into the signed-in account, once
+            per browser and account. Renders nothing. */}
+        <WishlistSync />
         {children}
       </StoreProvider>
     </UIProvider>

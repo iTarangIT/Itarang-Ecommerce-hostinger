@@ -11,10 +11,15 @@ interface PageProps {
 
 /**
  * The taxonomy is a fixed, local set, so every valid path is known at build
- * time. `dynamicParams: false` turns an unknown category into a routing-level
- * 404 rather than a soft 404 rendered with HTTP 200.
+ * time and `generateStaticParams` below still prerenders all of them.
+ *
+ * `dynamicParams: true` matches `/products/[slug]` rather than differing from it.
+ * These pages read the same tagged catalogue cache, so an admin save purges
+ * them too, and with `false` a purged entry cannot be regenerated — the route
+ * would answer `NoFallbackError` for a category that plainly exists. An
+ * unknown category still reaches `notFound()` below.
  */
-export const dynamicParams = false;
+export const dynamicParams = true;
 
 export async function generateStaticParams() {
   const categories = await catalog().listCategories();

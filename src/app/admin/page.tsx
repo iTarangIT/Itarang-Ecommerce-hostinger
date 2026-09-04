@@ -102,6 +102,13 @@ export default async function AdminOrdersPage({
             <span className="hidden text-sm text-muted-foreground sm:inline">{admin.email}</span>
           ) : null}
           <Link
+            href="/admin/products"
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+          >
+            <Package className="h-4 w-4" />
+            Products
+          </Link>
+          <Link
             href="/admin/funnel"
             className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
           >

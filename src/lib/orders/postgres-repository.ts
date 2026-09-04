@@ -1,4 +1,5 @@
 import type { PoolClient } from 'pg';
+import { revalidateTag } from 'next/cache';
 import { query, queryOne, transaction } from '@/lib/db/pool';
 import { generateOrderNumber } from './numbering';
 import {
@@ -760,7 +761,16 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
     actor: string,
     note?: string,
   ): Promise<Order | null> {
-    return transaction(async (client) => {
+    /**
+     * Whether this call actually moved a catalogue quantity.
+     *
+     * Set inside the transaction and acted on after it commits — purging the
+     * cache while the new number is still uncommitted would let a read racing
+     * the purge repopulate it with the old one.
+     */
+    let stockChanged = false;
+
+    const result = await transaction(async (client) => {
       const current = await client.query<OrderRow>(
         `SELECT ${ORDER_COLUMNS} FROM orders WHERE id = $1 FOR UPDATE`,
         [orderId],
@@ -819,22 +829,117 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
           [orderId],
         );
 
-        // Enqueue the Hostinger push in this same transaction — the
-        // transactional outbox. A job cannot exist without the payment, and the
-        // payment cannot commit without the job, so there is no window where a
-        // sale is recorded but the deduction is lost.
-        //
-        // Nothing is sent from here. The queue is drained outside the
-        // transaction, because a 15-second network call has no business
-        // holding a row lock on a paid order, and a Hostinger outage must never
-        // roll back money we have already taken.
-        //
-        // This runs whether or not the push is switched on: the queue is then a
-        // durable record of what is owed upstream, and turning the feature on
-        // later settles the backlog instead of losing it. `RETURNING` is what
-        // makes the job settle exactly the rows it counted, rather than
-        // re-reading by (variant, state) and sweeping up later sales.
+        // `RETURNING` above is what makes each branch below settle exactly the
+        // rows it counted, rather than re-reading by (variant, state) and
+        // sweeping up later sales.
         for (const [variantId, rows] of groupByVariant(consumed.rows)) {
+          const units = rows.reduce((sum, row) => sum + row.quantity, 0);
+
+          /**
+           * Our own catalogue is deducted here, and this is the whole fix.
+           *
+           * Consuming the reservation used to be the end of it: the row moved
+           * to `consumed` and `product_variants.stock` never changed. The
+           * effective figure the order path computes — baseline minus committed
+           * reservations — did fall, so overselling was already impossible, but
+           * the number the product page, the product card and the admin table
+           * all read is the *column*, and the column still said what it said
+           * before the sale. A unit could be paid for and the catalogue would
+           * go on advertising it.
+           *
+           * The join is also the eligibility check. A variant id that does not
+           * resolve to a row here is not ours — a Hostinger product, a demo
+           * fixture, an id from an older provider — and falls through to the
+           * outbox below untouched. There is no second product list to keep.
+           *
+           * `FOR UPDATE` serialises two captures of the same variant, and all
+           * of it is inside the payment transaction, so the deduction commits
+           * with the payment or not at all.
+           */
+          const owned = await client.query<{ id: number; stock: number | null }>(
+            `SELECT v.id, v.stock
+               FROM product_variants v
+               JOIN products p ON p.id = v.product_id
+              WHERE p.product_key || ':' || v.variant_key = $1
+              FOR UPDATE OF v`,
+            [variantId],
+          );
+
+          if (owned.rows.length > 0) {
+            const variant = owned.rows[0]!;
+
+            // `stock IS NULL` means "not counted", which is not the same as
+            // zero — `0012_product_catalogue.sql` says so in as many words. An
+            // untracked variant stays untracked; there is no number to move.
+            if (variant.stock !== null) {
+              // `GREATEST(…, 0)` cannot normally fire: a reservation exists
+              // only because the order path found the units available. It is
+              // here because the alternative is worse — the column carries a
+              // `stock >= 0` CHECK, and letting that raise would roll back a
+              // payment already taken, over an inventory discrepancy.
+              const after = await client.query<{ stock: number }>(
+                `UPDATE product_variants
+                    SET stock = GREATEST(stock - $2, 0)
+                  WHERE id = $1
+                  RETURNING stock`,
+                [variant.id, units],
+              );
+
+              if (variant.stock - units < 0) {
+                console.warn(
+                  `[inventory] ${variantId} sold ${units} with only ${variant.stock} in the ` +
+                    'catalogue; clamped to 0. The payment stands — correct the count by hand.',
+                );
+              }
+
+              /**
+               * The deduction has now been applied to the authoritative number,
+               * which is exactly what `reconciled_at` records.
+               *
+               * Without this the same unit is subtracted twice: once because
+               * the column went down, and again because `COMMITTED_RESERVATIONS`
+               * goes on counting a consumed-but-unreconciled row against
+               * availability.
+               */
+              await client.query(
+                `UPDATE stock_reservations SET reconciled_at = now()
+                  WHERE id = ANY($1::bigint[]) AND reconciled_at IS NULL`,
+                [rows.map((row) => row.id)],
+              );
+
+              // Keep the ceiling the order path reads in step with the column
+              // it now mirrors. `min(baseline, live)` would otherwise pin
+              // availability to whatever the stock was at the first ever sale.
+              await client.query(
+                `UPDATE inventory_baseline
+                    SET hostinger_quantity = $2, synced_at = now()
+                  WHERE variant_id = $1`,
+                [variantId, after.rows[0]!.stock],
+              );
+
+              stockChanged = true;
+            }
+
+            // Ours, so there is nothing to send anywhere. Falling through to
+            // the outbox would file a Hostinger job keyed on our own product
+            // key — which is exactly what it used to do.
+            continue;
+          }
+
+          // Not ours: the Hostinger outbox, unchanged.
+          //
+          // A transactional outbox. A job cannot exist without the payment, and
+          // the payment cannot commit without the job, so there is no window
+          // where a sale is recorded but the deduction is lost.
+          //
+          // Nothing is sent from here. The queue is drained outside the
+          // transaction, because a 15-second network call has no business
+          // holding a row lock on a paid order, and a Hostinger outage must
+          // never roll back money we have already taken.
+          //
+          // This runs whether or not the push is switched on: the queue is then
+          // a durable record of what is owed upstream, and turning the feature
+          // on later settles the backlog instead of losing it.
           const productId = await productIdForVariant(client, orderId, variantId);
           if (!productId) continue;
 
@@ -843,13 +948,7 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
                (order_id, variant_id, hostinger_product_id, units, reservation_ids)
              VALUES ($1, $2, $3, $4, $5::bigint[])
              ON CONFLICT (order_id, variant_id) DO NOTHING`,
-            [
-              orderId,
-              variantId,
-              productId,
-              rows.reduce((sum, row) => sum + row.quantity, 0),
-              rows.map((row) => row.id),
-            ],
+            [orderId, variantId, productId, units, rows.map((row) => row.id)],
           );
         }
       }
@@ -857,6 +956,36 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
       const [hydrated] = await this.hydrateWithin(client, updated.rows);
       return hydrated;
     });
+
+    /**
+     * Let the storefront see the number that just changed.
+     *
+     * Every catalogue read goes through `unstable_cache` tagged `catalog` in
+     * `commerce/db/db-provider.ts`, and that cache is what a product page, a
+     * product card and the category grids are rendered from. Without this the
+     * sale is in the database and the shop goes on advertising the old count
+     * until something else happens to purge it — which for a statically
+     * rendered product page could be never. The admin table is unaffected
+     * either way: it is `force-dynamic` and reads the column directly.
+     *
+     * Guarded and non-fatal, exactly as `inventory-push.ts` does it:
+     * `revalidateTag` is only callable from a Server Action or Route Handler,
+     * and this method is also reachable from scripts and the test suite.
+     * Failing to invalidate must never undo a payment already recorded.
+     */
+    if (stockChanged) {
+      try {
+        revalidateTag('catalog');
+      } catch (error) {
+        console.warn(
+          `[inventory] stock changed but the catalogue cache was not purged: ${
+            (error as Error).message
+          }`,
+        );
+      }
+    }
+
+    return result;
   }
 
   async transitionOrderStatus(

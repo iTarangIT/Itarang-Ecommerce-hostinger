@@ -1,4 +1,4 @@
-import { Info, RotateCcw, Truck, Wallet, Wrench } from 'lucide-react';
+import { Info, RotateCcw, Wrench } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 /**
@@ -9,9 +9,20 @@ import { cn } from '@/lib/utils';
  * is the `title`, so it is available on hover and to a screen reader without
  * crowding the column.
  *
- * Every claim is documented policy (see `TRUST_ITEMS` in `lib/site.ts` and
- * `/support/faq`). A promise the catalogue does not state is dropped rather
- * than softened: no stated return window means no returns tile.
+ * **Every tile is gated on a value the product states.** No stated return
+ * window means no returns tile; `installationIncluded: false` means no
+ * installation tile. Nothing here is unconditional.
+ *
+ * It used to open with two tiles that were: "Free Delivery above ₹4,999" and
+ * "Cash On Delivery — available on eligible orders and pincodes". Neither is a
+ * value any product carries, no delivery policy exists anywhere in the
+ * catalogue, and checkout is not open — so both printed a promise on all eight
+ * product pages that nothing could keep. They are gone rather than reworded,
+ * because what is missing is a policy, not a sentence.
+ *
+ * With today's catalogue that leaves nothing to show on any product and the
+ * component renders nothing at all. That is the right number of service
+ * promises to make when none is documented.
  */
 export function ServiceStrip({
   installationIncluded,
@@ -21,16 +32,6 @@ export function ServiceStrip({
   returnWindowDays?: number;
 }) {
   const promises = [
-    {
-      icon: Truck,
-      label: 'Free Delivery\nabove ₹4,999',
-      detail: 'Standard delivery is free on orders above ₹4,999. Batteries ship crated.',
-    },
-    {
-      icon: Wallet,
-      label: 'Cash On\nDelivery',
-      detail: 'Available on eligible orders and pincodes. Check yours above.',
-    },
     installationIncluded
       ? {
           icon: Wrench,
@@ -47,9 +48,13 @@ export function ServiceStrip({
       : null,
   ].filter((promise): promise is NonNullable<typeof promise> => promise !== null);
 
-  // One column per promise. A fixed three-column grid leaves a thinly enriched
-  // product with an empty cell and a divider running down to nothing.
-  const columns = { 2: 'grid-cols-2', 3: 'grid-cols-3', 4: 'grid-cols-4' }[promises.length];
+  // Nothing documented, nothing rendered — not an empty bordered strip with a
+  // divider running down to nothing.
+  if (promises.length === 0) return null;
+
+  // One column per promise. A fixed grid leaves a thinly enriched product with
+  // an empty cell and a divider running down to nothing.
+  const columns = { 1: 'grid-cols-1', 2: 'grid-cols-2' }[promises.length];
 
   return (
     <ul className={cn('grid divide-x divide-border border-b border-border py-4', columns)}>

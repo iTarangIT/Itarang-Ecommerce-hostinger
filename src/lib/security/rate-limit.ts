@@ -44,6 +44,31 @@ export const LIMITS = {
   passwordReset: { limit: 5, windowSeconds: 60 * 60 },
   /** Verification resends, per account. */
   verificationResend: { limit: 5, windowSeconds: 60 * 60 },
+  /**
+   * Sign-in codes requested for one address. Each one sends mail, so this is
+   * both anti-mail-bomb and the outer bound on how many codes can be in play.
+   */
+  otpRequest: { limit: 5, windowSeconds: 60 * 60 },
+  /** The same, per IP, so one address cannot request codes for many people. */
+  otpRequestByIp: { limit: 20, windowSeconds: 60 * 60 },
+  /**
+   * Code submissions per address.
+   *
+   * The real cap on guessing is the per-row attempt counter in `auth_otps`,
+   * which is five and is enforced in the database. This is the second line:
+   * the limiter fails open on a database error, so it cannot be the only thing
+   * standing between a six-digit code and an attacker.
+   */
+  otpVerify: { limit: 10, windowSeconds: 15 * 60 },
+  /**
+   * Account self-service writes — profile edits and the address book.
+   *
+   * Generous, because these are authenticated actions by somebody editing
+   * their own record, and a shopper correcting a typo three times is ordinary.
+   * The bucket exists so a stolen session cannot be used to write rows without
+   * limit, not to police normal use.
+   */
+  accountUpdate: { limit: 60, windowSeconds: 10 * 60 },
   /** Guest order lookup, per IP: order number + phone is brute-forceable. */
   orderLookup: { limit: 20, windowSeconds: 10 * 60 },
   /** Order placement, per account. Generous — a real shopper never hits it. */

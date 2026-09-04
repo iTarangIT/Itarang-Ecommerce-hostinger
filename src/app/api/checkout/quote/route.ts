@@ -50,6 +50,7 @@ export async function POST(request: Request) {
     coupon: quote.coupon,
     issues: quote.issues,
     serviceability: quote.serviceability,
+    codEnabled: quote.codEnabled,
     codAvailable: quote.codAvailable,
     codFee: quote.codFee,
     placeable: quote.placeable,

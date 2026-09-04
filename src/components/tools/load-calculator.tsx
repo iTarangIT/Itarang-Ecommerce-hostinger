@@ -59,7 +59,50 @@ const PRESETS: Array<{ label: string; description: string; selection: Selection;
   },
 ];
 
-export function LoadCalculator() {
+/**
+ * "inverters", "inverters and combos", "inverters, combos and batteries".
+ *
+ * Plural nouns because the sentence is about what the shop stocks, not about
+ * one product.
+ */
+function describeFamilies(families: SizingRecommendation['unavailableFamilies']): string {
+  const names: Record<SizingRecommendation['unavailableFamilies'][number], string> = {
+    inverter: 'inverters',
+    battery: 'home-backup batteries',
+    combo: 'inverter and battery combos',
+  };
+  const list = families.map((family) => names[family]);
+  if (list.length <= 1) return list[0] ?? '';
+  return `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
+}
+
+/**
+ * Two presentation-only props, added so the same calculator can be mounted on a
+ * product page. Neither reaches the arithmetic in `lib/sizing/calculator.ts` or
+ * the barriers in `lib/sizing/recommend.ts` — the request sent to
+ * `/api/sizing` is byte-for-byte the one the standalone tool sends.
+ */
+export interface LoadCalculatorProps {
+  /**
+   * Whether to mirror the working into the address bar.
+   *
+   * True on `/tools/load-calculator`, where a shareable URL is the point.
+   * False on a product page, where the effect would rewrite the address to
+   * `/tools/load-calculator` and silently move the shopper off the product
+   * they are reading.
+   */
+  syncUrl?: boolean;
+  /**
+   * The product whose page this is mounted on, when it is on one.
+   *
+   * Used for a single line of copy: whether the recommendation the engine
+   * returned happens to be this product. It is never sent to the API and never
+   * influences the result — a product page cannot nominate itself.
+   */
+  currentProductId?: string;
+}
+
+export function LoadCalculator({ syncUrl = true, currentProductId }: LoadCalculatorProps = {}) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const cart = useCart();
@@ -89,13 +132,16 @@ export function LoadCalculator() {
 
   const hasLoad = sizing.runningWatts > 0;
 
-  // Keep the URL in step with the working, so a result can be shared or bookmarked.
+  // Keep the URL in step with the working, so a result can be shared or
+  // bookmarked. Skipped when the calculator is embedded: on a product page this
+  // would replace the address with `/tools/load-calculator` on the first click.
   React.useEffect(() => {
+    if (!syncUrl) return;
     const qs = encodeSelection(selection, backupHours);
     router.replace(qs ? `/tools/load-calculator?${qs}` : '/tools/load-calculator', {
       scroll: false,
     });
-  }, [selection, backupHours, router]);
+  }, [selection, backupHours, router, syncUrl]);
 
   React.useEffect(() => {
     if (!hasLoad) {
@@ -105,9 +151,24 @@ export function LoadCalculator() {
     setLoading(true);
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      fetch(`/api/sizing?va=${sizing.requiredVa}&ah=${sizing.requiredAh}`, {
-        signal: controller.signal,
-      })
+      /**
+       * Four numbers, all of them load-bearing.
+       *
+       * `v` decides which products are electrically compatible — capacity alone
+       * cannot tell a 12V home battery from a 51V traction pack, which is how a
+       * 51V e-scooter pack once came to be offered for a home battery. `w` is
+       * what each product's documented maximum discharge current is checked
+       * against. Without either, the route withholds a recommendation rather
+       * than falling back to matching on Ah.
+       */
+      const query = new URLSearchParams({
+        va: String(sizing.requiredVa),
+        ah: String(sizing.requiredAh),
+        v: String(sizing.systemVoltage),
+        w: String(sizing.runningWatts),
+        h: String(sizing.backupHours),
+      });
+      fetch(`/api/sizing?${query}`, { signal: controller.signal })
         .then((r) => r.json())
         .then((data: SizingRecommendation) => setRecommendation(data))
         .catch(() => setRecommendation(null))
@@ -117,7 +178,14 @@ export function LoadCalculator() {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [hasLoad, sizing.requiredVa, sizing.requiredAh]);
+  }, [
+    hasLoad,
+    sizing.requiredVa,
+    sizing.requiredAh,
+    sizing.systemVoltage,
+    sizing.runningWatts,
+    sizing.backupHours,
+  ]);
 
   const setQuantity = (id: string, quantity: number) =>
     setSelection((current) => {
@@ -273,7 +341,10 @@ export function LoadCalculator() {
                 icon={<Zap className="h-4 w-4" />}
                 label="Running load"
                 value={hasLoad ? `${sizing.runningWatts} W` : '—'}
-                hint={hasLoad ? `peaks near ${sizing.peakWatts} W` : undefined}
+                // Shown for information. No product in the catalogue states a
+                // surge rating, so this figure is not part of any sizing check
+                // and the copy below does not pretend it is.
+                hint={hasLoad ? `momentary peak ~${sizing.peakWatts} W` : undefined}
               />
               <Stat
                 icon={<Zap className="h-4 w-4" />}
@@ -297,8 +368,12 @@ export function LoadCalculator() {
               />
               <Stat
                 icon={<Info className="h-4 w-4" />}
-                label="Appliances"
-                value={String(Object.values(selection).reduce((n, q) => n + q, 0))}
+                label="Energy needed"
+                // Running watts x hours. The shopper's own two inputs
+                // multiplied — no efficiency, no depth of discharge, no
+                // headroom — so it can be stated as a fact.
+                value={hasLoad ? `${sizing.loadEnergyWh} Wh` : '—'}
+                hint={hasLoad ? `over ${sizing.backupHours} h` : undefined}
               />
             </dl>
 
@@ -325,7 +400,7 @@ export function LoadCalculator() {
             ) : null}
           </div>
 
-          {/* Recommendations */}
+          {/* Recommendation */}
           {!hasLoad ? (
             <div className="rounded-xl border border-dashed border-border bg-card p-6 text-center">
               <p className="text-sm text-muted-foreground">
@@ -337,66 +412,138 @@ export function LoadCalculator() {
               <Skeleton className="h-40 w-full" />
               <Skeleton className="h-40 w-full" />
             </div>
-          ) : recommendation.exceedsRange ? (
-            <div className="rounded-xl border border-warning/40 bg-warning-soft p-5">
-              <p className="flex items-start gap-2 text-sm font-semibold text-foreground">
-                <AlertTriangle className="mt-0.5 h-4.5 w-4.5 shrink-0 text-warning" />
-                This load is beyond our standard range
-              </p>
-              <p className="mt-2 text-sm text-muted-foreground">
-                A {sizing.requiredVa} VA system with {sizing.requiredAh} Ah of storage needs a
-                custom specification. Our engineers will design it around your site.
-              </p>
-              <ButtonLink href="/support" variant="primary" size="sm" className="mt-4">
-                Talk to an engineer
-              </ButtonLink>
-            </div>
           ) : (
             <div className="space-y-4">
-              {recommendation.combo ? (
-                <div className="rounded-xl border-2 border-accent bg-card p-4">
-                  <p className="inline-flex items-center gap-1.5 rounded-full bg-accent px-2.5 py-1 text-2xs font-bold uppercase tracking-wide text-accent-foreground">
-                    <Check className="h-3 w-3" />
-                    Best match
-                  </p>
-                  <div className="mt-3">
-                    <ProductCard product={recommendation.combo} />
+              {/*
+                One branch per outcome the route distinguishes, because the
+                distinction is the point. This panel used to have two states —
+                products, or "this load is beyond our standard range" — and the
+                second was shown for every input, including a single LED bulb.
+                Telling somebody their two-fan load is unusual when the truth is
+                that we have not priced the product is a false statement about
+                their home.
+              */}
+              {recommendation.status === 'matched' && recommendation.battery ? (
+                <>
+                  <div className="rounded-xl border-2 border-accent bg-card p-4">
+                    <p className="inline-flex items-center gap-1.5 rounded-full bg-accent px-2.5 py-1 text-2xs font-bold uppercase tracking-wide text-accent-foreground">
+                      <Check className="h-3 w-3" />
+                      Recommended
+                    </p>
+                    <div className="mt-3">
+                      <ProductCard product={recommendation.battery.product} />
+                    </div>
+                    {/* Said only when it is true, and only ever after the fact.
+                        The engine picked this product from the catalogue on the
+                        load alone; `currentProductId` is not sent to the API and
+                        cannot influence what comes back. A product page that
+                        nominated itself would be worthless as an answer. */}
+                    {currentProductId && recommendation.battery.product.id === currentProductId ? (
+                      <p className="mt-2 flex items-start gap-1.5 text-xs font-semibold text-success">
+                        <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                        That is the product you are looking at.
+                      </p>
+                    ) : null}
+                    <p className="tabular mt-3 text-xs font-medium text-foreground">
+                      {recommendation.battery.capacityLabel}
+                    </p>
+                    <h3 className="mt-3 font-display text-sm font-semibold text-card-foreground">
+                      Why this one
+                    </h3>
+                    <ul className="mt-2 space-y-1.5">
+                      {/* Every line is a statement the product itself makes.
+                          The engine builds them from the catalogue row, so this
+                          list cannot claim something the specification does not
+                          say. */}
+                      {recommendation.battery.reasons.map((reason) => (
+                        <li
+                          key={reason}
+                          className="flex items-start gap-1.5 text-xs leading-relaxed text-muted-foreground"
+                        >
+                          <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" />
+                          <span>{reason}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    {/* Purchase is switched off site-wide; the button stays,
+                        disabled. See lib/commerce/purchase.ts. */}
+                    <PurchaseButton
+                      variant="accent"
+                      fullWidth
+                      className="mt-4"
+                      onClick={() => {
+                        cart.addItem(summaryToCartItem(recommendation.battery!.product));
+                        toast({
+                          title: 'Added to cart',
+                          description: recommendation.battery!.product.title,
+                          tone: 'success',
+                          action: { label: 'View cart', onClick: () => open('cart') },
+                        });
+                      }}
+                    >
+                      Add this battery to cart
+                    </PurchaseButton>
                   </div>
-                  {/* Purchase is switched off site-wide; the button stays,
-                      disabled. See lib/commerce/purchase.ts. */}
-                  <PurchaseButton
-                    variant="accent"
-                    fullWidth
-                    className="mt-3"
-                    onClick={() => {
-                      cart.addItem(summaryToCartItem(recommendation.combo!));
-                      toast({
-                        title: 'Added to cart',
-                        description: recommendation.combo!.title,
-                        tone: 'success',
-                        action: { label: 'View cart', onClick: () => open('cart') },
-                      });
-                    }}
-                  >
-                    Add this system to cart
-                  </PurchaseButton>
-                </div>
-              ) : null}
 
-              {recommendation.inverter || recommendation.battery ? (
+                  {recommendation.alternatives.length > 0 ? (
+                    <div className="rounded-xl border border-border bg-card p-4">
+                      <h3 className="font-display text-sm font-semibold text-card-foreground">
+                        Also compatible
+                      </h3>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Shown only where the product satisfies the same documented
+                        requirements. The recommendation above is the smallest that does.
+                      </p>
+                      <ul className="mt-3 space-y-4">
+                        {recommendation.alternatives.map((alternative) => (
+                          <li key={alternative.product.id}>
+                            <ProductCard product={alternative.product} />
+                            <p className="mt-2 text-xs text-muted-foreground">
+                              <span className="font-medium text-foreground">Not selected:</span>{' '}
+                              {alternative.whyNotSelected}
+                            </p>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <NoMatch
+                  status={recommendation.status}
+                  unavailableMatch={recommendation.unavailableMatch}
+                  requiredAh={sizing.requiredAh}
+                  requiredDcWatts={sizing.requiredDcWatts}
+                  systemVoltage={sizing.systemVoltage}
+                />
+              )}
+
+              {/* The rest of the system, where the catalogue holds it. */}
+              {recommendation.combo || recommendation.inverter ? (
                 <div className="rounded-xl border border-border bg-card p-4">
                   <h3 className="font-display text-sm font-semibold text-card-foreground">
-                    Or buy the parts separately
+                    For the rest of the system
                   </h3>
                   <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+                    {recommendation.combo ? (
+                      <ProductCard product={recommendation.combo} />
+                    ) : null}
                     {recommendation.inverter ? (
                       <ProductCard product={recommendation.inverter} />
                     ) : null}
-                    {recommendation.battery ? (
-                      <ProductCard product={recommendation.battery} />
-                    ) : null}
                   </div>
                 </div>
+              ) : null}
+
+              {/* Which families we stock nothing in at all — named, rather
+                  than silently omitted, so a battery-only answer does not read
+                  as the whole system. */}
+              {recommendation.unavailableFamilies.length > 0 ? (
+                <p className="rounded-lg border border-border bg-surface p-3 text-xs text-muted-foreground">
+                  We are not currently stocking{' '}
+                  {describeFamilies(recommendation.unavailableFamilies)} — our team can source
+                  that part.
+                </p>
               ) : null}
             </div>
           )}
@@ -409,13 +556,27 @@ export function LoadCalculator() {
             <div className="mt-3 space-y-3 text-xs leading-relaxed text-muted-foreground">
               <p>
                 <strong className="text-foreground">Inverter VA</strong> = running watts ÷ power
-                factor, with headroom so the unit is not permanently at full output. Surge is
-                checked separately against the largest single appliance, because two motors rarely
-                start at the same instant.
+                factor, with headroom so the unit is not permanently at full output.
               </p>
               <p>
                 <strong className="text-foreground">Battery Ah</strong> = (running watts × hours) ÷
                 (system voltage × efficiency × usable depth of discharge).
+              </p>
+              <p>
+                {/* Says exactly what happens to the surge figure, and no more.
+                    No battery in our range publishes a surge or peak discharge
+                    rating, so there is nothing to check the peak against and
+                    this tool does not pretend otherwise. */}
+                <strong className="text-foreground">Momentary peak</strong> is the running load plus
+                the largest single appliance&rsquo;s start-up surge, shown for information. It is
+                not used to size the inverter and is not checked against a battery, because none of
+                our batteries publishes a surge rating.
+              </p>
+              <p>
+                <strong className="text-foreground">The recommendation</strong> is a separate step.
+                A battery is only offered when its own published specification satisfies the system
+                voltage, the capacity and the continuous discharge your load needs, and it is in
+                stock. Where nothing does, we say so rather than offer the nearest size.
               </p>
               <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 border-t border-border pt-3">
                 {SIZING_ASSUMPTIONS.map((assumption) => (
@@ -428,13 +589,76 @@ export function LoadCalculator() {
                 ))}
               </dl>
               <p>
-                Appliance wattages are typical figures. If your appliance rating plate says
-                something different, size against that number and check with our engineers.
+                Appliance wattages and the four factors above are typical planning figures, not
+                product specifications. If your appliance rating plate says something different,
+                size against that number and check with our engineers.
               </p>
             </div>
           </details>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Every outcome that is not a recommendation, said accurately.
+ *
+ * "No matching battery" and "your load is too high" are different statements
+ * about somebody's home, and only one of them is ever true. The route decides
+ * which by proving it — a capacity or power comparison actually failed — so
+ * this component only has to render the answer it is given, and every branch
+ * ends at a human.
+ */
+function NoMatch({
+  status,
+  unavailableMatch,
+  requiredAh,
+  requiredDcWatts,
+  systemVoltage,
+}: {
+  status: SizingRecommendation['status'];
+  unavailableMatch: SizingRecommendation['unavailableMatch'];
+  requiredAh: number;
+  requiredDcWatts: number;
+  systemVoltage: number;
+}) {
+  const requirement = `Your load needs about ${requiredAh} Ah at a ${systemVoltage}V battery input, delivering around ${requiredDcWatts} W continuously.`;
+
+  const { title, body } =
+    status === 'not-available' && unavailableMatch
+      ? {
+          title: `${unavailableMatch.product.title} fits, but is not available right now`,
+          body: `${unavailableMatch.capacityLabel}. It satisfies everything your load needs; we simply cannot ship it today.`,
+        }
+      : status === 'information-missing'
+        ? {
+            title: 'We want to confirm a specification before recommending anything',
+            body: `${requirement} One of our batteries is the right kind of product, but its published specification is missing a figure this check needs, and we would rather confirm it than guess.`,
+          }
+        : status === 'incomplete-request'
+          ? {
+              title: 'We need a little more before we can recommend a battery',
+              body: 'Choose the appliances you want running and a backup window, and we will check them against what we stock.',
+            }
+          : {
+              title: 'No matching iTarang battery is currently available for this requirement',
+              body: `${requirement} Nothing in our current range satisfies all of that, and we will not offer you a battery that does not.`,
+            };
+
+  return (
+    <div className="rounded-xl border border-warning/40 bg-warning-soft p-5">
+      <p className="flex items-start gap-2 text-sm font-semibold text-foreground">
+        <AlertTriangle className="mt-0.5 h-4.5 w-4.5 shrink-0 text-warning" />
+        {title}
+      </p>
+      <p className="mt-2 text-sm text-muted-foreground">{body}</p>
+      <p className="mt-2 text-sm text-muted-foreground">
+        Please contact our support team and we can help you find the right solution.
+      </p>
+      <ButtonLink href="/support" variant="primary" size="sm" className="mt-4">
+        Talk to our support team
+      </ButtonLink>
     </div>
   );
 }

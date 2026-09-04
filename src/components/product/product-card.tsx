@@ -14,6 +14,7 @@ import { ButtonLink } from '@/components/ui/button';
 import { PriceBlock } from './price-block';
 import { PurchaseButton } from './purchase-button';
 import { cn } from '@/lib/utils';
+import { productPath } from '@/lib/routes';
 
 /**
  * Product card.
@@ -67,14 +68,14 @@ export function ProductCard({
     return (
       <div className={cn('flex gap-3', className)}>
         <Link
-          href={`/p/${product.slug}`}
+          href={productPath(product.slug)}
           className="relative h-20 w-20 shrink-0 overflow-hidden rounded-md border border-border bg-secondary"
         >
           <Image src={product.image} alt="" fill sizes="80px" className="object-contain p-1.5" />
         </Link>
         <div className="flex min-w-0 flex-1 flex-col justify-center">
           <Link
-            href={`/p/${product.slug}`}
+            href={productPath(product.slug)}
             className="line-clamp-2 text-sm font-semibold text-foreground transition-colors hover:text-accent-600"
           >
             {product.title}
@@ -100,7 +101,7 @@ export function ProductCard({
       )}
     >
       <div className="relative aspect-[4/5] overflow-hidden bg-surface">
-        <Link href={`/p/${product.slug}`} className="absolute inset-0" aria-label={product.title}>
+        <Link href={productPath(product.slug)} className="absolute inset-0" aria-label={product.title}>
           <Image
             src={product.image}
             alt={product.title}
@@ -196,7 +197,7 @@ export function ProductCard({
 
         <h3 className="text-sm leading-snug">
           <Link
-            href={`/p/${product.slug}`}
+            href={productPath(product.slug)}
             className="line-clamp-2-fixed text-primary transition-colors after:absolute after:inset-0 after:content-[''] hover:text-primary-600"
           >
             {product.title}
@@ -256,7 +257,7 @@ export function ProductCard({
               purchase is switched on. While it is off there is nothing to
               choose between, and every card carries the same disabled button. */}
           {PURCHASE_ENABLED && !soldOut && product.hasOptions ? (
-            <ButtonLink href={`/p/${product.slug}`} variant="outline" size="md" fullWidth>
+            <ButtonLink href={productPath(product.slug)} variant="outline" size="md" fullWidth>
               Choose options
             </ButtonLink>
           ) : (

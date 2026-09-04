@@ -9,7 +9,7 @@ import { SupportTeaser } from '@/components/support/support-teaser';
 export const metadata: Metadata = {
   title: 'Inverter & battery load calculator',
   description:
-    'Work out the inverter VA and battery Ah your home needs from the appliances you actually run — and see the matching iTarang systems.',
+    'Work out the inverter VA and battery Ah your home needs from the appliances you actually run, and see what we stock for it.',
   alternates: { canonical: '/tools/load-calculator' },
 };
 
@@ -36,8 +36,8 @@ export default function LoadCalculatorPage() {
               </h1>
               <p className="mt-3 max-w-3xl text-pretty text-sm leading-relaxed text-muted-foreground sm:text-base">
                 Tick what you want running during a power cut and how long you need it for. We work
-                out the inverter capacity and battery size, show the arithmetic, and take you to
-                the iTarang systems that match. Nothing here needs an email address.
+                out the inverter capacity and battery size, show the arithmetic, and point you at
+                whatever we stock for it. Nothing here needs an email address.
               </p>
             </div>
           </div>

@@ -113,15 +113,31 @@ export function fieldErrors(error: z.ZodError): Record<string, string> {
 
 /**
  * Indian state code → GST state number, for place-of-supply.
- * Captured now so invoices can be generated correctly later.
+ *
+ * All 36 states and union territories currently in the GST code list. Four were
+ * missing until the address book started validating against this array — an
+ * omission that was invisible while `state` was any free-text string, because
+ * a name this list does not know simply produced `undefined` from
+ * `stateCode()` and a blank place-of-supply on the invoice.
+ *
+ * Two obsolete codes are deliberately absent: 25 (Daman and Diu) and 28 (the
+ * undivided Andhra Pradesh). Daman and Diu merged into Dadra and Nagar Haveli
+ * in 2020 and the merged union territory uses 26; Andhra Pradesh became 37 when
+ * Telangana was created. Listing a retired code would let an invoice be issued
+ * against a place of supply that no longer exists.
+ *
+ * Names are the matching key — `stateCode()` compares on them — so the "and"
+ * spelling is uniform rather than mixing in ampersands.
  */
 export const STATES: Array<{ name: string; code: string }> = [
+  { name: 'Andaman and Nicobar Islands', code: '35' },
   { name: 'Andhra Pradesh', code: '37' },
   { name: 'Arunachal Pradesh', code: '12' },
   { name: 'Assam', code: '18' },
   { name: 'Bihar', code: '10' },
   { name: 'Chandigarh', code: '04' },
   { name: 'Chhattisgarh', code: '22' },
+  { name: 'Dadra and Nagar Haveli and Daman and Diu', code: '26' },
   { name: 'Delhi', code: '07' },
   { name: 'Goa', code: '30' },
   { name: 'Gujarat', code: '24' },
@@ -131,6 +147,8 @@ export const STATES: Array<{ name: string; code: string }> = [
   { name: 'Jharkhand', code: '20' },
   { name: 'Karnataka', code: '29' },
   { name: 'Kerala', code: '32' },
+  { name: 'Ladakh', code: '38' },
+  { name: 'Lakshadweep', code: '31' },
   { name: 'Madhya Pradesh', code: '23' },
   { name: 'Maharashtra', code: '27' },
   { name: 'Manipur', code: '14' },

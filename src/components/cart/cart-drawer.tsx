@@ -11,6 +11,7 @@ import { Drawer } from '@/components/ui/overlay';
 import { ButtonLink } from '@/components/ui/button';
 import { ProductCard } from '@/components/product/product-card';
 import { CartLineItem, FreeShipMeter, OrderSummary } from './cart-pieces';
+import { categoryPath } from '@/lib/routes';
 
 /**
  * Cart drawer — the default cart surface.
@@ -87,7 +88,7 @@ export function CartDrawer() {
             appliances you actually run.
           </p>
           <div className="mt-6 flex w-full flex-col gap-2">
-            <ButtonLink href="/c/combos" variant="primary" fullWidth onClick={close}>
+            <ButtonLink href={categoryPath('combos')} variant="primary" fullWidth onClick={close}>
               Shop combos
             </ButtonLink>
             <ButtonLink

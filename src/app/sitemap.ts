@@ -2,6 +2,7 @@ import type { MetadataRoute } from 'next';
 import { SITE } from '@/lib/site';
 import { catalog } from '@/lib/commerce';
 import { allProducts } from '@/lib/catalog/collections';
+import { categoryPath, productPath, subcategoryPath } from '@/lib/routes';
 
 interface Route {
   path: string;
@@ -26,9 +27,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   ];
 
   const categoryRoutes: Route[] = categories.flatMap((category) => [
-    { path: `/c/${category.slug}`, priority: 0.9 },
+    { path: categoryPath(category.slug), priority: 0.9 },
     ...category.subcategories.map((sub) => ({
-      path: `/c/${category.slug}/${sub.slug}`,
+      path: subcategoryPath(category.slug, sub.slug),
       priority: 0.8,
     })),
   ]);
@@ -36,7 +37,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // Products come from the active provider, so the sitemap never advertises a
   // URL the site cannot serve.
   const productRoutes: Route[] = products.map((product) => ({
-    path: `/p/${product.slug}`,
+    path: productPath(product.slug),
     priority: 0.8,
     lastModified: new Date(product.launchedAt),
   }));

@@ -17,7 +17,7 @@ export const CATEGORIES: Category[] = [
     seoCopy: [
       'A home inverter converts stored battery power into mains-grade AC when the grid fails, and recharges the battery when the grid returns. The output waveform is what separates a basic unit from a good one: pure sine wave output matches the shape of grid supply, so motors, compressors and switch-mode power supplies run without the humming, extra heat and reduced life that modified sine wave output causes.',
       'Sizing is a two-part decision. The inverter VA rating must cover the total connected load with headroom for start-up surge, and the battery Ah rating determines how long that load runs. A 900VA inverter comfortably carries four fans, six LED lights, a router and a television; a 1500VA unit adds a refrigerator or a small water pump. Our load calculator works the arithmetic out for you and returns matching iTarang systems.',
-      'Every iTarang inverter ships with wide-input protection for the 100V–290V swings common on rural and semi-urban feeders, short-circuit and overload cut-offs, and a documented warranty with certified installation across our service network.',
+      'Every iTarang inverter ships with wide-input protection for the 100V–290V swings common on rural and semi-urban feeders, short-circuit and overload cut-offs, and the full manufacturer specification on every product page.',
     ],
     icon: 'inverter',
     facetIds: [
@@ -69,7 +69,7 @@ export const CATEGORIES: Category[] = [
           '2200VA and above for large homes, shops and workshops running pumps, compressors and multiple refrigeration loads.',
         seoCopy: [
           'Above roughly 2000VA an inverter moves from a 12V single-battery design to a 24V or 48V bank, which reduces current draw at the same power and keeps cable losses and heating under control. This is the family for a large home with a borewell pump, or a retail counter running refrigeration and lighting through long outages.',
-          'High-capacity systems must be installed on a properly rated circuit with correct cable gauge. Certified installation is included with every iTarang high-capacity inverter.',
+          'High-capacity systems must be installed on a properly rated circuit with correct cable gauge, by a qualified electrician.',
         ],
       },
     ],
@@ -78,9 +78,9 @@ export const CATEGORIES: Category[] = [
     slug: 'batteries',
     name: 'Batteries',
     shortName: 'Batteries',
-    tagline: 'Lithium and tubular banks sized for real backup hours',
+    tagline: 'Home backup banks and EV traction packs, sized honestly',
     description:
-      'The battery decides how long your backup lasts and how often you replace it. Choose lithium for cycle life and zero maintenance, or tubular for proven long-outage performance at a lower entry price.',
+      'The battery decides how long your backup lasts and how often you replace it. Choose lithium for cycle life and zero maintenance, or tubular for proven long-outage performance at a lower entry price — or a LiFePO4 traction pack matched to your vehicle’s system voltage.',
     seoCopy: [
       'Battery capacity is quoted in ampere-hours (Ah) at a stated discharge rate — usually C20, meaning the rated capacity is available when discharged evenly over twenty hours. A 150Ah C20 battery paired with a 900VA inverter carries a typical four-fan, six-light load for roughly six to eight hours depending on the depth of discharge you are willing to accept.',
       'Chemistry is the other half of the decision. Lithium iron phosphate (LiFePO4) delivers three to five times the cycle life of lead acid, weighs roughly a third as much, needs no topping up, and can be discharged deeper without damage — but costs more up front. Tall tubular lead acid remains the value choice for homes with long, frequent outages where the lower initial cost matters more than the replacement interval.',
@@ -90,6 +90,7 @@ export const CATEGORIES: Category[] = [
     facetIds: [
       'subcategory',
       'batteryAh',
+      'voltage',
       'technology',
       'backupHours',
       'warrantyMonths',
@@ -97,7 +98,7 @@ export const CATEGORIES: Category[] = [
       'rating',
       'availability',
     ],
-    highlights: ['LiFePO4 & tall tubular', '100Ah to 220Ah', 'Shipped in protective crates'],
+    highlights: ['LiFePO4 home & EV packs', '30Ah to 220Ah', 'Shipped in protective crates'],
     subcategories: [
       {
         slug: 'lithium',
@@ -135,6 +136,28 @@ export const CATEGORIES: Category[] = [
           'Lower-cost flat plate and sealed maintenance-free units for short outages and light backup duty.',
         seoCopy: [
           'Flat plate batteries suit areas with short, infrequent outages where deep cycling is rare. Sealed maintenance-free (SMF) units add spill-proof construction and no water topping, making them suitable for indoor placement alongside a desktop UPS.',
+        ],
+      },
+      {
+        slug: 'ev-2-wheeler',
+        name: '2-Wheeler EV Batteries',
+        description:
+          'LiFePO4 traction packs for electric scooters and motorcycles, matched by system voltage and connector.',
+        seoCopy: [
+          'A traction pack is chosen by system voltage first and capacity second. A 60V drivetrain needs a pack whose controller accepts its nominal voltage, its charge voltage and its discharge cut-off — a 51V pack and a 73.6V pack are not alternatives for the same vehicle, whatever their capacity. Check the voltage on the listing against the vehicle, then the connector, then the charger.',
+          'Lithium iron phosphate is the safest chemistry on the road: it has a far higher thermal-runaway threshold than nickel-based cells and does not release oxygen when abused. Every pack listed here carries a battery management system that protects against over-charge, over-discharge, over-current and short circuit, and balances cells individually.',
+          'Fitting a pack whose connector or charge profile does not match the vehicle is the most common and most expensive mistake. Confirm the connector type and the charger rating before ordering; a lead-acid charger will damage a lithium pack.',
+        ],
+      },
+      {
+        slug: 'ev-3-wheeler',
+        name: '3-Wheeler & E-Rickshaw Batteries',
+        description:
+          'High-capacity LiFePO4 packs for e-rickshaws and e-loaders, sized in kWh for a day of duty.',
+        seoCopy: [
+          'An e-rickshaw is a working vehicle, so the number that matters is energy — kilowatt-hours — rather than ampere-hours alone. Energy divided by the vehicle’s consumption per kilometre is the honest estimate of a day’s range, and consumption varies with passenger load, terrain and motor rating far more than with the battery.',
+          'Lithium iron phosphate replaces a lead-acid bank at roughly a third of the weight and several times the cycle life, with no water topping, no acid and no terminal corrosion. Against daily deep cycling that difference compounds quickly.',
+          'A traction pack must match the controller and the charger. Confirm the system voltage, the charge voltage and the connector before ordering, and use only a charger approved for the pack.',
         ],
       },
     ],

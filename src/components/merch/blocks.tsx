@@ -4,11 +4,11 @@ import {
   ArrowRight,
   BadgeCheck,
   Calculator,
+  Factory,
   Headphones,
+  PhoneCall,
+  Recycle,
   ShieldCheck,
-  Truck,
-  Wallet,
-  Wrench,
 } from 'lucide-react';
 import type { NavCategory } from '@/lib/navigation';
 import { TRUST_ITEMS } from '@/lib/site';
@@ -17,7 +17,12 @@ import { SectionHeader } from '@/components/ui/section';
 import { CategoryIcon } from '@/components/layout/category-icon';
 import { cn } from '@/lib/utils';
 
-const TRUST_ICONS = { truck: Truck, shield: ShieldCheck, wallet: Wallet, wrench: Wrench };
+const TRUST_ICONS = {
+  shield: ShieldCheck,
+  factory: Factory,
+  phone: PhoneCall,
+  recycle: Recycle,
+};
 
 /* -------------------------------------------------------------- trust row */
 
@@ -53,13 +58,23 @@ export function TrustRow({ className }: { className?: string }) {
 
 /* --------------------------------------------------------- category tiles */
 
+/** "Four families, fifteen types" — counted, never typed. */
+function describeTaxonomy(categories: NavCategory[]): string {
+  const families = categories.length;
+  const types = categories.reduce((sum, category) => sum + category.subcategories.length, 0);
+  return `${families} ${families === 1 ? 'family' : 'families'}, ${types} ${types === 1 ? 'type' : 'types'}.`;
+}
+
 export function CategoryTiles({ categories }: { categories: NavCategory[] }) {
   return (
     <section className="container section">
       <SectionHeader
         eyebrow="Shop by category"
         title="Power systems for your home"
-        description="Four families, fourteen types. Start where you know what you need, or let the load calculator decide for you."
+        // Counted from the taxonomy rather than written down. It read
+        // "fourteen types" and there are fifteen — the two EV subcategories
+        // were added and the sentence was not.
+        description={`${describeTaxonomy(categories)} Start where you know what you need, or let the load calculator decide for you.`}
         action={{ label: 'Browse everything', href: '/search' }}
       />
       <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
@@ -128,15 +143,14 @@ export function LoadCalculatorPromo() {
           </h2>
           <p className="mt-3 max-w-xl text-sm leading-relaxed text-muted-foreground sm:text-base">
             Tick the appliances you want running during a cut and how long you need them for. We
-            work out the inverter VA and battery Ah, and show you the iTarang systems that match —
-            no guesswork, no sales call required.
+            work out the inverter VA and battery Ah, and show you what we stock for it.
           </p>
           <ul className="mt-5 grid gap-2 sm:grid-cols-2">
             {[
               'Appliance presets with real wattages',
-              'Surge headroom built into the maths',
+              'Start-up surge shown for every appliance',
               'Battery sized to your backup hours',
-              'One click to the matching combo',
+              'One click through to what we stock',
             ].map((point) => (
               <li key={point} className="flex items-start gap-2 text-sm text-muted-foreground">
                 <BadgeCheck className="mt-0.5 h-4 w-4 shrink-0 text-success" />
@@ -175,34 +189,33 @@ export function LoadCalculatorPromo() {
  * Each row links into the load calculator pre-filled with that appliance mix,
  * rather than at a specific SKU — so the guide keeps working whatever the
  * catalogue currently holds, and the shopper lands on a sized recommendation.
+ *
+ * It used to carry two more columns, "Recommended system" and "Backup", with
+ * values like "900VA inverter + 150Ah battery" and "6 – 8 hours". Both were
+ * hardcoded: the products named do not exist in the catalogue, and the backup
+ * figures were not produced by the calculator the table sends people to. A
+ * guide that recommends a specific system has to get it from the sizing code,
+ * so the columns are gone and the link does the work.
  */
 const LOAD_GUIDE = [
   {
     home: 'One room or studio',
     load: '2 fans · 4 LED lights · router',
-    system: '700VA inverter + 100Ah battery',
-    backup: '3 – 4 hours',
     href: '/tools/load-calculator?load=fan:2,led:4,router:1&hours=4',
   },
   {
     home: 'Two to three bedrooms',
     load: '4 fans · 6 lights · TV · router',
-    system: '900VA inverter + 150Ah battery',
-    backup: '6 – 8 hours',
     href: '/tools/load-calculator?load=fan:4,led:6,tv:1,router:1&hours=6',
   },
   {
     home: 'Three bedrooms with a mixer or pump',
     load: 'Above, plus a mixer or small pump',
-    system: '1100VA inverter + 150Ah lithium',
-    backup: '7 – 9 hours',
     href: '/tools/load-calculator?load=fan:4,led:6,tv:1,router:1,mixer:1&hours=7',
   },
   {
     home: 'Four bedrooms with refrigeration',
     load: 'Above, plus a refrigerator',
-    system: '1500VA inverter + 220Ah battery',
-    backup: '8 – 10 hours',
     href: '/tools/load-calculator?load=fan:4,led:8,tv:1,router:1,fridge:1&hours=8',
   },
 ];
@@ -219,13 +232,11 @@ export function LoadGuide() {
 
       {/* Table on desktop, cards on mobile — same data, format that suits the width. */}
       <div className="hidden overflow-x-auto rounded-lg border border-border md:block">
-        <table className="w-full min-w-[44rem] text-left text-sm">
+        <table className="w-full min-w-[32rem] text-left text-sm">
           <thead className="bg-surface text-xs uppercase tracking-wide text-muted-foreground">
             <tr>
               <th scope="col" className="px-4 py-3 font-semibold">Home size</th>
               <th scope="col" className="px-4 py-3 font-semibold">Typical load</th>
-              <th scope="col" className="px-4 py-3 font-semibold">Recommended system</th>
-              <th scope="col" className="px-4 py-3 font-semibold">Backup</th>
               <th scope="col" className="px-4 py-3" />
             </tr>
           </thead>
@@ -236,8 +247,6 @@ export function LoadGuide() {
                   {row.home}
                 </th>
                 <td className="px-4 py-3.5 text-muted-foreground">{row.load}</td>
-                <td className="px-4 py-3.5 font-medium text-foreground">{row.system}</td>
-                <td className="tabular px-4 py-3.5 text-muted-foreground">{row.backup}</td>
                 <td className="px-4 py-3.5 text-right">
                   <Link
                     href={row.href}
@@ -258,16 +267,6 @@ export function LoadGuide() {
           <li key={row.home} className="rounded-lg border border-border bg-card p-4">
             <p className="font-display text-sm font-bold text-foreground">{row.home}</p>
             <p className="mt-1 text-xs text-muted-foreground">{row.load}</p>
-            <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
-              <div>
-                <dt className="text-xs text-muted-foreground">System</dt>
-                <dd className="font-medium text-foreground">{row.system}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-muted-foreground">Backup</dt>
-                <dd className="tabular font-medium text-foreground">{row.backup}</dd>
-              </div>
-            </dl>
             <Link
               href={row.href}
               className="mt-3 inline-flex items-center gap-1 text-sm font-semibold text-accent-600"

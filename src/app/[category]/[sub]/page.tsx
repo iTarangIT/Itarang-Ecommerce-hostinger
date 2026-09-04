@@ -9,7 +9,8 @@ interface PageProps {
   searchParams: Promise<SearchParamsInput>;
 }
 
-export const dynamicParams = false;
+/** Same reasoning as the parent category route. */
+export const dynamicParams = true;
 
 export async function generateStaticParams() {
   const categories = await catalog().listCategories();

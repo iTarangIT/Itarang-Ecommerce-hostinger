@@ -10,6 +10,7 @@ import { summaryToCartItem, useCart } from '@/lib/store/hooks';
 import { useUI } from '@/lib/store/ui-provider';
 import { Checkbox } from '@/components/ui/field';
 import { PurchaseButton } from './purchase-button';
+import { productPath } from '@/lib/routes';
 
 /**
  * Frequently bought together.
@@ -66,7 +67,7 @@ export function FrequentlyBought({
               ) : null}
               <li>
                 <Link
-                  href={`/p/${item.slug}`}
+                  href={productPath(item.slug)}
                   className="relative block h-24 w-24 overflow-hidden rounded-md border border-border bg-surface transition-colors hover:border-accent/50 sm:h-28 sm:w-28"
                 >
                   <Image src={item.image} alt={item.title} fill sizes="112px" className="object-contain p-2" />
@@ -100,7 +101,7 @@ export function FrequentlyBought({
                 />
                 <span className="min-w-0 text-sm">
                   <Link
-                    href={`/p/${companion.slug}`}
+                    href={productPath(companion.slug)}
                     className="block font-medium text-foreground hover:text-accent-600"
                   >
                     {companion.title}

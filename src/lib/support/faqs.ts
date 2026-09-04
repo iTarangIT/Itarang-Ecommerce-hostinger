@@ -126,8 +126,15 @@ export const FAQ_SECTIONS: FaqSection[] = [
       {
         id: 'payment',
         question: 'What payment methods can I use?',
+        // Matches what checkout accepts. It used to add "no-cost EMI on
+        // eligible orders" and "Cash on delivery is available on eligible
+        // orders and pincodes": `emiEnabled` is false on every product and no
+        // lender terms exist, and `COD_ENABLED` is false — the COD route
+        // answers 403 and the quote refuses a COD order. This answer is also
+        // previewed on the homepage, so it was the last place either claim
+        // still appeared.
         answer:
-          'UPI, credit and debit cards, net banking and no-cost EMI on eligible orders. Cash on delivery is available on eligible orders and pincodes, confirmed at checkout.',
+          'UPI, credit and debit cards, and net banking, through Razorpay. Payment is taken online when you place the order.',
       },
       {
         id: 'gst',

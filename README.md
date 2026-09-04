@@ -18,10 +18,13 @@ npm run gen:images   # regenerate the SVG product illustrations
 
 ## Database (checkout)
 
-Hostinger is the source of truth for products, prices and availability, and is
-read-only. **Our** PostgreSQL owns everything else: orders, order items, payment
-records, stock reservations, order events and admin tracking. Hostinger is never
-written to.
+**Our** PostgreSQL owns the product catalogue — content, pricing and publishing
+— along with orders, order items, payment records, stock reservations, order
+events and admin tracking. See [Products](#products).
+
+The Hostinger Sales Channel catalogue remains available and read-only behind
+`COMMERCE_PROVIDER=hostinger`; the only thing ever written upstream is variant
+stock, and only when `HOSTINGER_INVENTORY_PUSH=true`.
 
 The database is either a local `itarang_dev` or one approved managed database
 (Supabase). Set `DATABASE_URL` **once** in `.env.local` — three loaders read that
@@ -211,6 +214,7 @@ It is excluded from `npm run verify` on purpose, so CI never needs a secret.
 ```bash
 COMMERCE_PROVIDER=mock        # 31 development products, works offline (default)
 COMMERCE_PROVIDER=hostinger   # live Hostinger catalogue, read-only
+COMMERCE_PROVIDER=db          # the catalogue we own
 ```
 
 With `hostinger` selected, every surface — homepage rails, mega-menu counts, facets, search,
@@ -222,6 +226,93 @@ Check upstream health and the field-level mapping at any time (development only)
 ```bash
 curl -s localhost:3000/api/diagnostics/hostinger | jq
 ```
+
+## Products
+
+**We own our product content.** Title, description, specifications, highlights,
+warranty, FAQs, manufacturer, seller, compatibility and images all live in our
+own PostgreSQL and are edited at `/admin/products`. Publishing a change needs no
+developer and no deploy.
+
+That is a deliberate reversal. It used to work the other way: Hostinger returned
+a title, a price and some images, and everything else — category, subcategory,
+highlights, box contents, FAQs, warranty, badges, facets, cross-sell — was a
+hand-edited TypeScript file keyed by Hostinger's product id. That id is not
+stable. Recreating a product in hPanel mints a new one and silently detaches its
+entry, which had already happened twice, the second time to all six products at
+once.
+
+**Hostinger is untouched.** The provider, the client, the mapper, the enrichment
+file and the inventory push loop are all exactly as they were and still selected
+by `COMMERCE_PROVIDER=hostinger`. `products.hostinger_product_id` is kept as a
+nullable reference so a future commerce or inventory integration can bind one of
+our products to an upstream one without a schema change. It is never read for
+content.
+
+```
+manufacturers ─┐
+sellers ───────┼─→ products ─┬─→ product_variants   sku, price, stock
+               │             ├─→ product_media      Supabase Storage key + order
+               │             ├─→ product_spec_groups ─→ product_specs
+               │             ├─→ product_faqs
+               │             └─→ product_sections   applications · charging ·
+               │                                    discharge · runtime ·
+               │                                    compatibility · care
+        (shared rows — one manufacturer, one seller, pointed at by every product)
+```
+
+There is deliberately no wide product table. A 51V traction pack and a
+wall-mounted home battery share almost no technical vocabulary — one has a
+discharge cut-off and a connector pin map, the other an IP rating and an
+inverter charging profile — so technical figures are **rows** in
+`product_spec_groups` / `product_specs`, which is the `SpecGroup` shape the
+product page already rendered. Adding a category needs no migration.
+
+### Publishing
+
+`draft → published → draft`, and `archived` from either. **There is no delete**:
+`order_items` snapshots product and variant ids, and `funnel_events` records
+what a visitor looked at. Archiving is the withdrawal, and it is reversible via
+draft — never straight back to the storefront.
+
+A product cannot be published until it states a title, a slug, a description, at
+least one image and at least one variant with both an MRP and a selling price.
+The gate is enforced server-side in `setStatus`, not by hiding a button.
+
+**A warranty is deliberately not required.** Five of the eight source documents
+state none, and the whole catalogue is built on the rule that an unknown value
+renders as *nothing* rather than as a plausible default. Requiring one here
+would force somebody to invent it.
+
+### Importing the supplied catalogue
+
+The eight Trontek products are transcribed into `db/seed/`, not parsed from the
+`.docx` files at import time — the data has to be reviewable in a diff, and a
+re-run has to be deterministic.
+
+```bash
+npm run products:import -- --dry-run   # validate the seed data, write nothing
+npm run products:import                # upsert by product_key, idempotent
+npm run products:media -- --dry-run    # check all 32 images resolve
+npm run products:media                 # upload to Supabase Storage, record rows
+```
+
+Both are idempotent and neither changes a product's `status` after it is
+created: a re-import must not republish something an administrator withdrew.
+`products:media` reads the archive in `docs/` directly, so there is no manual
+extraction step.
+
+### Product images
+
+Supabase Storage holds the binaries; `product_media.storage_path` holds the
+object key and nothing else. The public URL is derived on read from
+`SUPABASE_URL` — storing a full URL would bake the project host into every row.
+
+`SUPABASE_URL` **must be set at build time**: `next.config.mjs` reads it to
+authorise the host in both `images.remotePatterns` and the CSP, and both are
+baked into the build output. `SUPABASE_SERVICE_ROLE_KEY` is needed only to
+*write* an image, bypasses row-level security on every table in the project, and
+is covered by the client-bundle grep in `src/lib/security.test.ts`.
 
 ## Stack
 
@@ -239,16 +330,19 @@ time.
 ## Commerce abstraction
 
 The UI never imports catalogue data directly. It calls `catalog()`, which returns a
-`CatalogProvider`. Query behaviour lives in one shared `CatalogEngine`, so both providers answer a
-shopper's query identically — they differ only in where their `Product[]` comes from.
+`CatalogProvider`. Query behaviour lives in one shared `CatalogEngine`, so all three providers
+answer a shopper's query identically — they differ only in where their `Product[]` comes from.
 
 ```
 src/lib/commerce/
   types.ts            domain types + the CatalogProvider interface
   summary.ts          ProductSummary — the flat, serialisable card projection
   index.ts            catalog() — the single resolution point
+  db/
+    db-provider.ts    the catalogue we own — reads published rows, no reviews,
+                      no offers until real ones exist
   mock/
-    categories.ts     4 families, 14 subcategories, editorial copy
+    categories.ts     4 families, 16 subcategories, editorial copy
     products.ts       31 products (one mirrors the live Hostinger SKU)
     reviews.ts        review fixtures (city + verified state only, no names)
     offers.ts         bank / UPI / EMI / coupon / shipping / bundle offers
@@ -293,7 +387,7 @@ Supporting logic sits in `src/lib/catalog/`: `facets.ts` (facet definitions),
 ```
 /                                   homepage
 /c/[category]                       4 category pages
-/c/[category]/[sub]                 14 subcategory pages
+/c/[category]/[sub]                 16 subcategory pages
 /p/[slug]                           one page per product in the active catalogue
 /search                             faceted search
 /compare                            side-by-side, up to 4
@@ -303,14 +397,24 @@ Supporting logic sits in `src/lib/catalog/`: `facets.ts` (facet definitions),
 /support  /faq /warranty-registration /installation /complaint /dealers
 /account                            saved products (real), other panels gated on accounts
 /track                              guest order lookup
+/admin/products                     product list, filters, publish state
+/admin/products/new                 create a draft
+/admin/products/[productKey]        edit — information, pricing, media, content,
+                                    specifications, sections, warranty, parties,
+                                    FAQ, SEO
 /api/suggest /products /cross-sell /compare /sizing
 /api/diagnostics/hostinger          upstream health + mapping report (dev only)
 ```
 
-Category and product routes both set `dynamicParams: false`, so an unknown slug is a real HTTP
-404 rather than a not-found page served with 200. The category listing is fetched inside its own
-Suspense boundary so route validation completes before anything streams — with a segment-level
-`loading.tsx` the status was already sent by the time `notFound()` ran.
+Category and product routes set `dynamicParams: true`, so a slug that was not prerendered — a
+product published since the last build, or one whose cache entry an admin save has purged — is
+rendered on demand instead of 404ing. `generateStaticParams` still prerenders the whole catalogue
+at build time.
+
+Neither route has a segment-level `loading.tsx`, and that is load-bearing rather than an
+omission: a segment loading file starts streaming immediately, which commits HTTP 200 before the
+page can call `notFound()`, turning every unknown slug into a soft 404 that search engines index.
+Both routes validate first and stream their listing from an inner Suspense boundary instead.
 
 ## Design system
 
@@ -341,7 +445,16 @@ Anything that cannot work without a backend says so on screen rather than simula
 
 Values marked `PLACEHOLDER` in `src/lib/site.ts` — phone number, registered address, support hours
 — must be confirmed before launch. Offer values in `mock/offers.ts` and `lib/offers/coupons.ts`
-are illustrative and need signed commercial terms.
+are illustrative and need signed commercial terms; under `COMMERCE_PROVIDER=db` the product page
+renders no offers card at all rather than borrowing them.
+
+Two claims still reach a product page from configuration rather than from the product, and both
+need a decision before launch:
+
+- `PriceBlock` prints "Or ₹x/month on 6-month no-cost EMI" for anything over ₹5,000, which is
+  every product in the current catalogue. No EMI terms have been agreed.
+- `DeliveryCheck` and `ServiceStrip` state delivery and installation from
+  `lib/support/serviceability.ts`, which is development logic.
 
 ## What remains
 
@@ -353,5 +466,10 @@ are illustrative and need signed commercial terms.
 4. Verified-buyer review capture — the store has reviews disabled, so `getReviews()` returns `[]`
    under the live provider and no rating is ever fabricated.
 5. A service-desk endpoint for the Owner Centre forms.
-6. Enrichment entries for each new SKU. Watch the `unmappedProducts` list in the diagnostics
-   response; anything there is being filed by title matching rather than deliberately.
+6. Enrichment entries for each new SKU **under the Hostinger provider only**. Watch the
+   `unmappedProducts` list in the diagnostics response; anything there is being filed by title
+   matching rather than deliberately. Products under `COMMERCE_PROVIDER=db` carry their own
+   taxonomy and need no entry.
+7. Confirmed business data for the imported catalogue: the warranty terms for the five products
+   whose documents state none, a price for Powercube 2.7, the manufacturer's legal name and
+   registered address, a customer-care email, and confirmation of the minted `TRN-` SKUs.

@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/field';
 import { QuantityStepper } from './quantity-stepper';
 import { cn } from '@/lib/utils';
+import { productPath } from '@/lib/routes';
 
 /* ------------------------------------------------------------- line item */
 
@@ -43,7 +44,7 @@ export function CartLineItem({
   return (
     <div className={cn('flex gap-3 py-4', compact ? 'px-4 sm:px-5' : 'px-0')}>
       <Link
-        href={`/p/${item.slug}`}
+        href={productPath(item.slug)}
         onClick={compact ? close : undefined}
         className="relative h-20 w-20 shrink-0 overflow-hidden rounded-md border border-border bg-secondary sm:h-24 sm:w-24"
       >
@@ -54,7 +55,7 @@ export function CartLineItem({
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <Link
-              href={`/p/${item.slug}`}
+              href={productPath(item.slug)}
               onClick={compact ? close : undefined}
               className="line-clamp-2 text-sm font-semibold text-foreground transition-colors hover:text-accent-600"
             >

@@ -145,6 +145,44 @@ export async function clearFailedLogins(userId: number): Promise<void> {
 
 /* ------------------------------------------------------------ mutation */
 
+/** Raised when the phone a customer entered already belongs to another account. */
+export class PhoneInUseError extends Error {
+  constructor() {
+    super('That mobile number is already on another account.');
+    this.name = 'PhoneInUseError';
+  }
+}
+
+/**
+ * Update the profile fields a customer owns.
+ *
+ * Email is not among them: it is the sign-in identifier, so changing it is
+ * changing a credential and needs the new address proved before the old one
+ * stops working.
+ *
+ * `phone` carries a partial unique index (migration 0014), which is what makes
+ * it usable as an identifier later. A collision therefore surfaces as a
+ * constraint violation rather than a silent overwrite, and is translated here
+ * so callers do not have to know PostgreSQL error codes.
+ */
+export async function updateProfile(
+  userId: number,
+  input: { fullName: string; phone: string | null },
+): Promise<AuthUser | null> {
+  try {
+    const row = await queryOne<UserRow>(
+      `UPDATE users SET full_name = $2, phone = $3 WHERE id = $1 RETURNING ${COLUMNS}`,
+      [userId, input.fullName.trim(), input.phone?.trim() || null],
+    );
+    return row ? toUser(row) : null;
+  } catch (error) {
+    const code = (error as { code?: string }).code;
+    const constraint = String((error as { constraint?: string }).constraint ?? '');
+    if (code === '23505' && constraint.includes('phone')) throw new PhoneInUseError();
+    throw error;
+  }
+}
+
 export async function markEmailVerified(userId: number): Promise<void> {
   await query(
     `UPDATE users SET email_verified_at = now() WHERE id = $1 AND email_verified_at IS NULL`,

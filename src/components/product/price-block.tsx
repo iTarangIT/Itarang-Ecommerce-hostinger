@@ -34,6 +34,15 @@ export function PriceBlock({
    * the price it applies to.
    */
   discountPlacement?: 'inline' | 'below';
+  /**
+   * Print the no-cost EMI line.
+   *
+   * The caller decides, and only a product that states `emiEnabled` should say
+   * yes. This used to be gated additionally on `price >= 500000` — a threshold
+   * that was quietly making a commercial decision, since it meant any product
+   * over ₹5,000 advertised financing whether or not it had been arranged.
+   * The product now carries that fact, so the threshold is gone.
+   */
   showEmi?: boolean;
   showTaxNote?: boolean;
   className?: string;
@@ -75,7 +84,7 @@ export function PriceBlock({
       {showTaxNote ? (
         <p className="mt-1 text-xs text-muted-foreground">Inclusive of all taxes</p>
       ) : null}
-      {showEmi && price >= 500000 ? (
+      {showEmi ? (
         <p className="mt-1 text-xs text-muted-foreground">
           Or <span className="tabular font-semibold text-foreground">{formatPrice(emiPerMonth(price, 6))}</span>
           /month on 6-month no-cost EMI

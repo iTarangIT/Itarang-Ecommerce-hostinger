@@ -18,15 +18,22 @@ export interface Attribute {
  * any remaining slots.
  */
 export function attributePairs(product: Product): Attribute[] {
-  const { capacityVa, batteryAh, technology, backupHours, phase } = product.facets;
+  const { capacityVa, batteryAh, voltage, technology, backupHours, phase } = product.facets;
   const pairs: Attribute[] = [];
 
   if (capacityVa) pairs.push({ label: 'Capacity', value: `${capacityVa.toLocaleString('en-IN')} VA` });
   if (batteryAh) pairs.push({ label: 'Battery', value: `${batteryAh} Ah` });
+  if (voltage) pairs.push({ label: 'Nominal voltage', value: `${voltage} V` });
   if (technology) pairs.push({ label: 'Technology', value: technology });
   if (backupHours) pairs.push({ label: 'Typical backup', value: `${backupHours} hours` });
   if (phase) pairs.push({ label: 'Phase', value: phase });
-  if (product.warrantyMonths !== undefined) {
+  // The verbatim commercial phrase when the catalogue states one — "3 years or
+  // 1200 cycles, whichever is earlier" is the promise; "3 years" is only half
+  // of it. Falls back to the months figure, and to nothing at all when neither
+  // is stated.
+  if (product.warrantyText) {
+    pairs.push({ label: 'Warranty', value: product.warrantyText });
+  } else if (product.warrantyMonths !== undefined) {
     pairs.push({ label: 'Warranty', value: `${Math.round(product.warrantyMonths / 12)} years` });
   }
 

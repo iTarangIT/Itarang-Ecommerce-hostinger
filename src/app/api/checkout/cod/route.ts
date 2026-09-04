@@ -4,6 +4,7 @@ import { fieldErrors, placeOrderSchema } from '@/lib/checkout/validation';
 import { grantOrderAccess } from '@/lib/orders/access';
 import { requireCustomer } from '@/lib/orders/checkout-auth';
 import { databaseUnavailableMessage, isDatabaseUnavailable } from '@/lib/db/errors';
+import { env } from '@/lib/env';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,8 +15,29 @@ export const dynamic = 'force-dynamic';
  * gateway even if one were configured. The order is confirmed immediately and
  * its stock reservation is consumed, because the sale is committed the moment
  * the order is accepted.
+ *
+ * **COD is switched off for this release**, and this handler now says so
+ * itself. `buildQuote` already refused a COD quote whenever `COD_ENABLED` is
+ * false, so no COD order could be created — but that refusal was reached only
+ * after authenticating the caller, consuming their idempotency key and
+ * rebuilding a full quote, and it arrived dressed as `invalid_quote`, which
+ * reads as a problem with the cart. The route is the honest place to state a
+ * closed payment method, and stating it in two independent places is the point:
+ * neither is load-bearing alone.
  */
 export async function POST(request: Request) {
+  // Before authentication, because the answer does not depend on who is asking
+  // and there is nothing here worth making an anonymous caller work for.
+  if (!env().COD_ENABLED) {
+    return NextResponse.json(
+      {
+        error: 'Cash on delivery is not available. Please pay online.',
+        code: 'cod_disabled',
+      },
+      { status: 403 },
+    );
+  }
+
   // Checked before anything else: an unauthenticated caller must not be able
   // to probe validation behaviour or consume an idempotency key.
   const auth = await requireCustomer(request);

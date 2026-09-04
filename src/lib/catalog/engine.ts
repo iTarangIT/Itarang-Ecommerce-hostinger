@@ -9,6 +9,7 @@ import type {
 import { FACET_DEFINITIONS, productMatchesFacet } from './facets';
 import { displayPrice, minSellingPrice } from './pricing';
 import { sortProducts } from './sort';
+import { categoryPath, productPath } from '@/lib/routes';
 
 /**
  * In-memory catalogue query engine.
@@ -289,13 +290,13 @@ export function buildSuggestions(
       type: 'category',
       label: c.name,
       sublabel: c.tagline,
-      href: `/c/${c.slug}`,
+      href: categoryPath(c.slug),
     })),
     ...products.map<SearchSuggestion>((p) => ({
       type: 'product',
       label: p.title,
       sublabel: p.subtitle,
-      href: `/p/${p.slug}`,
+      href: productPath(p.slug),
       image: p.images[0],
       price: displayPrice(p),
     })),

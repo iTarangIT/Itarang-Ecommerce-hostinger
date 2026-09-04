@@ -71,6 +71,19 @@ export const FACET_DEFINITIONS: Record<FacetId, FacetDefinition> = {
     labelOf: (v) => `${v} Ah`,
     order: (v) => Number(v),
   },
+  voltage: {
+    id: 'voltage',
+    label: 'System voltage',
+    type: 'checkbox',
+    unit: 'V',
+    // The first filter an EV buyer applies, and the one that decides whether a
+    // pack fits at all: a 51V pack and a 73.6V pack are not alternatives for
+    // the same vehicle. Products that state no voltage — every home inverter
+    // battery — contribute nothing and are absent from the facet.
+    valuesOf: (p) => (p.facets.voltage ? [String(p.facets.voltage)] : []),
+    labelOf: (v) => `${v} V`,
+    order: (v) => Number(v),
+  },
   technology: {
     id: 'technology',
     label: 'Technology',

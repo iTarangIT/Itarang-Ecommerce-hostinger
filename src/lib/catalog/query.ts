@@ -9,6 +9,7 @@ export const URL_FACET_IDS: FacetId[] = [
   'subcategory',
   'capacityVa',
   'batteryAh',
+  'voltage',
   'technology',
   'backupHours',
   'warrantyMonths',

@@ -54,8 +54,12 @@ export function Header({ categories }: { categories: NavCategory[] }) {
         )}
       >
         <div className="container flex h-9 items-center justify-between text-xs">
+          {/* Describes what the catalogue actually holds. It read "Pure sine
+              wave power backup · certified installation included": we stock no
+              inverters at all, and `installationIncluded` is false on all eight
+              products — a claim on every page of the site that nothing backed. */}
           <p className="text-muted-foreground">
-            Pure sine wave power backup · certified installation included
+            Lithium iron phosphate batteries · made in India by Trontek
           </p>
           <div className="flex items-center gap-5">
             {UTILITY_LINKS.map((link) => (

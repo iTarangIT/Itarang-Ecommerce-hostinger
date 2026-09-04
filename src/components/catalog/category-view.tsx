@@ -11,11 +11,12 @@ import { ProductGridSkeleton, Skeleton } from '@/components/ui/skeleton';
 import { SupportNudge } from '@/components/ui/states';
 import { CategoryIcon } from '@/components/layout/category-icon';
 import { cn } from '@/lib/utils';
+import { categoryPath, subcategoryPath } from '@/lib/routes';
 
 /**
  * Shared category / subcategory body.
  *
- * The two routes that render it — `/c/[category]` and `/c/[category]/[sub]` —
+ * The two routes that render it — `/[category]` and `/[category]/[sub]` —
  * are separate plain dynamic segments rather than one optional catch-all,
  * because `dynamicParams: false` is only honoured at the routing layer for
  * plain segments. With a catch-all, an unknown category rendered `notFound()`
@@ -33,8 +34,8 @@ export async function CategoryView({
   allCategories: Category[];
 }) {
   const basePath = subcategory
-    ? `/c/${category.slug}/${subcategory.slug}`
-    : `/c/${category.slug}`;
+    ? subcategoryPath(category.slug, subcategory.slug)
+    : categoryPath(category.slug);
 
   const query = parseProductQuery(searchParams, {
     category: category.slug as CategorySlug,
@@ -43,7 +44,7 @@ export async function CategoryView({
 
   const crumbs = [
     { label: 'Home', href: '/' },
-    { label: category.name, href: `/c/${category.slug}` },
+    { label: category.name, href: categoryPath(category.slug) },
     ...(subcategory ? [{ label: subcategory.name, href: basePath }] : []),
   ];
 
@@ -78,7 +79,7 @@ export async function CategoryView({
             <ul className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
               <li className="shrink-0">
                 <Link
-                  href={`/c/${category.slug}`}
+                  href={categoryPath(category.slug)}
                   className={cn(
                     'inline-block rounded-full border px-4 py-2 text-sm font-medium transition-colors',
                     !subcategory
@@ -94,7 +95,7 @@ export async function CategoryView({
                 return (
                   <li key={sub.slug} className="shrink-0">
                     <Link
-                      href={`/c/${category.slug}/${sub.slug}`}
+                      href={subcategoryPath(category.slug, sub.slug)}
                       className={cn(
                         'inline-block rounded-full border px-4 py-2 text-sm font-medium transition-colors',
                         active
@@ -143,7 +144,7 @@ export async function CategoryView({
                       .map((other) => (
                         <li key={other.slug}>
                           <Link
-                            href={`/c/${other.slug}`}
+                            href={categoryPath(other.slug)}
                             className="flex items-center gap-2.5 rounded-md border border-border bg-card p-3 text-sm font-medium text-foreground transition-colors hover:border-accent/40 hover:text-accent-600"
                           >
                             <CategoryIcon kind={other.icon} className="h-4.5 w-4.5 text-primary" />
@@ -165,15 +166,26 @@ export async function CategoryView({
 /**
  * Should the demo battery be shown at the head of this listing?
  *
- * Only on the unrefined first page of the batteries category. The demo product
- * is a presentational fixture that never passes through `CatalogEngine`, so it
- * cannot honour a facet filter, a price range, a sort or a search term —
- * showing it under any of those would put a product in a result set it was
- * never matched against. Restricting it to the unfiltered first page keeps
- * every refined view strictly truthful.
+ * Only on the unrefined first page of the batteries category, and only while
+ * that listing has nothing real in it.
+ *
+ * Two separate constraints, for two separate reasons. The demo product never
+ * passes through `CatalogEngine`, so it cannot honour a facet filter, a price
+ * range, a sort or a search term — showing it under any of those would put a
+ * product in a result set it was never matched against. And it exists to
+ * demonstrate a design on an empty shop; once the catalogue has real batteries
+ * in it, a fixture sitting above them is no longer a demonstration, it is a
+ * product nobody can buy at the top of a page of products they can.
+ *
+ * Its own page at `/products/itarang-lifepower-150ah-12v` is unaffected and stays the
+ * reference for the layout.
  */
-function showsDemoProduct(query: ReturnType<typeof parseProductQuery>): boolean {
+function showsDemoProduct(
+  query: ReturnType<typeof parseProductQuery>,
+  realResultCount: number,
+): boolean {
   return (
+    realResultCount === 0 &&
     query.category === 'batteries' &&
     query.subcategory === undefined &&
     query.page === 1 &&
@@ -195,7 +207,7 @@ async function CategoryListing({
   // The demo product is injected here, after the provider has answered, and is
   // never passed back into the commerce layer. See the warning in
   // `lib/commerce/demo/demo-product.ts` for why it must stay out of `catalog()`.
-  const listed = showsDemoProduct(query)
+  const listed = showsDemoProduct(query, result.total)
     ? { ...result, items: [DEMO_PRODUCT, ...result.items], total: result.total + 1 }
     : result;
 
@@ -223,7 +235,9 @@ function ListingSkeleton() {
 export function categoryMetadata(category: Category, subcategory: Subcategory | null) {
   const title = subcategory ? subcategory.name : `${category.name} — ${category.tagline}`;
   const description = subcategory ? subcategory.description : category.description;
-  const path = subcategory ? `/c/${category.slug}/${subcategory.slug}` : `/c/${category.slug}`;
+  const path = subcategory
+    ? subcategoryPath(category.slug, subcategory.slug)
+    : categoryPath(category.slug);
 
   return {
     title,

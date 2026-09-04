@@ -3,6 +3,7 @@ import { bestSellers } from '@/lib/catalog/collections';
 import { Breadcrumbs } from '@/components/ui/breadcrumbs';
 import { currentUser } from '@/lib/auth/session';
 import { orders } from '@/lib/orders/postgres-repository';
+import { listAddresses } from '@/lib/account/addresses';
 import { AccountBody } from '@/components/account/account-body';
 
 export const dynamic = 'force-dynamic';
@@ -18,26 +19,38 @@ export default async function AccountPage() {
   // session lookup. The order history genuinely does depend on the session and
   // still follows it.
   const [session, suggestions] = await Promise.all([currentUser(), bestSellers(6)]);
+  // The serialisable slice, and only that. `sessionId`, `role` and
+  // `mustChangePassword` stay on the server: none of them changes what this
+  // page renders, and a client prop is a value anybody can read.
   const user = session
     ? {
         email: session.email,
         fullName: session.fullName,
+        phone: session.phone,
         verified: session.emailVerifiedAt !== null,
       }
     : null;
 
-  // Only ever this account's own orders — the repository filters on user_id in
-  // SQL, so there is no moment at which somebody else's order is in hand.
-  const history = session
-    ? (await orders().listOrdersForUser(session.id, 20)).orders.map((order) => ({
-        orderNumber: order.orderNumber,
-        status: order.status,
-        paymentStatus: order.paymentStatus,
-        total: order.amounts.total,
-        itemCount: order.items.reduce((sum, item) => sum + item.quantity, 0),
-        placedAt: order.createdAt,
-      }))
-    : [];
+  // Only ever this account's own orders and addresses. Both are filtered on
+  // `user_id` in SQL with the id taken from the session, so there is no moment
+  // at which somebody else's row is in hand — and no id the client can name.
+  const [history, addresses] = session
+    ? await Promise.all([
+        orders()
+          .listOrdersForUser(session.id, 20)
+          .then((result) =>
+            result.orders.map((order) => ({
+              orderNumber: order.orderNumber,
+              status: order.status,
+              paymentStatus: order.paymentStatus,
+              total: order.amounts.total,
+              itemCount: order.items.reduce((sum, item) => sum + item.quantity, 0),
+              placedAt: order.createdAt,
+            })),
+          ),
+        listAddresses(session.id),
+      ])
+    : [[], []];
 
   return (
     <>
@@ -52,7 +65,12 @@ export default async function AccountPage() {
       </div>
 
       <div className="container py-8 lg:py-10">
-        <AccountBody suggestions={suggestions} user={user} orders={history} />
+        <AccountBody
+          suggestions={suggestions}
+          user={user}
+          orders={history}
+          addresses={addresses}
+        />
       </div>
     </>
   );

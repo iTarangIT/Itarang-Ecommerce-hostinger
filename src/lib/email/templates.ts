@@ -92,6 +92,45 @@ export function accountExistsMessage(to: string, token: string): Mail {
   };
 }
 
+/**
+ * The one-time sign-in code.
+ *
+ * Unlike the three messages above this carries no link, and that is deliberate
+ * rather than an omission. A code the recipient types back into the tab they
+ * already have open cannot be turned into a phishing click, and there is no
+ * URL for a mail client to prefetch or a scanner to burn. It also means this
+ * message is safe to forward-quote in a support conversation once it has
+ * expired, which the link mails are not.
+ *
+ * The digits are spaced in the HTML for readability and left unspaced in the
+ * text part, so a copy-paste from either lands correctly in the field.
+ */
+export function loginCodeMessage(to: string, code: string): Mail {
+  const safe = escapeHtml(code);
+  return {
+    to,
+    subject: `${code} is your iTarang sign-in code`,
+    text: [
+      `Your iTarang sign-in code is ${code}.`,
+      '',
+      'It expires in 10 minutes and can be used once.',
+      '',
+      'If you did not try to sign in, you can ignore this message — ' +
+        'somebody typed your address by mistake, and nobody can reach your ' +
+        'account without this code.',
+    ].join('\n'),
+    html: `<!-- iTarang -->
+<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#111">
+  <h1 style="font-size:20px;margin:0 0 16px">Your sign-in code</h1>
+  <p style="font-size:15px;line-height:1.6;margin:0 0 20px">Enter this code to sign in to iTarang. It expires in 10&nbsp;minutes and can be used once.</p>
+  <p style="font-size:32px;font-weight:700;letter-spacing:8px;margin:0 0 24px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">${safe}</p>
+  <p style="font-size:13px;color:#666;line-height:1.6;margin:0">
+    If you did not try to sign in, you can ignore this message. Nobody can reach your account without this code.
+  </p>
+</div>`,
+  };
+}
+
 export function resetPasswordMessage(to: string, token: string): Mail {
   const href = link('/reset-password', token);
   return {

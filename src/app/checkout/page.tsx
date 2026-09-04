@@ -5,6 +5,7 @@ import { Breadcrumbs } from '@/components/ui/breadcrumbs';
 import { CheckoutFlow } from '@/components/checkout/checkout-flow';
 import { peekVisitor, record } from '@/lib/analytics/events';
 import { currentUser } from '@/lib/auth/session';
+import { listAddresses } from '@/lib/account/addresses';
 
 export const dynamic = 'force-dynamic';
 
@@ -64,6 +65,22 @@ export default async function CheckoutPage() {
     });
   }
 
+  /*
+   * This customer's saved addresses, read with the session's own id.
+   *
+   * `listAddresses` filters on `user_id` in SQL and excludes archived rows, so
+   * another customer's address is never in hand and none of these ids can be
+   * anything but this account's. Nothing in the request can influence which
+   * account is read — there is no parameter for it.
+   *
+   * These are a *convenience*: the values are copied into the same address
+   * form the shopper could have typed by hand, and the server re-validates and
+   * snapshots what is submitted. No address id is sent with the order, so
+   * there is no id for the server to resolve and no ownership question at
+   * placement time. See `checkout-flow.tsx` for why that is the safer shape.
+   */
+  const savedAddresses = await listAddresses(user.id);
+
   return (
     <>
       <div className="border-b border-border bg-surface">
@@ -82,6 +99,7 @@ export default async function CheckoutPage() {
       <div className="container py-8 lg:py-10">
         <CheckoutFlow
           account={{ email: user.email, fullName: user.fullName, phone: user.phone }}
+          savedAddresses={savedAddresses}
           provider={paymentProvider().id}
         />
       </div>

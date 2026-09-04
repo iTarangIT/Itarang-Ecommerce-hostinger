@@ -1,4 +1,5 @@
 import type { Offer } from '../types';
+import { categoryPath } from '@/lib/routes';
 
 /**
  * Development offer fixtures.
@@ -72,7 +73,7 @@ export const OFFERS: Offer[] = [
     detail:
       'Every iTarang combo is priced below the sum of its parts, and ships with one warranty and one installation visit.',
     categories: ['combos'],
-    termsUrl: '/c/combos',
+    termsUrl: categoryPath('combos'),
   },
 ];
 

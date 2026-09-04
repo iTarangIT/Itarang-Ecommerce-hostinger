@@ -9,6 +9,8 @@
  *   - support hours
  *   - service network coverage claim
  */
+import { categoryPath } from '@/lib/routes';
+
 export const SITE = {
   name: 'iTarang Products',
   shortName: 'iTarang',
@@ -63,10 +65,10 @@ export const FOOTER_COLUMNS: NavGroup[] = [
     label: 'Shop',
     href: '/search',
     children: [
-      { label: 'Inverters', href: '/c/inverters' },
-      { label: 'Batteries', href: '/c/batteries' },
-      { label: 'UPS systems', href: '/c/ups' },
-      { label: 'Inverter + battery combos', href: '/c/combos' },
+      { label: 'Inverters', href: categoryPath('inverters') },
+      { label: 'Batteries', href: categoryPath('batteries') },
+      { label: 'UPS systems', href: categoryPath('ups') },
+      { label: 'Inverter + battery combos', href: categoryPath('combos') },
       { label: 'Offers', href: '/offers' },
       { label: 'Compare products', href: '/compare' },
     ],
@@ -101,31 +103,59 @@ export const POLICY_LINKS: NavChild[] = [
 ];
 
 export interface TrustItem {
-  icon: 'truck' | 'shield' | 'wallet' | 'wrench';
+  icon: 'shield' | 'factory' | 'phone' | 'recycle';
   title: string;
   detail: string;
 }
 
-/** Claims here are deliberately conservative and tied to documented policy. */
+/**
+ * The four claims on the strip under the hero, and the source of each.
+ *
+ * These appear on the homepage, above the fold, on every visit — so they are
+ * the most-read sentences on the site and the ones least able to carry a guess.
+ * Each is checkable against the catalogue or the seller record:
+ *
+ * 1. `facets.technology` is `LiFePO4` on all eight products, and every one
+ *    lists an intelligent BMS among its key features.
+ * 2. `countryOfOrigin` is `India` on all eight, brand `TRONTEK`, and the
+ *    manufacturer record's country of origin is India.
+ * 3. `SELLERS[0].customerCarePhone` and `grievanceOfficerName` — the same
+ *    number and named officer the product pages print.
+ * 4. Every product's closing FAQ states the take-back programme under the
+ *    Battery Waste Management Rules, 2022.
+ *
+ * **What was here before, and why it went.** Four claims, all four contradicted
+ * by the catalogue they sat above: "Free delivery above ₹4,999" (no delivery
+ * policy exists anywhere in the catalogue), "Documented warranty — written
+ * terms with every product, from 2 to 5 years" (six of the eight products state
+ * no warranty at all, which `seed-data.test.ts` exists to keep true, and the two
+ * that do say 5 years and 3 years), "Pay on delivery" (checkout is not open) and
+ * "Certified installation — included on inverters, batteries and combos"
+ * (`installationIncluded` is false on all eight). A trust strip that cannot be
+ * checked against the catalogue is the opposite of one.
+ *
+ * Copy only. No delivery, COD, checkout or payment code is touched by this —
+ * those remain switched off exactly as they were.
+ */
 export const TRUST_ITEMS: TrustItem[] = [
   {
-    icon: 'truck',
-    title: 'Free delivery above ₹4,999',
-    detail: 'Batteries ship crated at no extra charge.',
-  },
-  {
     icon: 'shield',
-    title: 'Documented warranty',
-    detail: 'Written terms with every product, from 2 to 5 years.',
+    title: 'Lithium iron phosphate',
+    detail: 'Every battery we list is LFP with an intelligent BMS.',
   },
   {
-    icon: 'wallet',
-    title: 'Pay on delivery',
-    detail: 'Available on eligible orders and pincodes.',
+    icon: 'factory',
+    title: 'Made in India',
+    detail: 'Manufactured by Trontek, with in-house R&D and testing.',
   },
   {
-    icon: 'wrench',
-    title: 'Certified installation',
-    detail: 'Included on inverters, batteries and combos.',
+    icon: 'phone',
+    title: 'A person to call',
+    detail: 'Customer care on 9971027907, and a named grievance officer.',
+  },
+  {
+    icon: 'recycle',
+    title: 'Battery take-back',
+    detail: 'Recycled under the Battery Waste Management Rules, 2022.',
   },
 ];

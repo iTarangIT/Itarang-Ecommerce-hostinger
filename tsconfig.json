@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["dom", "dom.iterable", "esnext"],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
@@ -18,11 +22,30 @@
     "jsx": "preserve",
     "incremental": true,
     "noUncheckedIndexedAccess": false,
-    "plugins": [{ "name": "next" }],
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": [
+        "./src/*"
+      ]
     }
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    "next-env.d.ts",
+    ".next-prod/types/**/*.ts"
+  ],
+  // `.next-*` is a verification build made with NEXT_DIST_DIR (see the distDir
+  // note in next.config.mjs). Excluded because `**/*.ts` above would otherwise
+  // pull in a second copy of the generated route types, duplicating every
+  // declaration `.next/types` already provides.
+  "exclude": [
+    "node_modules",
+    ".next-*"
+  ]
 }

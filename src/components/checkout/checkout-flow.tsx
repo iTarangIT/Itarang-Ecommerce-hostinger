@@ -24,6 +24,8 @@ import type { QuoteIssue } from '@/lib/orders/quote';
 import type { ServiceabilityResult } from '@/lib/support/serviceability';
 import { formatPrice } from '@/lib/catalog/pricing';
 import { STATES } from '@/lib/checkout/validation';
+import type { CustomerAddress } from '@/lib/account/addresses';
+import { addAddressAction } from '@/lib/account/address-actions';
 import { useCart } from '@/lib/store/hooks';
 import { useUI } from '@/lib/store/ui-provider';
 import { Button, ButtonLink } from '@/components/ui/button';
@@ -33,6 +35,7 @@ import { OrderSummaryPanel } from './order-summary-panel';
 import { RazorpayPanel } from './razorpay-panel';
 import { TestModeBanner } from './test-mode-banner';
 import { cn } from '@/lib/utils';
+import { categoryPath } from '@/lib/routes';
 
 /**
  * Three-step checkout.
@@ -58,6 +61,8 @@ interface QuoteResponse {
   totals: CartTotals;
   issues: QuoteIssue[];
   serviceability: ServiceabilityResult | null;
+  /** Whether the business offers COD at all, independent of the pincode. */
+  codEnabled: boolean;
   codAvailable: boolean;
   codFee: number;
   placeable: boolean;
@@ -69,6 +74,26 @@ const STEPS: Array<{ id: Step; label: string; icon: typeof User }> = [
   { id: 3, label: 'Payment', icon: Wallet },
 ];
 
+/**
+ * A saved address, flattened into the shape the checkout form holds.
+ *
+ * `CustomerAddress` carries `line2`/`landmark` as optional and the form holds
+ * them as always-present strings, so the empty string is the bridge. Nothing
+ * else is copied: `recipientName` and `recipientPhone` stay on the saved
+ * address and do not overwrite the contact step, which the shopper may already
+ * have edited on the screen before this one.
+ */
+function toAddressFields(saved?: CustomerAddress) {
+  return {
+    line1: saved?.line1 ?? '',
+    line2: saved?.line2 ?? '',
+    landmark: saved?.landmark ?? '',
+    city: saved?.city ?? '',
+    state: saved?.state ?? '',
+    pincode: saved?.pincode ?? '',
+  };
+}
+
 /** The signed-in customer, passed down so the contact step starts filled in. */
 export interface CheckoutAccount {
   email: string;
@@ -78,9 +103,17 @@ export interface CheckoutAccount {
 
 export function CheckoutFlow({
   account,
+  savedAddresses,
   provider,
 }: {
   account: CheckoutAccount;
+  /**
+   * This account's saved addresses, read on the server with the session's id.
+   *
+   * Ordered default-first by `listAddresses`, which is why seeding the
+   * selection is just "take the head of the list" rather than a search.
+   */
+  savedAddresses: CustomerAddress[];
   provider: 'mock' | 'razorpay-test';
 }) {
   const cart = useCart();
@@ -96,14 +129,35 @@ export function CheckoutFlow({
     phone: account.phone ?? '',
     email: account.email,
   });
-  const [address, setAddress] = React.useState({
-    line1: '',
-    line2: '',
-    landmark: '',
-    city: '',
-    state: '',
-    pincode: '',
-  });
+  /**
+   * The shipping address for *this* order.
+   *
+   * Whether it came from a saved address or was typed by hand, this is the
+   * object that gets posted — the payload shape is identical either way. That
+   * is deliberate and is what keeps `place-order.ts`, the quote and the payment
+   * path untouched by this feature: the server cannot tell where the values
+   * came from, and does not need to.
+   *
+   * No address id is ever sent. There is therefore no id for the server to
+   * resolve and no ownership check to get wrong at placement time — the whole
+   * class of "customer A submits customer B's address id" is closed by not
+   * having the field, rather than by remembering to verify it.
+   */
+  const [address, setAddress] = React.useState(() => toAddressFields(savedAddresses[0]));
+
+  /**
+   * Which saved address is selected, or null for "a new address".
+   *
+   * Seeded from the head of `savedAddresses`, which `listAddresses` orders
+   * default-first — so a customer with a default never retypes it, and one with
+   * saved addresses but no explicit default still gets their most recent.
+   */
+  const [selectedAddressId, setSelectedAddressId] = React.useState<number | null>(
+    savedAddresses[0]?.id ?? null,
+  );
+
+  /** Only offered when the typed address is not already one of the saved ones. */
+  const [saveNewAddress, setSaveNewAddress] = React.useState(false);
   const [wantsGstInvoice, setWantsGstInvoice] = React.useState(false);
   const [gstin, setGstin] = React.useState('');
   const [payment, setPayment] = React.useState<PaymentChoice>('online');
@@ -209,6 +263,32 @@ export function CheckoutFlow({
     return Object.keys(errors).length === 0;
   };
 
+  /**
+   * Choose a saved address for this order.
+   *
+   * Copies the values in and clears any field errors the previous address left
+   * behind — a saved address has already been validated once, so carrying a
+   * stale "enter a valid pincode" over to it would be wrong.
+   *
+   * The saved row itself is untouched. So is the default flag: picking a
+   * different address for one order is not a statement about where the next one
+   * should go.
+   */
+  const selectSavedAddress = (saved: CustomerAddress) => {
+    setSelectedAddressId(saved.id);
+    setAddress(toAddressFields(saved));
+    setSaveNewAddress(false);
+    setFieldErrors({});
+  };
+
+  /** Switch to a blank form. Nothing is saved unless the shopper asks. */
+  const useNewAddress = () => {
+    setSelectedAddressId(null);
+    setAddress(toAddressFields());
+    setSaveNewAddress(false);
+    setFieldErrors({});
+  };
+
   const goTo = (target: Step) => {
     if (target > step && !validateStep(target)) return;
     setFormError(null);
@@ -289,6 +369,41 @@ export function CheckoutFlow({
         return;
       }
 
+      /*
+       * The order exists from here on.
+       *
+       * Saving the address is done now — after placement succeeded, before the
+       * navigation or the payment modal — and deliberately *not* inside
+       * `placeOrder` on the server. The order is already complete without it:
+       * `orders.shipping_address` holds its own copy of these values, so this
+       * write adds a convenience for next time and can fail without costing the
+       * customer their order. Putting it in the placement transaction would
+       * mean a full address book turning a paid order into a failed one.
+       *
+       * Ownership comes from the session inside `addAddressAction`. Nothing
+       * here names an account.
+       */
+      if (selectedAddressId === null && saveNewAddress) {
+        const form = new FormData();
+        form.append('line1', address.line1);
+        form.append('line2', address.line2);
+        form.append('landmark', address.landmark);
+        form.append('city', address.city);
+        form.append('state', address.state);
+        form.append('pincode', address.pincode);
+        // The person this parcel is for, which is what the contact step
+        // collected. The address book keeps a recipient per entry.
+        form.append('recipientName', contact.name);
+        form.append('recipientPhone', contact.phone);
+        // Never silently promote it: the shopper asked to save an address, not
+        // to change where everything goes from now on.
+        form.append('isDefault', 'false');
+
+        // A duplicate or a validation quibble must not interrupt a placed
+        // order, so the result is not surfaced here.
+        await addAddressAction(null, form).catch(() => null);
+      }
+
       if (payment === 'cod') {
         cart.clear();
         router.push(`/order/${data.orderNumber}?placed=1`);
@@ -345,7 +460,7 @@ export function CheckoutFlow({
         description="Add something to your cart before checking out."
         actions={
           <>
-            <ButtonLink href="/c/combos" variant="primary">
+            <ButtonLink href={categoryPath('combos')} variant="primary">
               Shop combos
             </ButtonLink>
             <ButtonLink href="/cart" variant="outline">
@@ -523,9 +638,91 @@ export function CheckoutFlow({
           <section className="rounded-xl border border-border bg-card p-5 sm:p-6">
             <h2 className="heading-3">Where should it go?</h2>
             <p className="mt-1.5 text-sm text-muted-foreground">
-              Enter the pincode first — we will confirm delivery and whether cash on delivery is
-              available.
+              {savedAddresses.length > 0
+                ? 'Pick a saved address, or enter a new one.'
+                : 'Enter the pincode first — we will confirm delivery and whether cash on delivery is available.'}
             </p>
+
+            {/*
+              The saved-address picker. Rendered only when there is something to
+              pick: a customer with no saved addresses sees exactly the form
+              that was here before, so checkout is never harder for them than it
+              was.
+
+              Choosing an entry copies its values into the same `address` state
+              the form below writes to. Nothing is "selected" at submit time —
+              by then there is only an address object, indistinguishable from a
+              typed one. Changing the selection therefore affects this order and
+              nothing else: it does not touch the saved row, the default flag,
+              or any earlier order.
+            */}
+            {savedAddresses.length > 0 ? (
+              <fieldset className="mt-6">
+                <legend className="text-sm font-medium text-foreground">Deliver to</legend>
+                <div className="mt-3 space-y-2">
+                  {savedAddresses.map((saved) => (
+                    <label
+                      key={saved.id}
+                      className={cn(
+                        'flex cursor-pointer items-start gap-3 rounded-lg border p-3.5 transition-colors',
+                        selectedAddressId === saved.id
+                          ? 'border-primary bg-primary/5'
+                          : 'border-border hover:border-foreground/20',
+                      )}
+                    >
+                      <input
+                        type="radio"
+                        name="savedAddress"
+                        className="mt-1 h-4 w-4 shrink-0 accent-primary"
+                        checked={selectedAddressId === saved.id}
+                        onChange={() => selectSavedAddress(saved)}
+                      />
+                      <span className="min-w-0 text-sm">
+                        <span className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium text-foreground">
+                            {saved.recipientName}
+                          </span>
+                          {saved.isDefault ? (
+                            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                              Default
+                            </span>
+                          ) : null}
+                        </span>
+                        <span className="mt-1 block text-muted-foreground">
+                          {saved.line1}
+                          {saved.line2 ? `, ${saved.line2}` : ''}
+                          {saved.landmark ? `, ${saved.landmark}` : ''}
+                          {`, ${saved.city}, ${saved.state} ${saved.pincode}`}
+                        </span>
+                        <span className="mt-0.5 block tabular text-muted-foreground">
+                          {saved.recipientPhone}
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+
+                  <label
+                    className={cn(
+                      'flex cursor-pointer items-center gap-3 rounded-lg border p-3.5 transition-colors',
+                      selectedAddressId === null
+                        ? 'border-primary bg-primary/5'
+                        : 'border-border hover:border-foreground/20',
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name="savedAddress"
+                      className="h-4 w-4 shrink-0 accent-primary"
+                      checked={selectedAddressId === null}
+                      onChange={useNewAddress}
+                    />
+                    <span className="text-sm font-medium text-foreground">
+                      Use a different address
+                    </span>
+                  </label>
+                </div>
+              </fieldset>
+            ) : null}
 
             <div className="mt-6 grid gap-4 sm:grid-cols-2">
               <Field label="Pincode" htmlFor="pincode" required error={fieldErrors.pincode}>
@@ -621,6 +818,27 @@ export function CheckoutFlow({
                 </Select>
               </Field>
             </div>
+
+            {/*
+              Offered only for an address that is not already saved. Ticking it
+              does not change what is ordered or where it goes — the order is
+              placed from the same values either way, and the save is a separate
+              write that happens once the order exists.
+            */}
+            {selectedAddressId === null ? (
+              <label className="mt-4 flex cursor-pointer items-start gap-2.5">
+                <Checkbox
+                  checked={saveNewAddress}
+                  onChange={(e) => setSaveNewAddress(e.target.checked)}
+                />
+                <span className="text-sm text-foreground">
+                  Save this address to my account
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    So you do not have to type it again next time.
+                  </span>
+                </span>
+              </label>
+            ) : null}
 
             <div className="mt-6 rounded-lg border border-border bg-surface p-4">
               <label className="flex cursor-pointer items-start gap-2.5">
@@ -718,23 +936,34 @@ export function CheckoutFlow({
                     badge="Test mode"
                   />
 
-                  <PaymentOption
-                    id="cod"
-                    checked={payment === 'cod'}
-                    onSelect={() => setPayment('cod')}
-                    disabled={!quote?.codAvailable}
-                    icon={<Banknote className="h-5 w-5" />}
-                    title="Cash on delivery"
-                    description={
-                      quote?.codAvailable
-                        ? quote.codFee > 0
-                          ? `Pay when it arrives. A ${formatPrice(quote.codFee)} handling fee applies.`
-                          : 'Pay the delivery agent when your order arrives.'
-                        : address.pincode.length === 6
-                          ? 'Not available at this pincode.'
-                          : 'Enter a delivery pincode to check availability.'
-                    }
-                  />
+                  {/* Not offered at all, so not shown at all.
+                      `codEnabled` is the business's answer; `codAvailable`
+                      additionally depends on the pincode. Rendering a disabled
+                      "Cash on delivery — not available at this pincode" while
+                      COD is switched off site-wide blamed the customer's
+                      address for a decision that had nothing to do with it,
+                      and invited them to keep trying other pincodes. The
+                      server refuses a COD order in two independent places
+                      regardless of what this renders. */}
+                  {quote?.codEnabled ? (
+                    <PaymentOption
+                      id="cod"
+                      checked={payment === 'cod'}
+                      onSelect={() => setPayment('cod')}
+                      disabled={!quote.codAvailable}
+                      icon={<Banknote className="h-5 w-5" />}
+                      title="Cash on delivery"
+                      description={
+                        quote.codAvailable
+                          ? quote.codFee > 0
+                            ? `Pay when it arrives. A ${formatPrice(quote.codFee)} handling fee applies.`
+                            : 'Pay the delivery agent when your order arrives.'
+                          : address.pincode.length === 6
+                            ? 'Not available at this pincode.'
+                            : 'Enter a delivery pincode to check availability.'
+                      }
+                    />
+                  ) : null}
                 </div>
 
                 <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-between">

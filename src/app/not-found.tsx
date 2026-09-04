@@ -3,6 +3,7 @@ import { Compass } from 'lucide-react';
 import { CATEGORIES } from '@/lib/commerce/mock/categories';
 import { ButtonLink } from '@/components/ui/button';
 import { StateBlock } from '@/components/ui/states';
+import { categoryPath } from '@/lib/routes';
 
 export default function NotFound() {
   return (
@@ -28,7 +29,7 @@ export default function NotFound() {
           {CATEGORIES.map((category) => (
             <li key={category.slug}>
               <Link
-                href={`/c/${category.slug}`}
+                href={categoryPath(category.slug)}
                 className="flex h-full flex-col rounded-lg border border-border bg-card p-4 transition-colors hover:border-accent/40"
               >
                 <span className="font-display text-sm font-semibold text-foreground">

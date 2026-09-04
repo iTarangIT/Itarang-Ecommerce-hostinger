@@ -4,13 +4,10 @@ import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { sendMail } from '@/lib/email/mailer';
-import {
-  accountExistsMessage,
-  resetPasswordMessage,
-  verifyEmailMessage,
-} from '@/lib/email/templates';
+import { resetPasswordMessage, verifyEmailMessage } from '@/lib/email/templates';
 import { LIMITS, callerIp, consume } from '@/lib/security/rate-limit';
 import { hashPassword, passwordProblem, verifyPassword } from './password';
+import { safeNext } from './redirects';
 import { createSession, currentUser, destroyAllSessions, destroySession } from './session';
 import { linkVisitorToUser, visitorContext } from '@/lib/analytics/events';
 import {
@@ -21,7 +18,6 @@ import {
 } from './verification';
 import {
   clearFailedLogins,
-  createUser,
   findUserByEmail,
   isLockedOut,
   markEmailVerified,
@@ -48,11 +44,10 @@ export type AuthFormState = { error: string } | null;
 
 const emailSchema = z.string().trim().toLowerCase().email('Enter a valid email address.').max(200);
 
-const registerSchema = z.object({
-  email: emailSchema,
-  password: z.string().min(1, 'Choose a password.'),
-  fullName: z.string().trim().min(2, 'Enter your name.').max(120),
-});
+/*
+ * `registerSchema` was here. It went with `registerAction`'s body — customers
+ * are created by proving an emailed code, not by posting a chosen password.
+ */
 
 const loginSchema = z.object({
   email: emailSchema,
@@ -68,12 +63,15 @@ const loginSchema = z.object({
  */
 const DUMMY_HASH = hashPassword('this-hash-exists-only-to-equalise-timing');
 
-/** Only same-origin relative paths, so `?next=` cannot become an open redirect. */
-function safeNext(raw: FormDataEntryValue | null): string | null {
-  const value = typeof raw === 'string' ? raw.trim() : '';
-  if (!value.startsWith('/') || value.startsWith('//')) return null;
-  return value;
-}
+/**
+ * Only same-origin relative paths, so `?next=` cannot become an open redirect.
+ *
+ * Lives in `redirects.ts` rather than here because every export of a
+ * `'use server'` module is a callable endpoint, and this rule is worth unit
+ * tests. Moving it also closed two holes the two-line version had: it accepted
+ * `/\evil.example` and `/<tab>/evil.example`, both of which several browsers
+ * normalise into a scheme-relative URL pointing at another host.
+ */
 
 /** The message every throttled action returns. Never says which limit tripped. */
 const THROTTLED: AuthFormState = {
@@ -93,53 +91,45 @@ async function requestMeta() {
 
 /* ----------------------------------------------------------- register */
 
+/**
+ * Retired. Customers sign up by proving a one-time code.
+ *
+ * The refusal is here, in the action, rather than only in the page that used
+ * to render its form. Every export of a `'use server'` module is a callable
+ * endpoint: removing the form removes the button, not the door. A caller who
+ * posts to this directly gets the same answer as one who cannot find it.
+ *
+ * Why it cannot simply keep working alongside OTP: it calls `createUser`
+ * without a role, so it only ever mints `role = 'customer'`
+ * (`users.ts` — `input.role ?? 'customer'`), and a customer created here could
+ * not then sign in, because `loginAction` refuses customers by password. It
+ * would manufacture accounts that are locked out on arrival.
+ *
+ * Administrators are unaffected — they are created by `scripts/admin-create.mts`,
+ * which does not go through here.
+ *
+ * The signature is kept so existing `useActionState` callers still typecheck.
+ * The body is gone rather than left unreachable behind an early return: dead
+ * code that still reads like a working signup is the kind of thing someone
+ * revives by deleting one line.
+ *
+ * Still rate limited. An endpoint that refuses cheaply is still an endpoint,
+ * and the `register:ip:` bucket is one of the markers `security.test.ts`
+ * checks for, so the guarantee that every auth action counts against a limit
+ * stays literally true.
+ */
 export async function registerAction(
   _prev: AuthFormState,
-  formData: FormData,
+  _formData: FormData,
 ): Promise<AuthFormState> {
-  const parsed = registerSchema.safeParse({
-    email: formData.get('email'),
-    password: formData.get('password'),
-    fullName: formData.get('fullName'),
-  });
-
-  if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? 'Check the details and try again.' };
-  }
-
-  const problem = passwordProblem(parsed.data.password);
-  if (problem) return { error: problem };
-
-  // Per IP: account creation is the one action with no prior identity to key
-  // on, and unlimited signups are how a mailer gets abused as an open relay.
   const rate = await consume(`register:ip:${await callerIp()}`, LIMITS.register);
   if (!rate.allowed) return THROTTLED;
 
-  const user = await createUser({
-    email: parsed.data.email,
-    passwordHash: hashPassword(parsed.data.password),
-    fullName: parsed.data.fullName,
-  });
-
-  // `createUser` returns null when the address is taken. Saying so would
-  // confirm the account exists, so the response is the same either way: we
-  // send mail to the address and show the neutral "check your inbox" screen.
-  if (!user) {
-    const existing = await findUserByEmail(parsed.data.email);
-    if (existing) {
-      const token = await issueToken(existing.id, 'reset_password', RESET_TTL_MINUTES);
-      await sendMail(accountExistsMessage(existing.email, token));
-    }
-    redirect('/login?registered=1');
-  }
-
-  const token = await issueToken(user.id, 'verify_email', VERIFY_TTL_MINUTES);
-  await sendMail(verifyEmailMessage(user.email, token));
-
-  await createSession(user.id, await requestMeta());
-  await linkBrowsingHistory(user.id);
-
-  redirect(safeNext(formData.get('next')) ?? '/account?welcome=1');
+  return {
+    error:
+      'Accounts are created by signing in with an email code. ' +
+      'Enter your email address on the sign-in page and we will send you one.',
+  };
 }
 
 
@@ -213,6 +203,35 @@ export async function loginAction(
     return REJECT;
   }
 
+  /**
+   * Customers authenticate with a one-time code, never with a password.
+   *
+   * This is the authentication boundary for that rule, and it is deliberately
+   * here rather than in the page that draws the form. A form is a rendering
+   * decision: hiding the password fields would leave the action reachable by
+   * anyone willing to post to it, which is not a policy, it is a suggestion.
+   *
+   * Existing customer rows still carry a `password_hash` — they are
+   * development accounts and nothing was migrated — and accounts created by
+   * the OTP flow carry an unusable sentinel. Neither is a way in, because this
+   * check runs before a session is ever created.
+   *
+   * **Placed after `verifyPassword`, on purpose.** A check before it would
+   * answer for a customer address without paying scrypt's cost, so the
+   * response time would tell an unauthenticated caller which addresses are
+   * administrators — an oracle this function otherwise works hard not to be.
+   * `REJECT` is the same object a wrong password returns, so the two are
+   * indistinguishable in both content and timing.
+   *
+   * The failed-attempt counter is incremented for the same reason: not because
+   * the password was wrong, but so that this branch costs exactly what that
+   * one costs and leaves the same trace.
+   */
+  if (row.role !== 'admin') {
+    await recordFailedLogin(row.id);
+    return REJECT;
+  }
+
   await clearFailedLogins(row.id);
   await createSession(row.id, await requestMeta());
   await linkBrowsingHistory(row.id);
@@ -225,6 +244,29 @@ export async function loginAction(
 export async function logoutAction(): Promise<void> {
   await destroySession();
   redirect('/');
+}
+
+/**
+ * Sign out of every browser this account is signed in on.
+ *
+ * The answer to "I signed in on a friend's laptop" and to "I think somebody
+ * else has been in my account" — neither of which the ordinary sign-out helps
+ * with, because it only deletes the session row for the cookie in hand.
+ *
+ * Takes no arguments, like `resendVerificationAction` and for the same reason:
+ * every export of a `'use server'` module is a callable endpoint, so a
+ * `signOutEverywhere(userId)` signature would let anyone post any id and
+ * have this server revoke a stranger's sessions. The identity comes from the
+ * session, which the caller cannot choose.
+ */
+export async function logoutEverywhereAction(): Promise<void> {
+  const user = await currentUser();
+  if (user) await destroyAllSessions(user.id);
+  // Drops the cookie as well. Without it the browser keeps sending a token
+  // whose row is gone — harmless, since every read joins against `sessions`,
+  // but it leaves a signed-out browser carrying a credential for no reason.
+  await destroySession();
+  redirect('/login?signedout=all');
 }
 
 /* ------------------------------------------------------ password reset */
@@ -243,7 +285,20 @@ export async function requestResetAction(
     const rate = await consume(`reset:${parsed.data}`, LIMITS.passwordReset);
 
     const row = rate.allowed ? await findUserByEmail(parsed.data) : null;
-    if (row) {
+
+    /**
+     * Only an administrator has a password worth resetting.
+     *
+     * A customer who completed a reset would still be refused by `loginAction`,
+     * so the mail would send them round a loop that cannot end in a sign-in —
+     * and it would do it in a message that implies otherwise. Their route back
+     * into the account is the code at `/login`, which needs nothing recovered.
+     *
+     * This leaks nothing: the redirect below is unconditional, so the response
+     * is identical for an admin, a customer, an unknown address and a
+     * throttled request alike.
+     */
+    if (row && row.role === 'admin') {
       const token = await issueToken(row.id, 'reset_password', RESET_TTL_MINUTES);
       await sendMail(resetPasswordMessage(row.email, token));
     }

@@ -61,6 +61,25 @@ export interface SizingResult {
   systemVoltage: 12 | 24 | 48;
   /** Battery capacity required, in Ah at the recommended voltage. */
   requiredAh: number;
+  /**
+   * Energy the selected appliances consume over the window, in watt-hours.
+   *
+   * Running watts × hours, and nothing else. No efficiency, no depth of
+   * discharge, no headroom — it is the shopper's own two inputs multiplied,
+   * which is why it can be shown on screen as a fact rather than an estimate.
+   */
+  loadEnergyWh: number;
+  /**
+   * Power the battery must deliver, in watts, to serve `runningWatts` at the
+   * inverter's output.
+   *
+   * `runningWatts / EFFICIENCY`. Stated here so the recommendation engine can
+   * compare a load against a product's documented maximum discharge current
+   * without holding a second copy of the efficiency figure — see
+   * `docs/p1-b-2-catalogue-audit.md`, which records that figure as awaiting
+   * business confirmation.
+   */
+  requiredDcWatts: number;
   backupHours: number;
   /** True when the load needs more than a single-battery 12V system. */
   needsBank: boolean;
@@ -75,6 +94,19 @@ const EFFICIENCY = 0.85;
 const DEPTH_OF_DISCHARGE = 0.6;
 /** Headroom over the running load so the inverter is not permanently at 100%. */
 const HEADROOM = 1.2;
+
+/**
+ * Watts at the inverter output → watts the battery has to supply.
+ *
+ * The single place `EFFICIENCY` is applied to a power figure, so the
+ * recommendation engine's discharge-limit check and this file cannot drift
+ * apart. None of the four constants above is supported by any source document;
+ * `docs/p1-b-2-catalogue-audit.md` records all four as awaiting business
+ * confirmation, and none was changed in P1-B-2.
+ */
+export function dcWattsFor(runningWatts: number): number {
+  return Math.ceil(runningWatts / EFFICIENCY);
+}
 
 export function calculateSizing(selection: Selection, backupHours: number): SizingResult {
   let runningWatts = 0;
@@ -109,6 +141,8 @@ export function calculateSizing(selection: Selection, backupHours: number): Sizi
     requiredVa,
     systemVoltage,
     requiredAh,
+    loadEnergyWh: Math.round(runningWatts * backupHours),
+    requiredDcWatts: dcWattsFor(runningWatts),
     backupHours,
     needsBank: systemVoltage > 12,
     batteriesInSeries,

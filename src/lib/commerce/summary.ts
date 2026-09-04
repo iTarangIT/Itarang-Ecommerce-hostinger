@@ -91,15 +91,21 @@ const CATEGORY_LABELS: Record<CategorySlug, string> = {
  * state is simply omitted — the same rule the warranty line follows.
  */
 function specChipsOf(product: Product): string[] {
-  const { capacityVa, batteryAh, technology, backupHours } = product.facets;
+  const { capacityVa, batteryAh, voltage, technology, backupHours } = product.facets;
   const chips: string[] = [];
 
   const va = capacityVa ? `${capacityVa.toLocaleString('en-IN')} VA` : null;
   const ah = batteryAh ? `${batteryAh} Ah` : null;
+  const volts = voltage ? `${voltage} V` : null;
 
   switch (product.category) {
     case 'batteries':
       if (ah) chips.push(ah);
+      // Second, not last: on a traction pack the system voltage decides
+      // whether the product fits the vehicle at all, so a card that lists
+      // capacity without it is describing the wrong thing. Absent on products
+      // whose catalogue does not state one, which is every tubular bank.
+      if (volts) chips.push(volts);
       if (technology) chips.push(technology);
       if (backupHours) chips.push(`${backupHours} hr backup`);
       break;

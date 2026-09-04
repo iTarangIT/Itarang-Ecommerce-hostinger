@@ -1,4 +1,4 @@
-import type { Paise, Product, ProductVariant, Review } from '../types';
+import type { Paise, Product, ProductSection, ProductVariant, Review } from '../types';
 import { artSet } from '../mock/art';
 import { DEMO_PRODUCT_SLUG } from './demo-slug';
 
@@ -13,7 +13,7 @@ import { DEMO_PRODUCT_SLUG } from './demo-slug';
  * Deliberate isolation — read this before moving anything:
  *
  *   This product is NEVER returned by `catalog()`. It is injected at page
- *   level only (the `/p/[slug]` route and the batteries listing). That is not
+ *   level only (the `/products/[slug]` route and the batteries listing). That is not
  *   a stylistic choice: `allProducts()` feeds `syncInventoryFromHostingerAction`
  *   in `lib/admin/actions.ts`, which calls `syncCatalogue()` — a database write
  *   that claims rows in `catalogue_products` and `catalogue_skus` (a primary
@@ -24,9 +24,10 @@ import { DEMO_PRODUCT_SLUG } from './demo-slug';
  *   So: never add this to a `CatalogProvider`, never pass it to
  *   `syncCatalogue()`, and never write it to Hostinger or the database.
  *
- * To remove the demo entirely, delete this directory plus
- * `components/product/demo-battery-sections.tsx`, and drop the `isDemoSlug`
- * branches in `app/p/[slug]/page.tsx` and `components/catalog/category-view.tsx`.
+ * To remove the demo entirely, delete this directory and drop the `isDemoSlug`
+ * branches in `app/products/[slug]/page.tsx` and `components/catalog/category-view.tsx`.
+ * The page sections it demonstrates are a real `Product` field now, rendered by
+ * `components/product/product-sections.tsx`, which stays.
  * ------------------------------------------------------------------------ */
 
 /** Rupees → paise, matching the catalogue's integer-paise convention. */
@@ -82,6 +83,112 @@ function buildDemoVariants(): ProductVariant[] {
   return [variants[openOn], ...variants.filter((_, index) => index !== openOn)];
 }
 
+/* ------------------------------------------------------------ page sections */
+
+/**
+ * Battery-specific page content.
+ *
+ * This used to be a shape of its own, kept here because the shared `Product`
+ * type had no home for it and the demo had to stay a single deletable unit.
+ * `Product.sections` is that home now, backed by the `product_sections` table,
+ * so this fixture is converted into `ProductSection[]` below and rendered by
+ * the same `ProductSections` component every real product uses. The demo is
+ * still a single deletable unit; it is just no longer the only thing that can
+ * have applications and a charging block.
+ */
+const DEMO_SECTION_SOURCE = {
+  applications: [
+    {
+      title: 'Home inverter backup',
+      description:
+        'The intended use. Runs lights, fans, a router and a television through a typical outage, and recharges between them without needing a full cycle.',
+    },
+    {
+      title: 'Solar storage',
+      description:
+        'Pairs with a solar MPPT controller set to a LiFePO4 profile. Partial charging does no harm, so cloudy days do not shorten its life the way they do with lead-acid.',
+    },
+    {
+      title: 'Shop and small office',
+      description:
+        'Holds billing systems, a computer and lighting through daytime cuts. The flat discharge curve means equipment sees a steady voltage rather than a sagging one.',
+    },
+    {
+      title: 'Frequent shallow cycling',
+      description:
+        'Areas with short, repeated outages. Lead-acid degrades quickly under this pattern; LiFePO4 is largely indifferent to it.',
+    },
+  ],
+
+  charging: {
+    summary:
+      'Charges from the inverter mains charger, a solar MPPT controller, or both. The only requirement is that the charger is set to a lithium or LiFePO4 profile — a tubular or flat-plate profile applies the wrong voltage and will not charge the pack correctly.',
+    points: [
+      { label: 'Recommended current', value: '30 A — about 5 hours to full' },
+      { label: 'Maximum current', value: '75 A' },
+      { label: 'Absorption voltage', value: '14.6V' },
+      { label: 'Float voltage', value: '13.8V' },
+      { label: 'Solar', value: 'MPPT controller, LiFePO4 profile' },
+      { label: 'Partial charging', value: 'Safe — no memory effect, no sulphation' },
+    ],
+  },
+
+  discharge: {
+    summary:
+      'Holds a nearly flat voltage across the whole discharge, so appliances run at full output until the pack is genuinely empty rather than dimming progressively as a lead-acid battery does.',
+    points: [
+      { label: 'Continuous', value: '150 A' },
+      { label: 'Peak, 3 seconds', value: '300 A' },
+      { label: 'Usable depth of discharge', value: '90%' },
+      { label: 'Cut-off voltage', value: '10.0V, enforced by the BMS' },
+      { label: 'Voltage sag under load', value: 'Negligible until nearly empty' },
+    ],
+  },
+
+  sizing: {
+    summary:
+      'A 150Ah 12V pack stores about 1.92 kWh, of which roughly 1.73 kWh is usable. These are indicative run times for common Indian household loads — the load calculator gives a figure for your own appliance list.',
+    scenarios: [
+      { load: '4 LED lights + 2 fans', draw: 'about 200 W', runtime: 'around 8 hours' },
+      { load: '8 LED lights + 4 fans + router', draw: 'about 280 W', runtime: 'around 6 hours' },
+      { load: 'Above plus a television', draw: 'about 400 W', runtime: 'around 4 hours' },
+      { load: 'Above plus a refrigerator', draw: 'about 600 W', runtime: 'around 2.5 hours' },
+    ],
+  },
+
+  compatibility: [
+    'Any 12V inverter with a selectable lithium or LiFePO4 charger profile',
+    'Solar MPPT controllers supporting a LiFePO4 charge curve',
+    'Up to four units in parallel for 600Ah at 12.8V',
+    'Not compatible with chargers fixed to a tubular or flat-plate profile',
+    'Not suitable for automotive starting duty',
+  ],
+
+  care: [
+    'No electrolyte topping up and no terminal cleaning — the pack is sealed and maintenance free',
+    'Keep terminal bolts tight; a loose terminal is the most common cause of heating',
+    'Site it somewhere ventilated and out of direct sun',
+    'If storing unused, leave it at roughly half charge rather than full or empty',
+    'Do not charge below 0°C — the BMS will block it, which is expected behaviour and not a fault',
+  ],
+};
+
+/**
+ * The fixture above, as the domain type.
+ *
+ * Assigned onto `DEMO_PRODUCT` below so the demo page renders through exactly
+ * the same component and the same field a real product does — which is the only
+ * way the demo keeps doing its job of proving the layout.
+ */
+export const DEMO_SECTIONS: ProductSection[] = [
+  { kind: 'applications', items: DEMO_SECTION_SOURCE.applications },
+  { kind: 'charging', ...DEMO_SECTION_SOURCE.charging },
+  { kind: 'discharge', ...DEMO_SECTION_SOURCE.discharge },
+  { kind: 'runtime', ...DEMO_SECTION_SOURCE.sizing },
+  { kind: 'compatibility', items: DEMO_SECTION_SOURCE.compatibility },
+  { kind: 'care', items: DEMO_SECTION_SOURCE.care },
+];
+
 /**
  * The demo battery.
  *
@@ -103,6 +210,7 @@ export const DEMO_PRODUCT: Product = {
   subcategory: 'lithium',
   art: 'battery',
   images: artSet('battery', 1),
+  sections: DEMO_SECTIONS,
 
   highlights: [
     '150Ah usable capacity at 12.8V — about 1.92 kWh of storage',
@@ -270,6 +378,10 @@ export const DEMO_PRODUCT: Product = {
 
   warrantyMonths: 60,
   installationIncluded: true,
+  // The one product allowed to advertise EMI, because it is the one product
+  // that is not real. The page carries a banner saying every figure on it is
+  // illustrative, and the design has to keep demonstrating this line.
+  emiEnabled: true,
   badges: ['premium'],
 
   /**
@@ -330,7 +442,7 @@ export const DEMO_PRODUCT: Product = {
  * Illustrative reviews for the demo product.
  *
  * Same fencing as `DEMO_PRODUCT.rating`: invented, never served by
- * `getReviews()`, and read only by the `/p/[slug]` route when the slug is the
+ * `getReviews()`, and read only by the `/products/[slug]` route when the slug is the
  * demo one. Reviewers are identified by city and verification state alone, the
  * convention the real fixtures follow in `mock/reviews.ts`.
  */
@@ -408,89 +520,3 @@ export const DEMO_REVIEWS: Review[] = [
     hasPhotos: false,
   },
 ];
-
-/* -------------------------------------------------- demo-only page sections */
-
-/**
- * Battery-specific content that has no home in the shared `Product` type.
- *
- * Kept here rather than added as new `Product` fields so the domain type stays
- * untouched and the demo remains a single deletable unit. Rendered only by
- * `components/product/demo-battery-sections.tsx`, only on the demo PDP.
- */
-export const DEMO_SECTIONS = {
-  applications: [
-    {
-      title: 'Home inverter backup',
-      description:
-        'The intended use. Runs lights, fans, a router and a television through a typical outage, and recharges between them without needing a full cycle.',
-    },
-    {
-      title: 'Solar storage',
-      description:
-        'Pairs with a solar MPPT controller set to a LiFePO4 profile. Partial charging does no harm, so cloudy days do not shorten its life the way they do with lead-acid.',
-    },
-    {
-      title: 'Shop and small office',
-      description:
-        'Holds billing systems, a computer and lighting through daytime cuts. The flat discharge curve means equipment sees a steady voltage rather than a sagging one.',
-    },
-    {
-      title: 'Frequent shallow cycling',
-      description:
-        'Areas with short, repeated outages. Lead-acid degrades quickly under this pattern; LiFePO4 is largely indifferent to it.',
-    },
-  ],
-
-  charging: {
-    summary:
-      'Charges from the inverter mains charger, a solar MPPT controller, or both. The only requirement is that the charger is set to a lithium or LiFePO4 profile — a tubular or flat-plate profile applies the wrong voltage and will not charge the pack correctly.',
-    points: [
-      { label: 'Recommended current', value: '30 A — about 5 hours to full' },
-      { label: 'Maximum current', value: '75 A' },
-      { label: 'Absorption voltage', value: '14.6V' },
-      { label: 'Float voltage', value: '13.8V' },
-      { label: 'Solar', value: 'MPPT controller, LiFePO4 profile' },
-      { label: 'Partial charging', value: 'Safe — no memory effect, no sulphation' },
-    ],
-  },
-
-  discharge: {
-    summary:
-      'Holds a nearly flat voltage across the whole discharge, so appliances run at full output until the pack is genuinely empty rather than dimming progressively as a lead-acid battery does.',
-    points: [
-      { label: 'Continuous', value: '150 A' },
-      { label: 'Peak, 3 seconds', value: '300 A' },
-      { label: 'Usable depth of discharge', value: '90%' },
-      { label: 'Cut-off voltage', value: '10.0V, enforced by the BMS' },
-      { label: 'Voltage sag under load', value: 'Negligible until nearly empty' },
-    ],
-  },
-
-  sizing: {
-    summary:
-      'A 150Ah 12V pack stores about 1.92 kWh, of which roughly 1.73 kWh is usable. These are indicative run times for common Indian household loads — the load calculator gives a figure for your own appliance list.',
-    scenarios: [
-      { load: '4 LED lights + 2 fans', draw: 'about 200 W', runtime: 'around 8 hours' },
-      { load: '8 LED lights + 4 fans + router', draw: 'about 280 W', runtime: 'around 6 hours' },
-      { load: 'Above plus a television', draw: 'about 400 W', runtime: 'around 4 hours' },
-      { load: 'Above plus a refrigerator', draw: 'about 600 W', runtime: 'around 2.5 hours' },
-    ],
-  },
-
-  compatibility: [
-    'Any 12V inverter with a selectable lithium or LiFePO4 charger profile',
-    'Solar MPPT controllers supporting a LiFePO4 charge curve',
-    'Up to four units in parallel for 600Ah at 12.8V',
-    'Not compatible with chargers fixed to a tubular or flat-plate profile',
-    'Not suitable for automotive starting duty',
-  ],
-
-  care: [
-    'No electrolyte topping up and no terminal cleaning — the pack is sealed and maintenance free',
-    'Keep terminal bolts tight; a loose terminal is the most common cause of heating',
-    'Site it somewhere ventilated and out of direct sun',
-    'If storing unused, leave it at roughly half charge rather than full or empty',
-    'Do not charge below 0°C — the BMS will block it, which is expected behaviour and not a fault',
-  ],
-};

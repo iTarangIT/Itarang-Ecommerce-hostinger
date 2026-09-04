@@ -15,6 +15,7 @@ import { StateBlock } from '@/components/ui/states';
 import { ProductRail } from '@/components/merch/product-rail';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import { categoryPath, productPath } from '@/lib/routes';
 
 /**
  * Side-by-side comparison.
@@ -89,10 +90,10 @@ export function CompareBody({ suggestions }: { suggestions: ProductSummary[] }) 
               description="Tap the compare icon on any product card, or the Compare button on a product page, to build a side-by-side table of capacity, technology, warranty and price."
               actions={
                 <>
-                  <ButtonLink href="/c/inverters" variant="primary">
+                  <ButtonLink href={categoryPath('inverters')} variant="primary">
                     Browse inverters
                   </ButtonLink>
-                  <ButtonLink href="/c/batteries" variant="outline">
+                  <ButtonLink href={categoryPath('batteries')} variant="outline">
                     Browse batteries
                   </ButtonLink>
                 </>
@@ -130,7 +131,7 @@ export function CompareBody({ suggestions }: { suggestions: ProductSummary[] }) 
                           <X className="h-4 w-4" />
                         </button>
                         <Link
-                          href={`/p/${entry.slug}`}
+                          href={productPath(entry.slug)}
                           className="relative mx-auto block aspect-square w-28 overflow-hidden rounded-md bg-surface"
                         >
                           <Image
@@ -145,13 +146,13 @@ export function CompareBody({ suggestions }: { suggestions: ProductSummary[] }) 
                           {entry.categoryLabel}
                         </p>
                         <Link
-                          href={`/p/${entry.slug}`}
+                          href={productPath(entry.slug)}
                           className="mt-0.5 line-clamp-2 font-display text-sm font-semibold text-foreground hover:text-accent-600"
                         >
                           {entry.title}
                         </Link>
                         <ButtonLink
-                          href={`/p/${entry.slug}`}
+                          href={productPath(entry.slug)}
                           variant="primary"
                           size="sm"
                           fullWidth

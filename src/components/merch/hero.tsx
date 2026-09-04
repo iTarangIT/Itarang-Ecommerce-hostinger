@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { ArrowRight, Check } from 'lucide-react';
 import { ButtonLink } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { categoryPath, subcategoryPath } from '@/lib/routes';
 
 interface Slide {
   eyebrow: string;
@@ -21,10 +22,12 @@ const SLIDES: Slide[] = [
   {
     eyebrow: 'Power backup, properly sized',
     title: 'Never let a power cut stop your home',
-    body: 'Pure sine wave inverters, long-life batteries and ready-matched combos — delivered, installed and warranted by iTarang.',
-    points: ['Silent changeover', 'Wide input 100V–290V', 'Certified installation included'],
+    // "installed" and "Certified installation included" both went: no product
+    // in the catalogue sets `installationIncluded`, so neither could be kept.
+    body: 'Pure sine wave inverters, long-life batteries and ready-matched combos — sized, supplied and supported by iTarang.',
+    points: ['Silent changeover', 'Wide input 100V–290V', 'Sized against your real load'],
     image: '/art/combo-1-angle.svg',
-    primary: { label: 'Shop combos', href: '/c/combos' },
+    primary: { label: 'Shop combos', href: categoryPath('combos') },
     secondary: { label: 'Size my system', href: '/tools/load-calculator' },
   },
   {
@@ -33,8 +36,8 @@ const SLIDES: Slide[] = [
     body: 'LiFePO4 batteries need no water topping and no ventilated trolley, and take daily deep cycling in their stride.',
     points: ['5-year warranty', 'Roughly a third the weight', 'Charges about twice as fast'],
     image: '/art/battery-2-front.svg',
-    primary: { label: 'Shop lithium batteries', href: '/c/batteries/lithium' },
-    secondary: { label: 'Lithium vs tubular', href: '/c/batteries' },
+    primary: { label: 'Shop lithium batteries', href: subcategoryPath('batteries', 'lithium') },
+    secondary: { label: 'Lithium vs tubular', href: categoryPath('batteries') },
   },
   {
     eyebrow: 'Solar ready',
@@ -42,8 +45,8 @@ const SLIDES: Slide[] = [
     body: 'Solar-ready inverters run on grid charging from day one and accept an array whenever you are ready — no replacement needed.',
     points: ['Integrated charge controller', 'Up to 2000Wp on MPPT models', 'Panel sizing at survey'],
     image: '/art/inverter-3-angle.svg',
-    primary: { label: 'Shop solar-ready', href: '/c/inverters/solar-ready' },
-    secondary: { label: 'See solar combos', href: '/c/combos/solar-combos' },
+    primary: { label: 'Shop solar-ready', href: subcategoryPath('inverters', 'solar-ready') },
+    secondary: { label: 'See solar combos', href: subcategoryPath('combos', 'solar-combos') },
   },
 ];
 

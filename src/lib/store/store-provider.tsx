@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import type { AppliedCoupon, CartItem, StoreState } from './types';
-import { EMPTY_STATE, MAX_COMPARE, MAX_RECENTLY_VIEWED } from './types';
+import { EMPTY_STATE, MAX_COMPARE, MAX_RECENTLY_VIEWED, MAX_WISHLIST } from './types';
 import { calculateTotals, type CartTotals } from './totals';
 
 /**
@@ -29,6 +29,10 @@ type Action =
   | { type: 'compare/toggle'; productId: string }
   | { type: 'compare/clear' }
   | { type: 'wishlist/toggle'; productId: string }
+  /** Replace the local list with the account's, after a server read or merge. */
+  | { type: 'wishlist/replace'; ids: string[]; syncedFor: number }
+  /** Sign-out: drop the list and the marker, so a shared device leaks neither. */
+  | { type: 'wishlist/forget' }
   | { type: 'recent/push'; slug: string };
 
 function reducer(state: StoreState, action: Action): StoreState {
@@ -128,13 +132,25 @@ function reducer(state: StoreState, action: Action): StoreState {
     case 'compare/clear':
       return { ...state, compare: [] };
 
-    case 'wishlist/toggle':
+    case 'wishlist/toggle': {
+      if (state.wishlist.includes(action.productId)) {
+        return { ...state, wishlist: state.wishlist.filter((id) => id !== action.productId) };
+      }
+      // Bounded, so a script cannot grow the list without limit and so the
+      // `?ids=` query string that fetches the cards stays a sane length.
+      if (state.wishlist.length >= MAX_WISHLIST) return state;
+      return { ...state, wishlist: [action.productId, ...state.wishlist] };
+    }
+
+    case 'wishlist/replace':
       return {
         ...state,
-        wishlist: state.wishlist.includes(action.productId)
-          ? state.wishlist.filter((id) => id !== action.productId)
-          : [action.productId, ...state.wishlist],
+        wishlist: action.ids.slice(0, MAX_WISHLIST),
+        wishlistSyncedFor: action.syncedFor,
       };
+
+    case 'wishlist/forget':
+      return { ...state, wishlist: [], wishlistSyncedFor: null };
 
     case 'recent/push':
       return {
