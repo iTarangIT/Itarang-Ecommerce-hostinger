@@ -39,9 +39,12 @@ export type HomeSystemVoltage = 12 | 24 | 48;
  */
 export const HOME_BACKUP_SUBCATEGORIES: ReadonlySet<string> = new Set([
   'lithium',
-  'tall-tubular',
-  'short-tubular',
-  'flat-plate-smf',
+  // Defined in the taxonomy for home and inverter stock, and empty today. It is
+  // listed here rather than added when the first product arrives, because the
+  // failure mode of forgetting runs the wrong way: a genuine home battery would
+  // be silently unrecommendable, and the calculator would report "nothing we
+  // stock matches" while the matching product sat in the catalogue.
+  'home-inverter',
 ]);
 
 /**
@@ -149,7 +152,29 @@ export interface Assessment {
   rejections: RejectionCode[];
   /** Documented statements supporting the match, in display order. */
   reasons: string[];
+  /**
+   * How many of this battery the load needs, wired in parallel.
+   *
+   * 1 for a product that satisfies the requirement on its own, and that is what
+   * every caller saw before bank sizing existed. `0` where the product was
+   * rejected for a reason that makes the question meaningless — a traction
+   * pack, an undocumented capacity — so nothing can print "0 units required"
+   * next to a match.
+   */
+  units: number;
 }
+
+/**
+ * The largest bank we will propose.
+ *
+ * A ceiling exists because the arithmetic does not stop: divide a big enough
+ * load by a small enough battery and the honest answer becomes "fourteen of
+ * these", which is not a recommendation, it is a reductio. Past this point the
+ * catalogue genuinely does not serve the load and saying so is more useful.
+ *
+ * Four is also about where parallel strings stop being a domestic install.
+ */
+export const MAX_BANK_UNITS = 4;
 
 /**
  * Which of the five situations the caller is in.
@@ -297,28 +322,54 @@ export function assess(product: Product, requirement: SizingRequirement): Assess
     );
   }
 
-  /* 3 — capacity. */
+  /* 3 — capacity, as a bank.
+     Batteries in parallel add ampere-hours at an unchanged voltage, which is
+     why the voltage barrier above is untouched by this: a bank of 12 V packs is
+     still a 12 V system. `units` is how many the load needs, and a requirement
+     that would take more than `MAX_BANK_UNITS` is refused outright rather than
+     answered with a number nobody would install. */
+  let units = 0;
   if (spec.ah === null) {
     rejections.push('capacity-not-documented');
-  } else if (spec.ah < requirement.requiredAh) {
-    rejections.push('capacity-below-requirement');
+  } else if (spec.ah <= 0) {
+    rejections.push('capacity-not-documented');
   } else {
-    reasons.push(
-      spec.energyWh !== null
-        ? `${spec.ah} Ah (${formatWh(spec.energyWh)}) rated capacity against the ${requirement.requiredAh} Ah your ${requirement.backupHours}-hour window needs`
-        : `${spec.ah} Ah rated capacity against the ${requirement.requiredAh} Ah your ${requirement.backupHours}-hour window needs`,
-    );
+    const needed = Math.max(1, Math.ceil(requirement.requiredAh / spec.ah));
+    if (needed > MAX_BANK_UNITS) {
+      rejections.push('capacity-below-requirement');
+    } else {
+      units = needed;
+      const bankAh = spec.ah * units;
+      const capacity =
+        spec.energyWh !== null
+          ? `${bankAh} Ah (${formatWh(spec.energyWh * units)})`
+          : `${bankAh} Ah`;
+      reasons.push(
+        units === 1
+          ? `${capacity} rated capacity against the ${requirement.requiredAh} Ah your ${requirement.backupHours}-hour window needs`
+          : `${units} in parallel give ${capacity}, against the ${requirement.requiredAh} Ah your ${requirement.backupHours}-hour window needs`,
+      );
+    }
   }
 
-  /* 4 — documented continuous discharge limit. */
+  /* 4 — documented continuous discharge limit, also as a bank.
+     Parallel units share the current, so the bank's limit is the unit's limit
+     times the number of units. Evaluated at `units` — never at the cap — so a
+     bank is only ever credited with the capability of the batteries the
+     capacity check actually called for. */
   if (spec.maxContinuousDischargeW === null) {
     rejections.push('discharge-limit-not-documented');
-  } else if (spec.maxContinuousDischargeW < requirement.requiredDcWatts) {
-    rejections.push('discharge-limit-below-requirement');
   } else {
-    reasons.push(
-      `Rated to deliver ${Math.round(spec.maxContinuousDischargeW)} W continuously, above the ${requirement.requiredDcWatts} W your ${requirement.runningWatts} W of appliances draw`,
-    );
+    const bankWatts = spec.maxContinuousDischargeW * Math.max(1, units);
+    if (bankWatts < requirement.requiredDcWatts) {
+      rejections.push('discharge-limit-below-requirement');
+    } else {
+      reasons.push(
+        units > 1
+          ? `Rated to deliver ${Math.round(bankWatts)} W continuously across ${units} units, above the ${requirement.requiredDcWatts} W your ${requirement.runningWatts} W of appliances draw`
+          : `Rated to deliver ${Math.round(bankWatts)} W continuously, above the ${requirement.requiredDcWatts} W your ${requirement.runningWatts} W of appliances draw`,
+      );
+    }
   }
 
   /* 5 — sellable. Last, so an out-of-stock match is still reported as a match
@@ -333,7 +384,9 @@ export function assess(product: Product, requirement: SizingRequirement): Assess
   // returned whatever the verdict — `rejections` sits beside it and is the
   // authoritative signal. A caller rendering the reasons for a product with a
   // non-empty `rejections` would be endorsing it; none does.
-  return { product, spec, rejections, reasons };
+  // Zeroed on any rejection so nothing downstream can print a unit count beside
+  // a product that was refused — `units` is only meaningful for a match.
+  return { product, spec, rejections, reasons, units: rejections.length === 0 ? units : 0 };
 }
 
 /* ----------------------------------------------------------------- ranking */
@@ -345,13 +398,20 @@ export function assess(product: Product, requirement: SizingRequirement): Assess
  * by documented usable energy ascending, then by price, then by slug. The last
  * tiebreak is what makes the order deterministic rather than dependent on the
  * order rows came back from the database.
+ *
+ * Both figures are for the **whole bank**, not one battery. Comparing a single
+ * unit of a candidate that needs three against a single unit of one that needs
+ * one compares two different systems: the shopper buys and pays for the bank,
+ * so that is what the two keys have to describe. With every candidate needing
+ * one unit — which is the whole catalogue today — this is identical to the
+ * per-unit comparison it replaces.
  */
 function rank(a: Assessment, b: Assessment): number {
-  const energyA = a.spec.energyWh ?? Number.POSITIVE_INFINITY;
-  const energyB = b.spec.energyWh ?? Number.POSITIVE_INFINITY;
+  const energyA = a.spec.energyWh === null ? Number.POSITIVE_INFINITY : a.spec.energyWh * a.units;
+  const energyB = b.spec.energyWh === null ? Number.POSITIVE_INFINITY : b.spec.energyWh * b.units;
   if (energyA !== energyB) return energyA - energyB;
-  const priceA = minSellingPrice(a.product);
-  const priceB = minSellingPrice(b.product);
+  const priceA = minSellingPrice(a.product) * a.units;
+  const priceB = minSellingPrice(b.product) * b.units;
   if (priceA !== priceB) return priceA - priceB;
   return a.product.slug.localeCompare(b.product.slug);
 }

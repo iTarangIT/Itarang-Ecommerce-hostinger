@@ -1,4 +1,5 @@
 import { query, queryOne } from '@/lib/db/pool';
+import { stateCode } from '@/lib/checkout/validation';
 import type { OrderStatus } from '@/lib/orders/types';
 
 /**
@@ -465,4 +466,117 @@ export async function recentFulfilment(
     total: Number(row.total),
     status: row.status,
   }));
+
+}
+
+/* ------------------------------------------------------------- geography */
+
+export interface GeographyRow {
+  /** Canonical state name as the checkout's own `STATES` list spells it. */
+  state: string;
+  /** GST state code, when the name resolves to one. */
+  stateCode: string | null;
+  orders: number;
+  /** Paise. */
+  gross: number;
+  /** Distinct signed-in customers. Guest orders count once each. */
+  customers: number;
+  /** The busiest cities inside this state, largest first. */
+  cities: Array<{ city: string; orders: number; gross: number }>;
+}
+
+/**
+ * Where the money came from.
+ *
+ * **Read from `orders.shipping_address`, not `customer_addresses`.** The order
+ * carries a jsonb *snapshot* of the address it was actually delivered to, and
+ * `0015_customer_addresses.sql` is emphatic that this is deliberate: a customer
+ * who edits or deletes a saved address must not silently rewrite delivery
+ * history. Reporting from the address book would move last quarter's revenue to
+ * a different city the moment somebody moved house.
+ *
+ * The window predicates are the same three `revenue()` uses — paid, prepaid,
+ * bucketed by capture time — so the totals here reconcile with the revenue card
+ * on the same screen rather than telling a second story.
+ *
+ * City and state are typed by shoppers, so they are folded before grouping:
+ * trimmed, internal whitespace collapsed, and compared case-insensitively.
+ * `[[:space:]]` rather than a backslash class on purpose — a JavaScript string
+ * literal silently drops an unrecognised escape, so a regex written as the
+ * obvious backslash-s would reach Postgres as a literal "s" and quietly match
+ * the wrong thing.
+ */
+export async function geography(from: Date, to: Date, limit = 200): Promise<GeographyRow[]> {
+  const capped = Math.min(Math.max(1, Math.floor(limit)), 1000);
+
+  const rows = await query<{
+    state: string;
+    city: string;
+    orders: number;
+    gross: string | number;
+    customers: number;
+  }>(
+    `WITH placed AS (
+       SELECT o.id,
+              o.user_id,
+              o.total,
+              btrim(regexp_replace(COALESCE(o.shipping_address ->> 'state', ''),
+                                   '[[:space:]]+', ' ', 'g')) AS state,
+              btrim(regexp_replace(COALESCE(o.shipping_address ->> 'city', ''),
+                                   '[[:space:]]+', ' ', 'g')) AS city
+         FROM orders o
+        WHERE o.payment_status = 'paid'
+          AND ${EXCLUDE_COD}
+          AND ${CAPTURED_AT} >= $1
+          AND ${CAPTURED_AT} <  $2
+     )
+     SELECT initcap(lower(state)) AS state,
+            initcap(lower(city))  AS city,
+            count(*)::int AS orders,
+            COALESCE(sum(total), 0)::bigint AS gross,
+            -- A guest order has no user_id and must still count as one
+            -- customer, so the id falls back to the order's own.
+            count(DISTINCT COALESCE(user_id::text, 'order:' || id::text))::int AS customers
+       FROM placed
+      WHERE state <> ''
+      GROUP BY initcap(lower(state)), initcap(lower(city))
+      ORDER BY gross DESC
+      LIMIT ${capped}`,
+    [from, to],
+  );
+
+  // Rolled up in TypeScript rather than with a second GROUPING SETS query: the
+  // row count here is bounded by the number of city/state pairs that have ever
+  // been paid for, which is small, and one pass keeps the SQL readable.
+  const byState = new Map<string, GeographyRow>();
+
+  for (const row of rows) {
+    const gross = Number(row.gross);
+    const existing = byState.get(row.state);
+    const entry =
+      existing ??
+      ({
+        state: row.state,
+        stateCode: stateCode(row.state) ?? null,
+        orders: 0,
+        gross: 0,
+        customers: 0,
+        cities: [],
+      } satisfies GeographyRow);
+
+    entry.orders += row.orders;
+    entry.gross += gross;
+    // Summed rather than counted distinct across cities: the same person
+    // ordering to two cities is two delivery relationships, and the state row
+    // is the sum of its cities by construction. Stated so nobody reads this as
+    // a distinct-people figure.
+    entry.customers += row.customers;
+    if (row.city !== '') entry.cities.push({ city: row.city, orders: row.orders, gross });
+
+    byState.set(row.state, entry);
+  }
+
+  return [...byState.values()]
+    .map((entry) => ({ ...entry, cities: entry.cities.sort((a, b) => b.gross - a.gross) }))
+    .sort((a, b) => b.gross - a.gross);
 }

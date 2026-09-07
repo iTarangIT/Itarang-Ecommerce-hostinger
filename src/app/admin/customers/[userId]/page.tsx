@@ -25,6 +25,14 @@ export const metadata: Metadata = {
  * there is no customer-facing route that reads any of it.
  */
 
+/** Day only, for the "delivered on" note beside a customer's location. */
+const IST_DATE = new Intl.DateTimeFormat('en-IN', {
+  day: 'numeric',
+  month: 'short',
+  year: 'numeric',
+  timeZone: 'Asia/Kolkata',
+});
+
 const IST_DATETIME = new Intl.DateTimeFormat('en-IN', {
   day: 'numeric',
   month: 'short',
@@ -92,9 +100,29 @@ export default async function CustomerActivityPage({
         {customer.fullName || customer.email}
       </h1>
 
-      <dl className="mt-4 grid gap-4 rounded-lg border border-border bg-card p-4 sm:grid-cols-4">
+      <dl className="mt-4 grid gap-4 rounded-lg border border-border bg-card p-4 sm:grid-cols-3 lg:grid-cols-5">
         <Row label="Email" value={customer.email} />
         <Row label="Phone" value={customer.phone || '—'} />
+        {/* Labelled with its provenance rather than presented as a plain fact.
+            An order address is somewhere goods were actually delivered and
+            cannot change; a saved address is current, editable and may never
+            have been used. Collapsing the two into one "City" row would invite
+            exactly the wrong conclusion. */}
+        <div>
+          <dt className="text-xs uppercase tracking-wide text-muted-foreground">Location</dt>
+          <dd className="mt-1 text-sm text-foreground">
+            {customer.location
+              ? [customer.location.city, customer.location.state].filter(Boolean).join(', ')
+              : '—'}
+            {customer.location ? (
+              <span className="mt-0.5 block text-xs text-muted-foreground">
+                {customer.location.source === 'order'
+                  ? `Delivered ${IST_DATE.format(new Date(customer.location.at))}`
+                  : 'Saved address — never used for delivery'}
+              </span>
+            ) : null}
+          </dd>
+        </div>
         <Row label="Account since" value={IST_DATETIME.format(new Date(customer.createdAt))} />
         <Row label="Events" value={String(customer.timeline.length)} />
       </dl>

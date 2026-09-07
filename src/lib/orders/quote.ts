@@ -7,6 +7,7 @@ import { activeProviderName } from '@/lib/commerce';
 import {
   PURCHASABLE_PROVIDER,
   PURCHASE_BLOCK_NOTE,
+  customerMaxQuantity,
   purchaseBlockFor,
 } from '@/lib/commerce/purchase';
 import { checkPincode, type ServiceabilityResult } from '@/lib/support/serviceability';
@@ -119,7 +120,12 @@ function toCartItem(product: Product, variant: ProductVariant, quantity: number)
     image: product.images[0] ?? '',
     price: variant.price,
     quantity,
-    maxQuantity: Math.max(1, variant.stock),
+    // The stepper ceiling the cart renders, which is why it is capped rather
+    // than set to the true count: `maxQuantity` crosses the wire to the
+    // browser, so `variant.stock` here would publish the figure this release
+    // exists to stop publishing. The genuine availability clamp is `allowed`
+    // below, computed from the real number and never sent.
+    maxQuantity: customerMaxQuantity(variant.stock),
     category: product.category,
     installationIncluded: product.installationIncluded,
   };
@@ -214,13 +220,19 @@ export async function buildQuote(request: QuoteRequest): Promise<QuoteResult> {
 
     // Silently capping would charge for less than the shopper asked for, so the
     // reduction is reported and the checkout surfaces it.
+    //
+    // The message no longer names the figure. It used to read "Only N of X
+    // available", which handed over the exact count the moment a shopper asked
+    // for more than we hold — the one request guaranteed to reveal it. The
+    // clamp below is unchanged and still uses the true number; only the
+    // sentence describing it does not.
     const allowed = Math.min(quantity, variant.stock);
     if (allowed < quantity) {
       issues.push({
         code: 'quantity_reduced',
         variantId: variant.id,
         title: product.title,
-        message: `Only ${variant.stock} of ${product.title} available — quantity reduced.`,
+        message: `We cannot supply that many of ${product.title} right now — quantity reduced.`,
       });
     }
 

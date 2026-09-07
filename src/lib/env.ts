@@ -131,6 +131,21 @@ const schema = z
     /* ------------------------------------------------------------- gst */
     SELLER_GSTIN: z.string().optional(),
     SELLER_STATE_CODE: z.string().optional(),
+
+    /* ------------------------------------------------ stock notifications */
+
+    /**
+     * Where the internal "a product has gone out of stock" alert is sent.
+     *
+     * Defaulted rather than required, because the alert is operational mail and
+     * a missing variable must not stop the application booting — nor, worse,
+     * stop a payment committing. The address the business named is the default;
+     * set the variable to route it somewhere else without a code change.
+     *
+     * Sending is additionally gated on the `stock_notifications` setting in
+     * `app_settings`, which an administrator controls from the console.
+     */
+    STOCK_ALERT_EMAIL: z.string().email().default('anirudh@itarang.com'),
   })
   .superRefine((value, ctx) => {
     if (value.COMMERCE_PROVIDER === 'hostinger' && !value.HOSTINGER_SALES_CHANNEL_ID) {
@@ -302,6 +317,7 @@ export function env(): Env {
     AUTH_OTP_PEPPER: blank(process.env.AUTH_OTP_PEPPER),
     SELLER_GSTIN: process.env.SELLER_GSTIN,
     SELLER_STATE_CODE: process.env.SELLER_STATE_CODE,
+    STOCK_ALERT_EMAIL: blank(process.env.STOCK_ALERT_EMAIL),
   });
 
   if (!parsed.success) {

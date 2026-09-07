@@ -830,13 +830,91 @@ export interface CustomerTimelineEntry {
   orderNumber: string | null;
 }
 
+/**
+ * Where a customer is, and how we know.
+ *
+ * `source` is part of the answer, not decoration. An order's address is a jsonb
+ * snapshot of somewhere goods were actually delivered and can never change; a
+ * saved address is current but editable and may never have been used. Reporting
+ * them as one figure would be the same mistake as sourcing revenue geography
+ * from the address book.
+ */
+export interface CustomerLocation {
+  city: string | null;
+  state: string | null;
+  source: 'order' | 'saved-address';
+  /** When that address was recorded. ISO. */
+  at: string;
+}
+
 export interface CustomerDetail {
   userId: number;
   email: string;
   fullName: string | null;
   phone: string | null;
   createdAt: string;
+  /** Null for a customer with neither an order nor a saved address. */
+  location: CustomerLocation | null;
   timeline: CustomerTimelineEntry[];
+}
+
+/**
+ * Where this customer is, preferring somewhere they actually took delivery.
+ *
+ * Two sources, tried in that order and labelled in the result:
+ *
+ *   **Their most recent paid-for order.** `orders.shipping_address` is a jsonb
+ *   snapshot, so it is evidence of a real delivery and cannot be rewritten by
+ *   the customer later — the property `0015_customer_addresses.sql` argues for
+ *   at length.
+ *
+ *   **Their default saved address**, for somebody who has registered but not
+ *   yet ordered. Current but editable, and possibly never used, which is
+ *   exactly why the caller is told which of the two it got.
+ *
+ * Archived addresses are excluded: a soft-deleted row is one the customer chose
+ * to remove, and presenting it as where they live would be wrong.
+ */
+async function customerLocation(userId: number): Promise<CustomerLocation | null> {
+  const [fromOrder] = await query<{ city: string | null; state: string | null; at: Date }>(
+    `SELECT o.shipping_address ->> 'city'  AS city,
+            o.shipping_address ->> 'state' AS state,
+            o.created_at AS at
+       FROM orders o
+      WHERE o.user_id = $1
+      ORDER BY o.created_at DESC
+      LIMIT 1`,
+    [userId],
+  );
+
+  if (fromOrder && (fromOrder.city || fromOrder.state)) {
+    return {
+      city: fromOrder.city,
+      state: fromOrder.state,
+      source: 'order',
+      at: fromOrder.at.toISOString(),
+    };
+  }
+
+  const [saved] = await query<{ city: string | null; state: string | null; at: Date }>(
+    `SELECT city, state, created_at AS at
+       FROM customer_addresses
+      WHERE user_id = $1 AND archived_at IS NULL
+      ORDER BY is_default DESC, created_at DESC
+      LIMIT 1`,
+    [userId],
+  );
+
+  if (saved && (saved.city || saved.state)) {
+    return {
+      city: saved.city,
+      state: saved.state,
+      source: 'saved-address',
+      at: saved.at.toISOString(),
+    };
+  }
+
+  return null;
 }
 
 /**
@@ -866,6 +944,8 @@ export async function customerDetail(
   }>(`SELECT id, email, full_name, phone, created_at FROM users WHERE id = $1`, [userId]);
 
   if (!person) return null;
+
+  const location = await customerLocation(userId);
 
   const rows = await query<{
     at: Date;
@@ -912,6 +992,7 @@ export async function customerDetail(
     fullName: person.full_name,
     phone: person.phone,
     createdAt: person.created_at.toISOString(),
+    location,
     timeline: rows.map((row) => ({
       at: row.at.toISOString(),
       kind: row.kind,

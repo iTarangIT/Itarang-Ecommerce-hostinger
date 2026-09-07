@@ -105,3 +105,29 @@ export function purchaseBlockFor(
  * client component.
  */
 export const PURCHASABLE_PROVIDER = 'db';
+
+/**
+ * The largest quantity a shopper may select for one line.
+ *
+ * A ceiling exists because the alternative *is* the stock count. The quantity
+ * stepper's maximum and the cart's "that is all we can supply" note were both
+ * derived straight from `variant.stock`, so anyone could read the exact figure
+ * off the control without it ever being printed — hold three units and the
+ * stepper stopped at three.
+ *
+ * Ten is a retail order limit, not an inventory statement: it is the same for
+ * every variant, so it reveals nothing about any of them.
+ */
+export const CUSTOMER_QUANTITY_CEILING = 10;
+
+/**
+ * The stepper maximum a customer is shown.
+ *
+ * **This is presentation, never enforcement.** The real clamp is in
+ * `lib/orders/quote.ts`, which re-reads the database row and reduces the line
+ * to what is genuinely available — a rule this function must not be confused
+ * with and cannot weaken. All it decides is how far the `+` button goes.
+ */
+export function customerMaxQuantity(stock: number): number {
+  return Math.min(Math.max(1, stock), CUSTOMER_QUANTITY_CEILING);
+}

@@ -8,6 +8,8 @@ import { setProductStatusAction } from '@/lib/admin/product-actions';
 import { Button } from '@/components/ui/button';
 import { ProductStatusPill } from '@/components/admin/product-status-pill';
 import { ProductMediaPanel } from '@/components/admin/product-media-panel';
+import { InterestedCustomers } from '@/components/admin/interested-customers';
+import { stockNotificationSettingsOf } from '@/lib/stock/settings';
 import {
   ContentPanel,
   FacetsPanel,
@@ -83,6 +85,11 @@ export default async function EditProductPage({
     tab === 'parties'
       ? await Promise.all([repository.listManufacturers(), repository.listSellers()])
       : [[], []];
+
+  // Only the pricing panel shows the notification controls, so the setting is
+  // read only when that tab is open.
+  const stockNotificationsEnabled =
+    tab === 'pricing' ? (await stockNotificationSettingsOf()).enabled : false;
 
   const blockers = publishBlockers(product);
 
@@ -193,7 +200,30 @@ export default async function EditProductPage({
 
       <div className="mt-6 rounded-lg border border-border bg-card p-5 lg:p-6">
         {tab === 'information' ? <InformationPanel product={product} /> : null}
-        {tab === 'pricing' ? <PricingPanel product={product} /> : null}
+        {tab === 'pricing' ? (
+          <>
+            <PricingPanel product={product} />
+
+            {/* Who is waiting for this product, on the tab that holds the
+                stock field — so an administrator putting units back sees the
+                list in the same place, rather than having to remember the
+                out-of-stock page exists. Available for every product, not only
+                sold-out ones: interest is recorded whenever somebody asks. */}
+            <div className="mt-6 border-t border-border pt-5">
+              <h2 className="font-display text-sm font-semibold uppercase tracking-wide text-foreground">
+                Stock notifications
+              </h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Customers who asked to be told when this product returns, plus those who saved it
+                or added it to a cart. Sending is always manual.
+              </p>
+              <InterestedCustomers
+                productKey={product.productKey}
+                notificationsEnabled={stockNotificationsEnabled}
+              />
+            </div>
+          </>
+        ) : null}
         {tab === 'media' ? <ProductMediaPanel product={product} /> : null}
         {tab === 'content' ? <ContentPanel product={product} /> : null}
         {tab === 'specs' ? <SpecsPanel product={product} /> : null}

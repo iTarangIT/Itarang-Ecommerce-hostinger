@@ -24,7 +24,20 @@ export interface ProductSummary {
   mrp: Paise;
   discount: number;
   availability: 'in-stock' | 'low-stock' | 'out-of-stock' | 'preorder';
-  stock: number;
+  /*
+   * There is deliberately no `stock` here any more.
+   *
+   * A `ProductSummary` is the shape that crosses the wire: `/api/products` and
+   * `/api/cross-sell` return it as JSON, and every server-rendered card is
+   * serialised into the RSC payload. So the exact count was readable from the
+   * page source on any listing, whether or not a number was ever drawn on
+   * screen — removing the "Only N left" text alone would have hidden it from
+   * shoppers and left it in front of anyone who opened devtools.
+   *
+   * `availability` stays, because that is the question a card actually needs
+   * answered. The count remains on `ProductVariant` for the server, the admin
+   * console and order processing.
+   */
   rating: { average: number; count: number } | null;
   /** Only set when the product has buyer-facing options. */
   hasOptions: boolean;
@@ -188,7 +201,6 @@ export function toProductSummary(product: Product): ProductSummary {
     mrp: price.mrp,
     discount: discountPercent(price),
     availability,
-    stock: variant?.stock ?? 0,
     rating: product.rating ? { average: product.rating.average, count: product.rating.count } : null,
     hasOptions: product.options.length > 0,
     defaultVariantId: variant?.id ?? product.variants[0]?.id ?? '',

@@ -293,7 +293,7 @@ export function PricingPanel({ product }: { product: ProductRecord }) {
               <Field
                 label="Units in stock"
                 htmlFor={`stock-${index}`}
-                hint="Enter a number and it decides availability: 0 takes the product off sale, 1–5 shows “Only N left”. Leave blank if stock is not tracked."
+                hint="Enter a number and it decides availability: 0 takes the product off sale and puts it on the Out of stock list. Any other number sells normally — customers are never shown the count. Leave blank if stock is not tracked."
               >
                 <Input
                   id={`stock-${index}`}

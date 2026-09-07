@@ -3,7 +3,7 @@ import { catalog } from '@/lib/commerce';
 import { buildNavigation } from '@/lib/navigation';
 import {
   bestSellers,
-  byCategory,
+  bySubcategory,
   featuredReviews,
   newArrivals,
   productTitleMap,
@@ -20,7 +20,7 @@ import {
   TrustRow,
 } from '@/components/merch/blocks';
 import { SupportTeaser } from '@/components/support/support-teaser';
-import { categoryPath } from '@/lib/routes';
+import { subcategoryPath } from '@/lib/routes';
 
 export const metadata: Metadata = {
   title: 'Home Inverters, Batteries & UPS Systems',
@@ -34,15 +34,19 @@ export const metadata: Metadata = {
 };
 
 export default async function HomePage() {
-  const [categories, offers, popular, combos, latest, reviews, titles] = await Promise.all([
-    buildNavigation(),
-    catalog().listOffers(),
-    bestSellers(8),
-    byCategory('combos', 8),
-    newArrivals(6),
-    featuredReviews(6),
-    productTitleMap(),
-  ]);
+  const [categories, offers, popular, homeBatteries, latest, reviews, titles] =
+    await Promise.all([
+      buildNavigation(),
+      catalog().listOffers(),
+      bestSellers(8),
+      // Was `byCategory('combos', 8)`. Combos are not a category any more, so
+      // this rail was going to render empty and link to a 404. Lithium home
+      // storage is the nearest thing the business actually sells.
+      bySubcategory('lithium', 8),
+      newArrivals(6),
+      featuredReviews(6),
+      productTitleMap(),
+    ]);
 
   return (
     <>
@@ -70,11 +74,14 @@ export default async function HomePage() {
 
       <div className="container section-tight">
         <ProductRail
-          products={combos}
-          eyebrow="Matched systems"
-          title="Inverter + battery, sized and ready"
-          description="Charger profile pre-matched to the chemistry, one warranty, one installation visit — and priced below the parts bought separately."
-          action={{ label: 'All combos', href: categoryPath('combos') }}
+          products={homeBatteries}
+          eyebrow="Home backup"
+          title="Lithium storage for the hours the grid is out"
+          description="LiFePO4 packs with an integrated battery management system, sized against your actual load rather than a round number — the load calculator does the arithmetic."
+          action={{
+            label: 'All lithium batteries',
+            href: subcategoryPath('batteries', 'lithium'),
+          }}
         />
       </div>
 

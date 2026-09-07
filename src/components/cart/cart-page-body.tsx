@@ -28,8 +28,13 @@ import { StateBlock } from '@/components/ui/states';
 import { ProductRail } from '@/components/merch/product-rail';
 import { CartLineItem, CouponField, FreeShipMeter, OrderSummary } from './cart-pieces';
 import { categoryPath, productPath } from '@/lib/routes';
+// The canonical pattern, imported rather than re-declared. This file and
+// `checkout-flow.tsx` each carried their own copy of the same 15-character
+// regex, so a correction to the GSTIN format — or the addition of a real
+// checksum — would have had to be made in three places and would silently have
+// been made in one.
+import { GSTIN_PATTERN } from '@/lib/checkout/validation';
 
-const GSTIN_PATTERN = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
 
 export function CartPageBody({
   recommendations,
@@ -67,8 +72,8 @@ export function CartPageBody({
             description="Add an inverter, a battery or a ready-matched combo. If you are not sure what size you need, the load calculator will work it out from your appliances."
             actions={
               <>
-                <ButtonLink href={categoryPath('combos')} variant="primary">
-                  Shop combos
+                <ButtonLink href={categoryPath('batteries')} variant="primary">
+                  Shop batteries
                 </ButtonLink>
                 <ButtonLink href="/tools/load-calculator" variant="outline">
                   Size my system

@@ -33,6 +33,15 @@ export interface RecommendedProduct {
   reasons: string[];
   /** "105 Ah at 12.8 V nominal · 1.34 kWh", from the product's own values. */
   capacityLabel: string;
+  /**
+   * How many of this battery the load needs, wired in parallel.
+   *
+   * 1 for a load one battery serves. Higher when the requirement exceeds a
+   * single pack — batteries in parallel add capacity at an unchanged voltage,
+   * which is how a catalogue with one 105 Ah home battery answers a household
+   * that needs more than 105 Ah. Never above `MAX_BANK_UNITS`.
+   */
+  units: number;
 }
 
 export interface SizingRecommendation {
@@ -90,6 +99,9 @@ function toRecommended(assessment: Assessment): RecommendedProduct {
     product: toProductSummary(assessment.product),
     reasons: assessment.reasons,
     capacityLabel: capacityLabel(assessment),
+    // How many of it, wired in parallel. Always at least 1 for a match, so the
+    // UI can render "2 ×" without special-casing the single-battery answer.
+    units: Math.max(1, assessment.units),
   };
 }
 

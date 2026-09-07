@@ -16,10 +16,19 @@ import {
 import type { SizingRecommendation } from '@/app/api/sizing/route';
 import {
   APPLIANCES,
+  APPLIANCE_GROUPS,
+  DIVERSITY_OPTIONS,
+  HOME_PRESETS,
+  MAX_CUSTOM_APPLIANCES,
+  ROOMS,
   SIZING_ASSUMPTIONS,
+  appliancesForRoom,
   calculateSizing,
   decodeSelection,
   encodeSelection,
+  type Appliance,
+  type CustomAppliance,
+  type RoomId,
   type Selection,
 } from '@/lib/sizing/calculator';
 import { summaryToCartItem, useCart } from '@/lib/store/hooks';
@@ -28,36 +37,11 @@ import { Button, ButtonLink } from '@/components/ui/button';
 import { ProductCard } from '@/components/product/product-card';
 import { PurchaseButton } from '@/components/product/purchase-button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Input } from '@/components/ui/field';
 import { cn } from '@/lib/utils';
 
-const GROUPS = ['Lighting & fans', 'Entertainment & work', 'Kitchen', 'Heavy loads'] as const;
-
-const PRESETS: Array<{ label: string; description: string; selection: Selection; hours: number }> = [
-  {
-    label: 'One room',
-    description: '2 fans, 4 lights, router',
-    selection: { fan: 2, led: 4, router: 1 },
-    hours: 4,
-  },
-  {
-    label: 'Two bedrooms',
-    description: '4 fans, 6 lights, TV, router',
-    selection: { fan: 4, led: 6, tv: 1, router: 1 },
-    hours: 5,
-  },
-  {
-    label: 'Family home',
-    description: 'Above, plus refrigerator and a mixer',
-    selection: { fan: 4, led: 8, tv: 1, router: 1, fridge: 1, mixer: 1 },
-    hours: 6,
-  },
-  {
-    label: 'Home office',
-    description: 'Desktop, laptop, router, 2 fans, 4 lights',
-    selection: { desktop: 1, laptop: 1, router: 1, fan: 2, led: 4 },
-    hours: 4,
-  },
-];
+/** Digits only, for the custom-appliance wattage field. */
+const NON_DIGITS = /[^0-9]/g;
 
 /**
  * "inverters", "inverters and combos", "inverters, combos and batteries".
@@ -113,6 +97,10 @@ export function LoadCalculator({ syncUrl = true, currentProductId }: LoadCalcula
       decodeSelection(
         searchParams.get('load') ?? undefined,
         searchParams.get('hours') ?? undefined,
+        {
+          use: searchParams.get('use') ?? undefined,
+          custom: searchParams.get('custom') ?? undefined,
+        },
       ),
     // Read once on mount; later changes are driven by the controls below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -121,13 +109,17 @@ export function LoadCalculator({ syncUrl = true, currentProductId }: LoadCalcula
 
   const [selection, setSelection] = React.useState<Selection>(initial.selection);
   const [backupHours, setBackupHours] = React.useState(initial.backupHours);
+  const [diversity, setDiversity] = React.useState(initial.diversity);
+  const [custom, setCustom] = React.useState<CustomAppliance[]>(initial.custom);
+  /** Which way into the appliance list: straight at the devices, or by room. */
+  const [mode, setMode] = React.useState<'devices' | 'rooms'>('devices');
   const [recommendation, setRecommendation] = React.useState<SizingRecommendation | null>(null);
   const [loading, setLoading] = React.useState(false);
   const resultRef = React.useRef<HTMLDivElement>(null);
 
   const sizing = React.useMemo(
-    () => calculateSizing(selection, backupHours),
-    [selection, backupHours],
+    () => calculateSizing(selection, backupHours, { diversity, custom }),
+    [selection, backupHours, diversity, custom],
   );
 
   const hasLoad = sizing.runningWatts > 0;
@@ -137,11 +129,11 @@ export function LoadCalculator({ syncUrl = true, currentProductId }: LoadCalcula
   // would replace the address with `/tools/load-calculator` on the first click.
   React.useEffect(() => {
     if (!syncUrl) return;
-    const qs = encodeSelection(selection, backupHours);
+    const qs = encodeSelection(selection, backupHours, { diversity, custom });
     router.replace(qs ? `/tools/load-calculator?${qs}` : '/tools/load-calculator', {
       scroll: false,
     });
-  }, [selection, backupHours, router, syncUrl]);
+  }, [selection, backupHours, diversity, custom, router, syncUrl]);
 
   React.useEffect(() => {
     if (!hasLoad) {
@@ -195,7 +187,7 @@ export function LoadCalculator({ syncUrl = true, currentProductId }: LoadCalcula
       return next;
     });
 
-  const applyPreset = (preset: (typeof PRESETS)[number]) => {
+  const applyPreset = (preset: (typeof HOME_PRESETS)[number]) => {
     setSelection(preset.selection);
     setBackupHours(preset.hours);
     resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -206,10 +198,19 @@ export function LoadCalculator({ syncUrl = true, currentProductId }: LoadCalcula
       {/* Appliance picker */}
       <div className="lg:col-span-7">
         <section>
-          <h2 className="heading-3">Start from a typical home</h2>
-          <ul className="mt-3 grid gap-2 sm:grid-cols-2">
-            {PRESETS.map((preset) => (
-              <li key={preset.label}>
+          <h2 className="heading-3">
+            <span className="mr-2 inline-grid h-6 w-6 place-items-center rounded-full bg-accent text-2xs font-bold text-accent-foreground">
+              1
+            </span>
+            What size is your home?
+          </h2>
+          <p className="mt-1.5 text-sm text-muted-foreground">
+            A starting point you can edit — nobody knows their connected load, but everybody knows
+            how many bedrooms they have.
+          </p>
+          <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {HOME_PRESETS.map((preset) => (
+              <li key={preset.id}>
                 <button
                   type="button"
                   onClick={() => applyPreset(preset)}
@@ -226,90 +227,91 @@ export function LoadCalculator({ syncUrl = true, currentProductId }: LoadCalcula
         </section>
 
         <section className="mt-8">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="heading-3">Or pick your appliances</h2>
-            {Object.keys(selection).length > 0 ? (
-              <Button variant="ghost" size="sm" onClick={() => setSelection({})}>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="heading-3">
+              <span className="mr-2 inline-grid h-6 w-6 place-items-center rounded-full bg-accent text-2xs font-bold text-accent-foreground">
+                2
+              </span>
+              Adjust your appliances
+            </h2>
+            {Object.keys(selection).length > 0 || custom.length > 0 ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setSelection({});
+                  setCustom([]);
+                }}
+              >
                 <RotateCcw className="h-4 w-4" />
                 Reset
               </Button>
             ) : null}
           </div>
 
-          <div className="mt-4 space-y-6">
-            {GROUPS.map((group) => (
-              <div key={group}>
-                <h3 className="font-display text-sm font-semibold uppercase tracking-wide text-accent-600">
-                  {group}
-                </h3>
-                <ul className="mt-2.5 divide-y divide-border rounded-lg border border-border bg-card">
-                  {APPLIANCES.filter((a) => a.group === group).map((appliance) => {
-                    const quantity = selection[appliance.id] ?? 0;
-                    const active = quantity > 0;
-                    return (
-                      <li
-                        key={appliance.id}
-                        className={cn(
-                          'flex items-center gap-3 p-3 transition-colors sm:p-3.5',
-                          active && 'bg-accent-50/60',
-                        )}
-                      >
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium text-foreground">{appliance.name}</p>
-                          <p className="tabular text-xs text-muted-foreground">
-                            {appliance.watts} W each
-                            {appliance.surge > 1
-                              ? ` · surges to ~${Math.round(appliance.watts * appliance.surge)} W`
-                              : ''}
-                          </p>
-                          {appliance.note && active ? (
-                            <p className="mt-1 flex items-start gap-1 text-xs text-warning">
-                              <Info className="mt-0.5 h-3 w-3 shrink-0" />
-                              {appliance.note}
-                            </p>
-                          ) : null}
-                        </div>
-
-                        {active ? (
-                          <div className="inline-flex shrink-0 items-center rounded-md border border-input bg-card">
-                            <button
-                              type="button"
-                              onClick={() => setQuantity(appliance.id, quantity - 1)}
-                              aria-label={`Remove one ${appliance.name}`}
-                              className="grid h-9 w-9 place-items-center text-foreground hover:bg-secondary"
-                            >
-                              <Minus className="h-4 w-4" />
-                            </button>
-                            <span className="tabular w-8 text-center text-sm font-semibold">
-                              {quantity}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => setQuantity(appliance.id, quantity + 1)}
-                              aria-label={`Add one ${appliance.name}`}
-                              className="grid h-9 w-9 place-items-center text-foreground hover:bg-secondary"
-                            >
-                              <Plus className="h-4 w-4" />
-                            </button>
-                          </div>
-                        ) : (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="shrink-0"
-                            onClick={() => setQuantity(appliance.id, appliance.defaultQuantity)}
-                          >
-                            <Plus className="h-4 w-4" />
-                            Add
-                          </Button>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
+          {/* Two ways into one list. Choosing a room adds that room's typical
+              appliances to the same `selection`, so the paths cannot disagree
+              about the arithmetic and a shopper can start in one and finish in
+              the other. */}
+          <div
+            role="tablist"
+            aria-label="How to choose appliances"
+            className="mt-3 inline-flex rounded-lg border border-border bg-surface p-1"
+          >
+            {(
+              [
+                ['devices', 'By device'],
+                ['rooms', 'By room'],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                role="tab"
+                type="button"
+                aria-selected={mode === id}
+                onClick={() => setMode(id)}
+                className={cn(
+                  'rounded-md px-3.5 py-1.5 text-sm font-medium transition-colors',
+                  mode === id
+                    ? 'bg-card text-foreground shadow-card'
+                    : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {label}
+              </button>
             ))}
           </div>
+
+          {mode === 'rooms' ? (
+            <div className="mt-4 space-y-6">
+              {ROOMS.map((room) => (
+                <ApplianceList
+                  key={room.id}
+                  title={room.name}
+                  appliances={appliancesForRoom(room.id as RoomId)}
+                  selection={selection}
+                  onChange={setQuantity}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="mt-4 space-y-6">
+              {APPLIANCE_GROUPS.map((group) => (
+                <ApplianceList
+                  key={group}
+                  title={group}
+                  appliances={APPLIANCES.filter((a) => a.group === group)}
+                  selection={selection}
+                  onChange={setQuantity}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Anything the list does not cover. Livguard calls it "Add Device";
+              the wattage is the shopper's, because we do not know their
+              appliance and will not invent a rating for it. */}
+          <CustomAppliances custom={custom} onChange={setCustom} />
         </section>
       </div>
 
@@ -318,6 +320,9 @@ export function LoadCalculator({ syncUrl = true, currentProductId }: LoadCalcula
         <div ref={resultRef} className="space-y-4 lg:sticky lg:top-24">
           <div className="rounded-xl border border-border bg-card p-5">
             <h2 className="font-display text-base font-bold text-card-foreground">
+              <span className="mr-2 inline-grid h-6 w-6 place-items-center rounded-full bg-accent text-2xs font-bold text-accent-foreground">
+                3
+              </span>
               How long do you need backup for?
             </h2>
             <div className="mt-4 flex items-center gap-3">
@@ -335,6 +340,40 @@ export function LoadCalculator({ syncUrl = true, currentProductId }: LoadCalcula
                 {backupHours} {backupHours === 1 ? 'hour' : 'hours'}
               </span>
             </div>
+
+            {/* Simultaneous use. Reduces the battery, never the inverter —
+                see `DIVERSITY_OPTIONS`. Defaulted to 100% so the shopper opts
+                in to the assumption rather than inheriting it. */}
+            <fieldset className="mt-5">
+              <legend className="text-sm font-medium text-card-foreground">
+                How much of it runs at the same time?
+              </legend>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {DIVERSITY_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setDiversity(option.value)}
+                    aria-pressed={diversity === option.value}
+                    title={option.description}
+                    className={cn(
+                      'rounded-md border px-3 py-1.5 text-sm font-medium transition-colors',
+                      diversity === option.value
+                        ? 'border-accent bg-accent text-accent-foreground'
+                        : 'border-input bg-card text-foreground hover:border-accent/50',
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                {DIVERSITY_OPTIONS.find((option) => option.value === diversity)?.description}
+                {diversity < 1
+                  ? ' — this lowers the battery size, not the inverter. If everything does run together, the backup lasts proportionally less.'
+                  : ''}
+              </p>
+            </fieldset>
 
             <dl className="mt-5 grid grid-cols-2 gap-3">
               <Stat
@@ -444,8 +483,22 @@ export function LoadCalculator({ syncUrl = true, currentProductId }: LoadCalcula
                         That is the product you are looking at.
                       </p>
                     ) : null}
+                    {/* The bank, when the load needs more than one pack.
+                        Batteries in parallel add capacity at an unchanged
+                        voltage; stated plainly because "2 x" is the difference
+                        between a quote a shopper can act on and a surprise at
+                        checkout. */}
+                    {recommendation.battery.units > 1 ? (
+                      <p className="mt-3 rounded-md bg-accent-50 p-2.5 text-xs font-semibold text-foreground">
+                        You need {recommendation.battery.units} of these, wired in parallel, to
+                        cover {sizing.requiredAh} Ah.
+                      </p>
+                    ) : null}
                     <p className="tabular mt-3 text-xs font-medium text-foreground">
                       {recommendation.battery.capacityLabel}
+                      {recommendation.battery.units > 1
+                        ? ` · ${recommendation.battery.units} required`
+                        : ''}
                     </p>
                     <h3 className="mt-3 font-display text-sm font-semibold text-card-foreground">
                       Why this one
@@ -472,16 +525,23 @@ export function LoadCalculator({ syncUrl = true, currentProductId }: LoadCalcula
                       fullWidth
                       className="mt-4"
                       onClick={() => {
-                        cart.addItem(summaryToCartItem(recommendation.battery!.product));
+                        // The whole bank, so what lands in the cart is what the
+                        // recommendation actually said. Adding one of three
+                        // would quietly under-deliver the backup on screen.
+                        const units = recommendation.battery!.units;
+                        const item = summaryToCartItem(recommendation.battery!.product, units);
+                        cart.addItem(item);
                         toast({
-                          title: 'Added to cart',
+                          title: units > 1 ? `${units} added to cart` : 'Added to cart',
                           description: recommendation.battery!.product.title,
                           tone: 'success',
                           action: { label: 'View cart', onClick: () => open('cart') },
                         });
                       }}
                     >
-                      Add this battery to cart
+                      {recommendation.battery.units > 1
+                        ? `Add all ${recommendation.battery.units} to cart`
+                        : 'Add this battery to cart'}
                     </PurchaseButton>
                   </div>
 
@@ -538,11 +598,58 @@ export function LoadCalculator({ syncUrl = true, currentProductId }: LoadCalcula
               {/* Which families we stock nothing in at all — named, rather
                   than silently omitted, so a battery-only answer does not read
                   as the whole system. */}
-              {recommendation.unavailableFamilies.length > 0 ? (
+              {/* The inverter half of the system, stated as a specification
+                  rather than omitted.
+                  We stock no inverters, so there is no product to show — but a
+                  shopper who leaves with a battery and no idea what it plugs
+                  into has not been helped. The VA figure, the waveform and the
+                  battery input voltage are all things they can take to a
+                  supplier, and every one of them comes from their own load. */}
+              {!recommendation.inverter && hasLoad ? (
+                <div className="rounded-lg border border-border bg-surface p-3.5">
+                  <h3 className="font-display text-sm font-semibold text-foreground">
+                    The inverter you would pair with it
+                  </h3>
+                  <dl className="mt-2 space-y-1 text-xs text-muted-foreground">
+                    <div className="flex justify-between gap-3">
+                      <dt>Rating</dt>
+                      <dd className="tabular font-semibold text-foreground">
+                        {sizing.requiredVa} VA or larger
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt>Battery input</dt>
+                      <dd className="tabular font-semibold text-foreground">
+                        {sizing.systemVoltage} V
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt>Type</dt>
+                      <dd className="font-semibold text-foreground">
+                        Pure sine wave, lithium-ready
+                      </dd>
+                    </div>
+                  </dl>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    A lithium pack needs a charger profile built for it — a lead-acid charger will
+                    not charge it correctly.{' '}
+                    <span className="font-medium text-foreground">
+                      We do not stock inverters today
+                    </span>
+                    , so this is a specification to buy against rather than a product; our team can
+                    source one.
+                  </p>
+                </div>
+              ) : null}
+
+              {recommendation.unavailableFamilies.filter((family) => family !== 'inverter').length >
+              0 ? (
                 <p className="rounded-lg border border-border bg-surface p-3 text-xs text-muted-foreground">
                   We are not currently stocking{' '}
-                  {describeFamilies(recommendation.unavailableFamilies)} — our team can source
-                  that part.
+                  {describeFamilies(
+                    recommendation.unavailableFamilies.filter((family) => family !== 'inverter'),
+                  )}{' '}
+                  — our team can source that part.
                 </p>
               ) : null}
             </div>
@@ -689,6 +796,251 @@ function Stat({
       </dt>
       <dd className="tabular mt-1 font-display text-xl font-bold text-foreground">{value}</dd>
       {hint ? <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p> : null}
+    </div>
+  );
+}
+
+/* -------------------------------------------------- appliance list */
+
+/**
+ * One titled block of appliances with quantity steppers.
+ *
+ * Extracted so the device path and the room path render the identical control
+ * over the identical `selection`. Two copies would be two places for the
+ * stepper's clamping to drift, and the room path exists precisely so a shopper
+ * can switch between them mid-edit without losing anything.
+ */
+function ApplianceList({
+  title,
+  appliances,
+  selection,
+  onChange,
+}: {
+  title: string;
+  appliances: Appliance[];
+  selection: Selection;
+  onChange: (id: string, quantity: number) => void;
+}) {
+  if (appliances.length === 0) return null;
+
+  return (
+    <div>
+      <h3 className="font-display text-sm font-semibold uppercase tracking-wide text-accent-600">
+        {title}
+      </h3>
+      <ul className="mt-2.5 divide-y divide-border rounded-lg border border-border bg-card">
+        {appliances.map((appliance) => {
+          const quantity = selection[appliance.id] ?? 0;
+          const active = quantity > 0;
+          return (
+            <li
+              key={appliance.id}
+              className={cn(
+                'flex items-center gap-3 p-3 transition-colors sm:p-3.5',
+                active && 'bg-accent-50/60',
+              )}
+            >
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-foreground">{appliance.name}</p>
+                <p className="tabular text-xs text-muted-foreground">
+                  {appliance.watts} W each
+                  {appliance.surge > 1
+                    ? ` · surges to ~${Math.round(appliance.watts * appliance.surge)} W`
+                    : ''}
+                  {/* The running subtotal — the number a shopper is actually
+                      adding up in their head as they pick. */}
+                  {active ? (
+                    <span className="font-semibold text-foreground">
+                      {' '}
+                      · {appliance.watts * quantity} W total
+                    </span>
+                  ) : null}
+                </p>
+                {appliance.note && active ? (
+                  <p className="mt-1 flex items-start gap-1 text-xs text-warning">
+                    <Info className="mt-0.5 h-3 w-3 shrink-0" />
+                    {appliance.note}
+                  </p>
+                ) : null}
+              </div>
+
+              {active ? (
+                <div className="inline-flex shrink-0 items-center rounded-md border border-input bg-card">
+                  <button
+                    type="button"
+                    onClick={() => onChange(appliance.id, quantity - 1)}
+                    aria-label={`Remove one ${appliance.name}`}
+                    className="grid h-9 w-9 place-items-center text-foreground hover:bg-secondary"
+                  >
+                    <Minus className="h-4 w-4" />
+                  </button>
+                  <span className="tabular w-8 text-center text-sm font-semibold">{quantity}</span>
+                  <button
+                    type="button"
+                    onClick={() => onChange(appliance.id, quantity + 1)}
+                    aria-label={`Add one ${appliance.name}`}
+                    className="grid h-9 w-9 place-items-center text-foreground hover:bg-secondary"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+                </div>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => onChange(appliance.id, appliance.defaultQuantity)}
+                >
+                  <Plus className="h-4 w-4" />
+                  Add
+                </Button>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+/* ------------------------------------------------ custom appliances */
+
+/**
+ * Appliances the shopper describes themselves.
+ *
+ * The wattage is theirs. Nothing here suggests a figure, because an appliance
+ * we have never listed has no typical rating we could honestly offer — and a
+ * guessed number would flow straight into the battery size.
+ *
+ * No surge multiplier is collected either: it is treated as 1, and the panel
+ * says so rather than quietly under-stating the peak.
+ */
+function CustomAppliances({
+  custom,
+  onChange,
+}: {
+  custom: CustomAppliance[];
+  onChange: (next: CustomAppliance[]) => void;
+}) {
+  const [name, setName] = React.useState('');
+  const [watts, setWatts] = React.useState('');
+
+  const parsedWatts = Number(watts);
+  const canAdd =
+    name.trim().length > 0 &&
+    Number.isFinite(parsedWatts) &&
+    parsedWatts > 0 &&
+    parsedWatts <= 10000 &&
+    custom.length < MAX_CUSTOM_APPLIANCES;
+
+  const add = () => {
+    if (!canAdd) return;
+    onChange([
+      ...custom,
+      { name: name.trim().slice(0, 40), watts: Math.round(parsedWatts), quantity: 1 },
+    ]);
+    setName('');
+    setWatts('');
+  };
+
+  const setQuantity = (index: number, quantity: number) => {
+    if (quantity <= 0) {
+      onChange(custom.filter((_, i) => i !== index));
+      return;
+    }
+    onChange(custom.map((entry, i) => (i === index ? { ...entry, quantity } : entry)));
+  };
+
+  return (
+    <div className="mt-6">
+      <h3 className="font-display text-sm font-semibold uppercase tracking-wide text-accent-600">
+        Something else
+      </h3>
+
+      {custom.length > 0 ? (
+        <ul className="mt-2.5 divide-y divide-border rounded-lg border border-border bg-card">
+          {custom.map((entry, index) => (
+            <li
+              key={`${entry.name}-${index}`}
+              className="flex items-center gap-3 bg-accent-50/60 p-3 sm:p-3.5"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-foreground">{entry.name}</p>
+                <p className="tabular text-xs text-muted-foreground">
+                  {entry.watts} W each
+                  <span className="font-semibold text-foreground">
+                    {' '}
+                    · {entry.watts * entry.quantity} W total
+                  </span>
+                  <span> · no surge allowance</span>
+                </p>
+              </div>
+              <div className="inline-flex shrink-0 items-center rounded-md border border-input bg-card">
+                <button
+                  type="button"
+                  onClick={() => setQuantity(index, entry.quantity - 1)}
+                  aria-label={`Remove one ${entry.name}`}
+                  className="grid h-9 w-9 place-items-center text-foreground hover:bg-secondary"
+                >
+                  <Minus className="h-4 w-4" />
+                </button>
+                <span className="tabular w-8 text-center text-sm font-semibold">
+                  {entry.quantity}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setQuantity(index, entry.quantity + 1)}
+                  aria-label={`Add one ${entry.name}`}
+                  className="grid h-9 w-9 place-items-center text-foreground hover:bg-secondary"
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {custom.length < MAX_CUSTOM_APPLIANCES ? (
+        <form
+          className="mt-2.5 flex flex-wrap items-end gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            add();
+          }}
+        >
+          <label className="min-w-0 flex-1">
+            <span className="mb-1 block text-xs text-muted-foreground">Appliance</span>
+            <Input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="Sewing machine"
+              maxLength={40}
+              className="h-10"
+            />
+          </label>
+          <label className="w-28">
+            <span className="mb-1 block text-xs text-muted-foreground">Watts</span>
+            <Input
+              inputMode="numeric"
+              value={watts}
+              onChange={(event) => setWatts(event.target.value.replace(NON_DIGITS, ''))}
+              placeholder="150"
+              className="h-10"
+              aria-label="Watts per unit"
+            />
+          </label>
+          <Button type="submit" variant="outline" className="h-10" disabled={!canAdd}>
+            <Plus className="h-4 w-4" />
+            Add
+          </Button>
+        </form>
+      ) : null}
+
+      <p className="mt-2 text-xs text-muted-foreground">
+        Check the rating plate on the appliance. We do not guess a wattage for something we have
+        not listed, and anything added here is counted without a start-up surge allowance.
+      </p>
     </div>
   );
 }

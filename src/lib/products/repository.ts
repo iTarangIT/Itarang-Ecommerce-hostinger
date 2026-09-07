@@ -87,6 +87,29 @@ export interface ProductRepository {
     variants: VariantInput[],
     actor: string,
   ): Promise<ProductWriteResult>;
+
+  /* ------------------------------------------------------ bulk pricing */
+
+  /** Every SKU in the catalogue, for validating an uploaded price list. */
+  listVariantSkus(): Promise<string[]>;
+
+  /**
+   * Set MRP and selling price on many variants at once, keyed on SKU.
+   *
+   * Deliberately **not** `replaceVariants`. That deletes a product's variants
+   * and reinserts them from the input, which is right for a form that submits
+   * every field and catastrophic for a price list: stock, availability, option
+   * values and variant titles are absent from the spreadsheet and would be
+   * erased by omission. This writes two columns and touches nothing else.
+   *
+   * One transaction for the whole file. A price list applied halfway leaves the
+   * catalogue mixing two sets of prices with no way to tell which row came from
+   * where, so either all of it lands or none of it does.
+   */
+  updateVariantPricesBySku(
+    rows: ReadonlyArray<{ sku: string; mrp: number; selling: number }>,
+    actor: string,
+  ): Promise<{ ok: true; updated: number } | { ok: false; code: 'not_found'; sku: string }>;
   replaceSpecGroups(
     productKey: string,
     groups: SpecGroup[],

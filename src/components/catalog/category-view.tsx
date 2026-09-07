@@ -12,6 +12,7 @@ import { SupportNudge } from '@/components/ui/states';
 import { CategoryIcon } from '@/components/layout/category-icon';
 import { cn } from '@/lib/utils';
 import { categoryPath, subcategoryPath } from '@/lib/routes';
+import { buildNavigation } from '@/lib/navigation';
 
 /**
  * Shared category / subcategory body.
@@ -52,6 +53,29 @@ export async function CategoryView({
   const intro = subcategory ? subcategory.description : category.description;
   const seoCopy = subcategory ? subcategory.seoCopy : category.seoCopy;
 
+  /**
+   * The sibling pills, restricted to subcategories that have products — the
+   * same rule the mega menu applies, for the same reason, sourced from the same
+   * place so the two cannot disagree about what exists.
+   *
+   * `buildNavigation` is memoised per request and the root layout has already
+   * called it, so this is a map lookup rather than a second pass over the
+   * catalogue.
+   *
+   * The subcategory currently being viewed is kept whatever its count, so that
+   * arriving at an empty section from a bookmark or a search engine still shows
+   * the navigation instead of silently dropping the pill under the cursor.
+   */
+  const navCategory = (await buildNavigation()).find((c) => c.slug === category.slug);
+  const stockedSlugs = new Set(
+    (navCategory?.subcategories ?? []).map((sub) => sub.href.split('/').pop()),
+  );
+  const visibleSubcategories = category.subcategories.filter(
+    (sub) => stockedSlugs.has(sub.slug) || sub.slug === subcategory?.slug,
+  );
+
+  const otherCategories = allCategories.filter((c) => c.slug !== category.slug);
+
   return (
     <>
       <BreadcrumbJsonLd items={crumbs} baseUrl={SITE.url} />
@@ -90,7 +114,7 @@ export async function CategoryView({
                   All {category.shortName.toLowerCase()}
                 </Link>
               </li>
-              {category.subcategories.map((sub) => {
+              {visibleSubcategories.map((sub) => {
                 const active = subcategory?.slug === sub.slug;
                 return (
                   <li key={sub.slug} className="shrink-0">
@@ -133,14 +157,16 @@ export async function CategoryView({
             </div>
             <div className="lg:col-span-4">
               <SupportNudge className="flex-col items-stretch sm:flex-col sm:items-stretch" />
-              {!subcategory ? (
+              {/* Gated on there being another category to name. The taxonomy is
+                  down to one family, so this heading otherwise stood above an
+                  empty list on every category page. */}
+              {!subcategory && otherCategories.length > 0 ? (
                 <nav aria-label="Other categories" className="mt-4">
                   <h3 className="font-display text-sm font-semibold uppercase tracking-wide text-foreground">
                     Also in the range
                   </h3>
                   <ul className="mt-3 space-y-2">
-                    {allCategories
-                      .filter((c) => c.slug !== category.slug)
+                    {otherCategories
                       .map((other) => (
                         <li key={other.slug}>
                           <Link

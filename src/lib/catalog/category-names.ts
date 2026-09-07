@@ -6,7 +6,7 @@ import type { CategorySlug } from '@/lib/commerce/types';
  * This exists to keep editorial prose out of the browser. `facets.ts` needs
  * only slug → name, but it used to reach for `CATEGORY_BY_SLUG`, and
  * `facet-controls.tsx` is a client component — so every catalogue page shipped
- * the whole `CATEGORIES` array, including all seventeen `seoCopy` passages, to
+ * the whole `CATEGORIES` array, including all of its `seoCopy` passages, to
  * resolve a couple of labels.
  *
  * Deriving these from `CATEGORIES` at module scope would import it again and
@@ -17,29 +17,26 @@ import type { CategorySlug } from '@/lib/commerce/types';
  * without a name.
  */
 
-export const CATEGORY_NAMES: Record<CategorySlug, string> = {
-  inverters: 'Inverters',
+/**
+ * `Partial` because `CategorySlug` is wider than the live taxonomy.
+ *
+ * The union still admits `inverters`, `ups` and `combos` so the development
+ * fixture in `mock/products.ts` typechecks, but none of the three is a
+ * customer-facing category any more (see `mock/categories.ts`). A total
+ * `Record` would force us to name three sections that no longer exist, and the
+ * parity test would then have to be loosened to tolerate them — which is
+ * exactly the drift this file exists to prevent. `categoryName` falls back to
+ * the slug, so nothing renders blank either way.
+ */
+export const CATEGORY_NAMES: Partial<Record<CategorySlug, string>> = {
   batteries: 'Batteries',
-  ups: 'UPS Systems',
-  combos: 'Inverter + Battery Combos',
 };
 
 export const SUBCATEGORY_NAMES: Record<string, string> = {
-  'pure-sine-wave': 'Pure Sine Wave Inverters',
-  'digital-ups': 'Digital UPS (DUPS)',
-  'solar-ready': 'Solar-Ready Inverters',
-  'high-capacity': 'High-Capacity Inverters',
-  lithium: 'Lithium (LiFePO4) Batteries',
-  'tall-tubular': 'Tall Tubular Batteries',
-  'short-tubular': 'Short Tubular Batteries',
-  'flat-plate-smf': 'Flat Plate & SMF Batteries',
+  lithium: 'Lithium Batteries',
+  'home-inverter': 'Home & Inverter Batteries',
   'ev-2-wheeler': '2-Wheeler EV Batteries',
   'ev-3-wheeler': '3-Wheeler & E-Rickshaw Batteries',
-  'home-ups': 'Home & Office UPS',
-  'online-ups': 'Online (Double Conversion) UPS',
-  'home-combos': 'Home Combos',
-  'shop-office-combos': 'Shop & Office Combos',
-  'solar-combos': 'Solar Combos',
 };
 
 export function categoryName(slug: string): string {

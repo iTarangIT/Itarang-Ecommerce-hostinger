@@ -109,9 +109,14 @@ export function CartLineItem({
           </div>
         </div>
 
+        {/* `maxQuantity` is now a flat per-line order limit rather than the
+            stock count (see `commerce/purchase.ts`), so the note says what it
+            actually means. The old wording — "Only N available" — read as an
+            inventory statement and, while it was derived from stock, it was
+            one. */}
         {item.quantity >= item.maxQuantity ? (
           <p className="mt-1.5 text-xs text-warning">
-            Only {item.maxQuantity} available at the moment.
+            That is the most you can order in one go. Talk to us for a larger quantity.
           </p>
         ) : null}
       </div>

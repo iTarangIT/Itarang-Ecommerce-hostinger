@@ -25,6 +25,8 @@ import { BuyBox } from '@/components/product/buy-box';
 import { CollapsibleCard } from '@/components/product/collapsible-card';
 import { ProductSpecs } from '@/components/product/product-specs';
 import { ProductLoadCalculator } from '@/components/product/product-load-calculator';
+import { HOME_BACKUP_SUBCATEGORIES } from '@/lib/sizing/recommend';
+import { notifyStateFor } from '@/lib/stock/notify-state';
 import { OfferStack } from '@/components/product/offer-stack';
 import { SizeChart } from '@/components/product/size-chart';
 import { SellerDetail } from '@/components/product/seller-info';
@@ -178,6 +180,31 @@ export default async function ProductPage({ params }: PageProps) {
   };
 
   // Narrowed once here so the conditional blocks below read cleanly.
+  /**
+   * Is the load calculator relevant to this product at all?
+   *
+   * The same allow-list `lib/sizing/recommend.ts` filters on, so the page's
+   * offer of the tool and the engine's willingness to answer with this product
+   * cannot come apart. Read by the "Size my system" card below and mirrored in
+   * `ProductLoadCalculator`.
+   */
+  const isHomeBackupProduct = HOME_BACKUP_SUBCATEGORIES.has(product.subcategory);
+
+  /**
+   * What the "Notify me" control on a sold-out product should open with.
+   *
+   * Resolved on the server because both halves need a session: the address to
+   * prefill, and whether this customer has already asked. A guest gets nulls
+   * and an empty field — being told a product is back does not require an
+   * account.
+   *
+   * `subscribedSku` rather than a boolean, because the shopper can switch
+   * variants on the page and the answer is per variant. The control compares it
+   * with whichever variant is selected, so switching to a different one shows
+   * the form again rather than claiming they are already on its list.
+   */
+  const notify = await notifyStateFor(product);
+
   const warrantyMonths = product.warrantyMonths;
 
   // The headline figures for the gallery's overlay tile. Computed here so the
@@ -257,7 +284,7 @@ export default async function ProductPage({ params }: PageProps) {
             </div>
 
             {/* Price, selectors, buy controls, delivery and the service row. */}
-            <BuyBox product={product} />
+            <BuyBox product={product} notify={notify} />
 
             {/* The selling points, as the bullet list a retail page opens its
                 description with. The prose sits in the panel below. */}
@@ -429,25 +456,33 @@ export default async function ProductPage({ params }: PageProps) {
                 </ul>
               </div>
 
-              <div className="mt-4 rounded-lg border border-accent/30 bg-accent-50 p-4">
-                <h3 className="flex items-center gap-2 font-display text-sm font-semibold text-foreground">
-                  <Calculator className="h-4.5 w-4.5 text-accent-600" />
-                  Not sure this fits your load?
-                </h3>
-                <p className="mt-1.5 text-sm text-muted-foreground">
-                  Tell the calculator which appliances you need running and it will confirm
-                  whether this system is the right size — or point you at the one that is.
-                </p>
-                <ButtonLink
-                  href="/tools/load-calculator"
-                  variant="accent"
-                  size="sm"
-                  className="mt-3"
-                >
-                  Size my system
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </ButtonLink>
-              </div>
+              {/* Home and inverter products only, matching
+                  `ProductLoadCalculator` and the recommendation engine's own
+                  allow-list. "Not sure this fits your load?" on an e-rickshaw
+                  pack asks a question the tool behind it cannot answer — the
+                  engine will never return a traction pack for a household
+                  load, by three independent barriers. */}
+              {isHomeBackupProduct ? (
+                <div className="mt-4 rounded-lg border border-accent/30 bg-accent-50 p-4">
+                  <h3 className="flex items-center gap-2 font-display text-sm font-semibold text-foreground">
+                    <Calculator className="h-4.5 w-4.5 text-accent-600" />
+                    Not sure this fits your load?
+                  </h3>
+                  <p className="mt-1.5 text-sm text-muted-foreground">
+                    Tell the calculator which appliances you need running and it will confirm
+                    whether this system is the right size — or point you at the one that is.
+                  </p>
+                  <ButtonLink
+                    href="/tools/load-calculator"
+                    variant="accent"
+                    size="sm"
+                    className="mt-3"
+                  >
+                    Size my system
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </ButtonLink>
+                </div>
+              ) : null}
             </CollapsibleCard>
 
             {/* Two cards, because these are two companies.

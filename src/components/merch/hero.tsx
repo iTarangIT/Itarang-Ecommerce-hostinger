@@ -18,35 +18,52 @@ interface Slide {
   secondary: { label: string; href: string };
 }
 
+/**
+ * Three slides, one per product line the business actually sells.
+ *
+ * Two of the three used to advertise combos and solar-ready inverters, and the
+ * third linked "Lithium vs tubular" — none of which exists in the catalogue or,
+ * since the taxonomy was reduced, has a page to land on. A hero that opens the
+ * site on a 404 is worse than a hero with fewer slides, so the copy now matches
+ * the catalogue: home lithium storage, two-wheeler packs, three-wheeler packs.
+ *
+ * Every claim below is one the product documents support (see
+ * `docs/p1-b-2-catalogue-audit.md`); nothing here states a warranty, a range or
+ * a compatibility the source sheets do not.
+ */
 const SLIDES: Slide[] = [
   {
-    eyebrow: 'Power backup, properly sized',
-    title: 'Never let a power cut stop your home',
-    // "installed" and "Certified installation included" both went: no product
-    // in the catalogue sets `installationIncluded`, so neither could be kept.
-    body: 'Pure sine wave inverters, long-life batteries and ready-matched combos — sized, supplied and supported by iTarang.',
-    points: ['Silent changeover', 'Wide input 100V–290V', 'Sized against your real load'],
-    image: '/art/combo-1-angle.svg',
-    primary: { label: 'Shop combos', href: categoryPath('combos') },
+    eyebrow: 'Home backup',
+    title: 'Keep the house running through the cut',
+    body: 'LiFePO4 home storage that pairs with a lithium-ready inverter — no water topping, no ventilated trolley, and sized against the appliances you actually run.',
+    points: ['No maintenance', 'Deep cycling without the penalty', 'Sized against your real load'],
+    image: '/art/battery-2-front.svg',
+    primary: { label: 'Shop lithium batteries', href: subcategoryPath('batteries', 'lithium') },
     secondary: { label: 'Size my system', href: '/tools/load-calculator' },
   },
   {
-    eyebrow: 'Lithium storage',
-    title: 'Fit it once, forget the maintenance',
-    body: 'LiFePO4 batteries need no water topping and no ventilated trolley, and take daily deep cycling in their stride.',
-    points: ['5-year warranty', 'Roughly a third the weight', 'Charges about twice as fast'],
-    image: '/art/battery-2-front.svg',
-    primary: { label: 'Shop lithium batteries', href: subcategoryPath('batteries', 'lithium') },
-    secondary: { label: 'Lithium vs tubular', href: categoryPath('batteries') },
+    eyebrow: '2-wheeler EV',
+    title: 'Traction packs matched to your drivetrain',
+    body: 'LiFePO4 packs for electric scooters and motorcycles, listed with the nominal voltage, charge voltage and discharge cut-off your controller has to accept.',
+    points: ['48V, 60V and 72V systems', 'BMS on every pack', 'Connector stated on the listing'],
+    image: '/art/battery-1-angle.svg',
+    primary: {
+      label: 'Shop 2-wheeler batteries',
+      href: subcategoryPath('batteries', 'ev-2-wheeler'),
+    },
+    secondary: { label: 'All batteries', href: categoryPath('batteries') },
   },
   {
-    eyebrow: 'Solar ready',
-    title: 'Buy the inverter now, add panels later',
-    body: 'Solar-ready inverters run on grid charging from day one and accept an array whenever you are ready — no replacement needed.',
-    points: ['Integrated charge controller', 'Up to 2000Wp on MPPT models', 'Panel sizing at survey'],
-    image: '/art/inverter-3-angle.svg',
-    primary: { label: 'Shop solar-ready', href: subcategoryPath('inverters', 'solar-ready') },
-    secondary: { label: 'See solar combos', href: subcategoryPath('combos', 'solar-combos') },
+    eyebrow: '3-wheeler & e-rickshaw',
+    title: 'Energy enough for a full day of duty',
+    body: 'High-capacity packs for e-rickshaws and e-loaders, quoted in kilowatt-hours because that — not ampere-hours alone — is what decides a working day.',
+    points: ['Quoted in kWh', 'A third the weight of lead acid', 'No acid, no terminal corrosion'],
+    image: '/art/battery-3-front.svg',
+    primary: {
+      label: 'Shop e-rickshaw batteries',
+      href: subcategoryPath('batteries', 'ev-3-wheeler'),
+    },
+    secondary: { label: 'All batteries', href: categoryPath('batteries') },
   },
 ];
 

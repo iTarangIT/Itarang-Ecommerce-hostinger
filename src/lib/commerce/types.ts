@@ -387,6 +387,19 @@ export interface SortOption {
   label: string;
 }
 
+/**
+ * A numeric window on one range facet.
+ *
+ * Either end may be absent, meaning "unbounded that way" — which is not the
+ * same as the facet's own minimum or maximum, and matters when the catalogue
+ * changes underneath a shared link. Units are the facet's own: paise for price,
+ * ampere-hours for capacity, volts for voltage.
+ */
+export interface FacetRange {
+  min?: number;
+  max?: number;
+}
+
 /** Parsed, validated listing query — the single source of truth for a PLP. */
 export interface ProductQuery {
   category?: CategorySlug;
@@ -394,8 +407,17 @@ export interface ProductQuery {
   search?: string;
   /** Multi-select facet selections keyed by facet id. */
   filters: Partial<Record<FacetId, string[]>>;
-  priceMin?: Paise;
-  priceMax?: Paise;
+  /**
+   * Range selections keyed by facet id.
+   *
+   * Replaced the dedicated `priceMin` / `priceMax` pair. Price was the only
+   * range facet, so it had its own fields on the query, its own branch in the
+   * engine and its own control in the sidebar — none of which generalised, and
+   * capacity and voltage needed exactly the same behaviour. One map keyed by
+   * facet id means adding the next range facet is a `FACET_DEFINITIONS` entry
+   * and nothing else.
+   */
+  ranges: Partial<Record<FacetId, FacetRange>>;
   minRating?: number;
   sort: SortId;
   page: number;
@@ -411,6 +433,16 @@ export interface ProductListResult {
   facets: FacetGroup[];
   /** Price bounds across the *unfiltered* result set, for the range control. */
   priceBounds: { min: Paise; max: Paise };
+  /**
+   * Bounds for every range facet across the *unfiltered* result set.
+   *
+   * The same role `priceBounds` plays, generalised — a slider needs the whole
+   * scale, not the scale of what is left after the shopper has already narrowed
+   * it, or dragging the handle down would keep shrinking its own track.
+   * `priceBounds` is kept beside it because the empty-state copy reads it
+   * directly and there is no value in churning that.
+   */
+  rangeBounds: Partial<Record<FacetId, { min: number; max: number }>>;
 }
 
 export interface SearchSuggestion {

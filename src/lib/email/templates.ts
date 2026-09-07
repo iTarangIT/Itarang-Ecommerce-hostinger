@@ -152,3 +152,86 @@ export function resetPasswordMessage(to: string, token: string): Mail {
     ),
   };
 }
+
+/* --------------------------------------------------- stock notifications */
+
+/**
+ * "It is back" — sent to a customer who asked to be told.
+ *
+ * Deliberately not a marketing email. It states the one fact the person asked
+ * for, links to the product, and says why they are receiving it — which is the
+ * difference between a notification somebody requested and mail they did not.
+ *
+ * Sent only by an explicit admin action, never automatically, and never twice
+ * for the same restock: `stock_notification_sends` has a primary key on
+ * (transition, email) and the send path inserts before it mails.
+ */
+export function backInStockMessage(to: string, productTitle: string, productPath: string): Mail {
+  const href = `${env().NEXT_PUBLIC_SITE_URL.replace(/\/$/, '')}${productPath}`;
+  return {
+    to,
+    subject: `${productTitle} is back in stock`,
+    text: [
+      `${productTitle} is available again.`,
+      '',
+      href,
+      '',
+      'You are getting this because you asked to be told when this product came',
+      'back into stock. This is the only message we send about it.',
+    ].join('\n'),
+    html: wrap(
+      'It is back in stock',
+      `${escapeHtml(productTitle)} is available again.<br><br>You are getting this because you asked to be told when this product came back into stock. This is the only message we send about it.`,
+      { label: 'View the product', href },
+    ),
+  };
+}
+
+/**
+ * The internal alert, sent to the business when a variant sells out.
+ *
+ * Goes to `STOCK_ALERT_EMAIL`, once per transition. It carries no customer
+ * data — a count of people waiting, never their addresses — because it is
+ * routine operational mail and the interested list belongs behind the admin
+ * sign-in, where it already is.
+ */
+export function outOfStockAlertMessage(
+  to: string,
+  details: {
+    productTitle: string;
+    sku: string;
+    source: 'order' | 'admin';
+    waitingCount: number;
+  },
+): Mail {
+  const href = `${env().NEXT_PUBLIC_SITE_URL.replace(/\/$/, '')}/admin/products/out-of-stock`;
+  const cause =
+    details.source === 'order'
+      ? 'The last units were bought.'
+      : 'The stock count was set to zero in the admin console.';
+  const waiting =
+    details.waitingCount === 0
+      ? 'Nobody has asked to be notified about it.'
+      : `${details.waitingCount} customer${details.waitingCount === 1 ? ' has' : 's have'} asked to be notified when it returns.`;
+
+  return {
+    to,
+    subject: `Out of stock: ${details.productTitle} (${details.sku})`,
+    text: [
+      `${details.productTitle} — SKU ${details.sku} — is now out of stock.`,
+      '',
+      cause,
+      waiting,
+      '',
+      href,
+      '',
+      'This is sent once, when the product goes out of stock. It is not repeated',
+      'while it stays out of stock.',
+    ].join('\n'),
+    html: wrap(
+      'A product has gone out of stock',
+      `<strong>${escapeHtml(details.productTitle)}</strong><br>SKU ${escapeHtml(details.sku)}<br><br>${escapeHtml(cause)} ${escapeHtml(waiting)}<br><br>This is sent once, when the product goes out of stock — not repeated while it stays out of stock.`,
+      { label: 'Open the out-of-stock list', href },
+    ),
+  };
+}

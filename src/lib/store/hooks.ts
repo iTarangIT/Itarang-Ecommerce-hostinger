@@ -7,6 +7,7 @@ import {
   addWishlistItemAction,
   removeWishlistItemAction,
 } from '@/lib/account/wishlist-actions';
+import { CUSTOMER_QUANTITY_CEILING, customerMaxQuantity } from '@/lib/commerce/purchase';
 import { useStore } from './store-provider';
 import { MAX_COMPARE } from './types';
 import type { AppliedCoupon, CartItem } from './types';
@@ -25,7 +26,7 @@ export function toCartItem(
     image: product.images[0] ?? '',
     price: variant.price,
     quantity,
-    maxQuantity: Math.max(1, variant.stock),
+    maxQuantity: customerMaxQuantity(variant.stock),
     category: product.category,
     installationIncluded: product.installationIncluded,
   };
@@ -41,7 +42,11 @@ export function summaryToCartItem(summary: ProductSummary, quantity = 1): CartIt
     image: summary.image,
     price: { mrp: summary.mrp, selling: summary.price },
     quantity,
-    maxQuantity: Math.max(1, summary.stock),
+    // A summary no longer carries a count — see `commerce/summary.ts` — so the
+    // optimistic line opens at the flat customer ceiling. `buildQuote` reduces
+    // it to what is genuinely available the moment the cart is priced, which is
+    // where that decision has always actually been made.
+    maxQuantity: CUSTOMER_QUANTITY_CEILING,
     category: summary.category,
     installationIncluded: summary.installationIncluded,
   };

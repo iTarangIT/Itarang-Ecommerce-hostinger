@@ -98,6 +98,18 @@ export const LIMITS = {
   events: { limit: 300, windowSeconds: 10 * 60 },
   /** The same beacons per IP, so one address cannot mint endless visitors. */
   eventsByIp: { limit: 1_200, windowSeconds: 10 * 60 },
+  /**
+   * "Notify me when this is back", per email address.
+   *
+   * The form accepts an address without proving it belongs to the person
+   * typing it — which is right, because demanding an account before we will
+   * tell somebody a battery is available would lose the sale. That makes it a
+   * way to sign a third party up for mail they did not ask for, so the bucket
+   * is tight: a handful of products is a real shopper, hundreds is not.
+   */
+  stockNotify: { limit: 10, windowSeconds: 60 * 60 },
+  /** The same per IP, so one machine cannot enrol many addresses. */
+  stockNotifyByIp: { limit: 40, windowSeconds: 60 * 60 },
 } as const satisfies Record<string, RateLimit>;
 
 /**

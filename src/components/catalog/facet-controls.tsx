@@ -3,15 +3,16 @@
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
 import { SlidersHorizontal, X } from 'lucide-react';
-import type { FacetGroup, FacetId, ProductQuery } from '@/lib/commerce/types';
+import type { FacetGroup, FacetId, FacetRange, ProductQuery } from '@/lib/commerce/types';
 import {
   activeFilterCount,
   buildQueryString,
   clearAllFilters,
+  setFacetRange,
   toggleFacetValue,
 } from '@/lib/catalog/query';
 import { FACET_DEFINITIONS } from '@/lib/catalog/facets';
-import { formatAmount, formatPrice } from '@/lib/catalog/pricing';
+import { formatPrice } from '@/lib/catalog/pricing';
 import { CollapsibleSection } from '@/components/ui/accordion';
 import { Button } from '@/components/ui/button';
 import { Checkbox, Input } from '@/components/ui/field';
@@ -78,7 +79,7 @@ function FacetPanel({
 
         if (facet.type === 'range') {
           return (
-            <PriceFacet key={facet.id} facet={facet} query={query} navigate={navigate} />
+            <RangeFacet key={facet.id} facet={facet} query={query} navigate={navigate} />
           );
         }
 
@@ -156,7 +157,79 @@ function FacetPanel({
   );
 }
 
-function PriceFacet({
+/**
+ * One range facet: a slider for the ceiling, plus a From/To pair.
+ *
+ * This was `PriceFacet`, and price was hardcoded into every line of it — the
+ * rupee formatting, the ÷100 paise conversion, the digits-only input mask, the
+ * step of 500. Capacity and voltage need exactly the same control, so the
+ * price-specific parts became `RANGE_FACET_UI` and the rest is shared.
+ *
+ * Two behaviours are worth keeping in mind. The slider sets the **maximum**
+ * only, as it always has: a single-thumb input cannot express both ends, and
+ * the From/To fields are there for a floor. And a decimal is accepted, because
+ * voltage has one — the old input stripped every non-digit, which would have
+ * turned a typed "60.8" into "608".
+ */
+const RANGE_FACET_UI: Partial<
+  Record<
+    FacetId,
+    {
+      /** URL/display unit per stored unit. Price is stored in paise. */
+      scale: number;
+      step: number;
+      decimals: number;
+      format: (displayValue: number) => string;
+      fromLabel: string;
+      toLabel: string;
+    }
+  >
+> = {
+  price: {
+    scale: 100,
+    step: 500,
+    decimals: 0,
+    format: (v) => formatPrice(v * 100),
+    fromLabel: 'Minimum price in rupees',
+    toLabel: 'Maximum price in rupees',
+  },
+  batteryAh: {
+    scale: 1,
+    step: 1,
+    decimals: 0,
+    format: (v) => `${v} Ah`,
+    fromLabel: 'Minimum capacity in ampere-hours',
+    toLabel: 'Maximum capacity in ampere-hours',
+  },
+  voltage: {
+    scale: 1,
+    // A tenth of a volt, because the catalogue holds 12.8, 25.6, 60.8 and 73.6.
+    // A step of 1 would make the top of the slider 73, which excludes the pack
+    // that set the maximum — the shopper drags to the end and loses a product.
+    step: 0.1,
+    decimals: 1,
+    format: (v) => `${v} V`,
+    fromLabel: 'Minimum voltage',
+    toLabel: 'Maximum voltage',
+  },
+};
+
+const DEFAULT_RANGE_UI = {
+  scale: 1,
+  step: 1,
+  decimals: 0,
+  format: (v: number) => String(v),
+  fromLabel: 'Minimum',
+  toLabel: 'Maximum',
+};
+
+/** Trim to the facet's decimals, so the URL does not pick up float noise. */
+function round(value: number, decimals: number): number {
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
+}
+
+function RangeFacet({
   facet,
   query,
   navigate,
@@ -165,46 +238,57 @@ function PriceFacet({
   query: ProductQuery;
   navigate: (next: ProductQuery) => void;
 }) {
-  const min = facet.min ?? 0;
-  const max = facet.max ?? 0;
+  const ui = RANGE_FACET_UI[facet.id] ?? DEFAULT_RANGE_UI;
+  const min = round((facet.min ?? 0) / ui.scale, ui.decimals);
+  const max = round((facet.max ?? 0) / ui.scale, ui.decimals);
 
-  const [from, setFrom] = React.useState(
-    query.priceMin !== undefined ? String(Math.round(query.priceMin / 100)) : '',
-  );
-  const [to, setTo] = React.useState(
-    query.priceMax !== undefined ? String(Math.round(query.priceMax / 100)) : '',
-  );
-  const [slider, setSlider] = React.useState(
-    query.priceMax !== undefined ? Math.round(query.priceMax / 100) : Math.round(max / 100),
-  );
+  const selected = query.ranges[facet.id];
+  const selectedFrom = selected?.min !== undefined ? round(selected.min / ui.scale, ui.decimals) : undefined;
+  const selectedTo = selected?.max !== undefined ? round(selected.max / ui.scale, ui.decimals) : undefined;
+
+  const [from, setFrom] = React.useState(selectedFrom !== undefined ? String(selectedFrom) : '');
+  const [to, setTo] = React.useState(selectedTo !== undefined ? String(selectedTo) : '');
+  const [slider, setSlider] = React.useState(selectedTo ?? max);
 
   React.useEffect(() => {
-    setFrom(query.priceMin !== undefined ? String(Math.round(query.priceMin / 100)) : '');
-    setTo(query.priceMax !== undefined ? String(Math.round(query.priceMax / 100)) : '');
-    setSlider(query.priceMax !== undefined ? Math.round(query.priceMax / 100) : Math.round(max / 100));
-  }, [query.priceMin, query.priceMax, max]);
+    setFrom(selectedFrom !== undefined ? String(selectedFrom) : '');
+    setTo(selectedTo !== undefined ? String(selectedTo) : '');
+    setSlider(selectedTo ?? max);
+  }, [selectedFrom, selectedTo, max]);
 
   const apply = (nextFrom: string, nextTo: string) => {
-    const parsedFrom = nextFrom ? Number(nextFrom) * 100 : undefined;
-    const parsedTo = nextTo ? Number(nextTo) * 100 : undefined;
-    navigate({ ...query, priceMin: parsedFrom, priceMax: parsedTo, page: 1 });
+    const parsedFrom = nextFrom.trim() === '' ? undefined : Number(nextFrom) * ui.scale;
+    const parsedTo = nextTo.trim() === '' ? undefined : Number(nextTo) * ui.scale;
+    navigate(
+      setFacetRange(
+        query,
+        facet.id,
+        Number.isFinite(parsedFrom as number) ? parsedFrom : undefined,
+        Number.isFinite(parsedTo as number) ? parsedTo : undefined,
+      ),
+    );
   };
+
+  // Digits, one decimal point, nothing else. Empty stays empty so the field can
+  // be cleared back to "no bound", which is not the same as its minimum.
+  const sanitise = (raw: string) =>
+    ui.decimals > 0 ? raw.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1') : raw.replace(/\D/g, '');
 
   return (
     <CollapsibleSection title={facet.label}>
       <p className="text-xs text-muted-foreground">
         Products here run from{' '}
-        <span className="tabular font-medium text-foreground">{formatPrice(min)}</span> to{' '}
-        <span className="tabular font-medium text-foreground">{formatPrice(max)}</span>.
+        <span className="tabular font-medium text-foreground">{ui.format(min)}</span> to{' '}
+        <span className="tabular font-medium text-foreground">{ui.format(max)}</span>.
       </p>
 
       <label className="mt-4 block">
-        <span className="sr-only">Maximum price</span>
+        <span className="sr-only">{ui.toLabel}</span>
         <input
           type="range"
-          min={Math.round(min / 100)}
-          max={Math.round(max / 100)}
-          step={500}
+          min={min}
+          max={max}
+          step={ui.step}
           value={slider}
           onChange={(e) => setSlider(Number(e.target.value))}
           onMouseUp={() => apply(from, String(slider))}
@@ -216,10 +300,7 @@ function PriceFacet({
         />
       </label>
       <p className="mt-1 text-xs text-muted-foreground">
-        Up to{' '}
-        <span className="tabular font-semibold text-foreground">
-          ₹{formatAmount(slider * 100)}
-        </span>
+        Up to <span className="tabular font-semibold text-foreground">{ui.format(slider)}</span>
       </p>
 
       <form
@@ -232,23 +313,23 @@ function PriceFacet({
         <label className="min-w-0 flex-1">
           <span className="mb-1 block text-xs text-muted-foreground">From</span>
           <Input
-            inputMode="numeric"
+            inputMode="decimal"
             value={from}
-            onChange={(e) => setFrom(e.target.value.replace(/\D/g, ''))}
-            placeholder={String(Math.round(min / 100))}
+            onChange={(e) => setFrom(sanitise(e.target.value))}
+            placeholder={String(min)}
             className="h-10"
-            aria-label="Minimum price in rupees"
+            aria-label={ui.fromLabel}
           />
         </label>
         <label className="min-w-0 flex-1">
           <span className="mb-1 block text-xs text-muted-foreground">To</span>
           <Input
-            inputMode="numeric"
+            inputMode="decimal"
             value={to}
-            onChange={(e) => setTo(e.target.value.replace(/\D/g, ''))}
-            placeholder={String(Math.round(max / 100))}
+            onChange={(e) => setTo(sanitise(e.target.value))}
+            placeholder={String(max)}
             className="h-10"
-            aria-label="Maximum price in rupees"
+            aria-label={ui.toLabel}
           />
         </label>
         <Button type="submit" variant="outline" size="sm" className="h-10">
@@ -380,9 +461,15 @@ export function ActiveFilterChips({
 }) {
   const { navigate, pending } = useFacetNavigation(basePath);
   const entries = Object.entries(query.filters) as Array<[FacetId, string[]]>;
-  const hasPrice = query.priceMin !== undefined || query.priceMax !== undefined;
 
-  if (entries.length === 0 && !hasPrice) return null;
+  // Every narrowed range gets a chip, not just price. A shopper who filtered by
+  // voltage and then scrolled past the sidebar previously had no indication the
+  // filter was on and no way to drop it without finding the control again.
+  const rangeEntries = (Object.entries(query.ranges) as Array<[FacetId, FacetRange]>).filter(
+    ([, range]) => range && (range.min !== undefined || range.max !== undefined),
+  );
+
+  if (entries.length === 0 && rangeEntries.length === 0) return null;
 
   const labelFor = (facetId: FacetId, value: string) => {
     const group = facets.find((f) => f.id === facetId);
@@ -412,18 +499,25 @@ export function ActiveFilterChips({
         )),
       )}
 
-      {hasPrice ? (
-        <button
-          type="button"
-          onClick={() => navigate({ ...query, priceMin: undefined, priceMax: undefined, page: 1 })}
-          className="group inline-flex items-center gap-1.5 rounded-full border border-border bg-card py-1 pl-3 pr-2 text-xs font-medium text-foreground transition-colors hover:border-destructive/40 hover:text-destructive"
-        >
-          {query.priceMin !== undefined ? formatPrice(query.priceMin) : 'Any'} –{' '}
-          {query.priceMax !== undefined ? formatPrice(query.priceMax) : 'Any'}
-          <X className="h-3.5 w-3.5 opacity-60 group-hover:opacity-100" />
-          <span className="sr-only">Remove price filter</span>
-        </button>
-      ) : null}
+      {rangeEntries.map(([facetId, range]) => {
+        const def = FACET_DEFINITIONS[facetId];
+        const ui = RANGE_FACET_UI[facetId] ?? DEFAULT_RANGE_UI;
+        const show = (value: number | undefined) =>
+          value === undefined ? 'Any' : ui.format(round(value / ui.scale, ui.decimals));
+
+        return (
+          <button
+            key={facetId}
+            type="button"
+            onClick={() => navigate(setFacetRange(query, facetId, undefined, undefined))}
+            className="group inline-flex items-center gap-1.5 rounded-full border border-border bg-card py-1 pl-3 pr-2 text-xs font-medium text-foreground transition-colors hover:border-destructive/40 hover:text-destructive"
+          >
+            {def.label}: {show(range.min)} – {show(range.max)}
+            <X className="h-3.5 w-3.5 opacity-60 group-hover:opacity-100" />
+            <span className="sr-only">Remove {def.label.toLowerCase()} filter</span>
+          </button>
+        );
+      })}
 
       <button
         type="button"

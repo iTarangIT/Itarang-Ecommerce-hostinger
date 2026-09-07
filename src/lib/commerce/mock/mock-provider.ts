@@ -27,7 +27,25 @@ function facetIdsForCategory(category: string): FacetId[] {
   return CATEGORY_BY_SLUG.get(category as never)?.facetIds ?? SEARCH_FACET_IDS;
 }
 
-const engine = new CatalogEngine(PRODUCTS, facetIdsForCategory);
+/**
+ * The fixture, narrowed to categories that still exist.
+ *
+ * `PRODUCTS` is a development fixture written when the taxonomy had four
+ * families; it still contains inverters, UPS units and combos. Those are no
+ * longer customer-facing categories (see `categories.ts`), so a product filed
+ * under one has no category page to sit on, no breadcrumb that resolves and no
+ * mega-menu entry — it would be reachable only by guessing its URL.
+ *
+ * Filtering here rather than deleting fixture rows keeps the development
+ * catalogue intact for whenever those families come back, and means the mock
+ * provider agrees with the database provider about what a shopper can browse.
+ * Nothing in the live catalogue is affected: `COMMERCE_PROVIDER=db` never
+ * reads this file.
+ */
+const LIVE_CATEGORIES = new Set(CATEGORIES.map((c) => c.slug));
+const CATALOGUE = PRODUCTS.filter((product) => LIVE_CATEGORIES.has(product.category));
+
+const engine = new CatalogEngine(CATALOGUE, facetIdsForCategory);
 
 export class MockCatalogProvider implements CatalogProvider {
   readonly name = 'mock';

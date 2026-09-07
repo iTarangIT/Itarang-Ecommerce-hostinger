@@ -41,16 +41,32 @@ const BADGE_META: Record<BadgeKind, { label: string; tone: Tone }> = {
   'sold-out': { label: 'Sold out', tone: 'neutral' },
 };
 
+/**
+ * Badges a shopper is never shown, whatever the catalogue says.
+ *
+ * `low-stock` is a `BadgeKind` a product row can still carry — the mock
+ * fixtures set it, and the type is shared with the admin console — but it is an
+ * inventory disclosure, and this release stopped making those. Suppressing it
+ * here rather than editing every fixture means a badge added by an
+ * administrator, an importer or a future provider is filtered too.
+ */
+const HIDDEN_BADGES: ReadonlySet<BadgeKind> = new Set(['low-stock']);
+
 export function ProductBadge({ kind }: { kind: BadgeKind }) {
+  if (HIDDEN_BADGES.has(kind)) return null;
   const meta = BADGE_META[kind];
   return <Badge tone={meta.tone}>{meta.label}</Badge>;
 }
 
 export function BadgeStack({ badges, max = 2 }: { badges: BadgeKind[]; max?: number }) {
-  if (badges.length === 0) return null;
+  // Filtered before the slice, not after: taking the first `max` and then
+  // dropping the hidden ones would let `low-stock` consume a slot and render
+  // nothing, silently costing a product its "Bestseller".
+  const visible = badges.filter((b) => !HIDDEN_BADGES.has(b));
+  if (visible.length === 0) return null;
   return (
     <div className="flex flex-wrap gap-1">
-      {badges.slice(0, max).map((b) => (
+      {visible.slice(0, max).map((b) => (
         <ProductBadge key={b} kind={b} />
       ))}
     </div>

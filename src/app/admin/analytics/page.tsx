@@ -1,11 +1,12 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { ArrowLeft, FlaskConical, IndianRupee, Package } from 'lucide-react';
+import { ArrowLeft, FlaskConical, IndianRupee, MapPin, Package } from 'lucide-react';
 import {
   FULFILMENT_STAGES,
   availableMonths,
   fulfilmentCounts,
   isRangeKey,
+  geography,
   monthlyRevenue,
   recentFulfilment,
   resolveRange,
@@ -86,12 +87,13 @@ export default async function AnalyticsPage({
     prev: params.prev,
   });
 
-  const [counts, money, series, months, recent] = await Promise.all([
+  const [counts, money, series, months, recent, places] = await Promise.all([
     fulfilmentCounts(range.from, range.to),
     revenue(range.from, range.to),
     monthlyRevenue(12),
     availableMonths(),
     recentFulfilment(range.from, range.to, 25),
+    geography(range.from, range.to),
   ]);
 
   const peak = Math.max(1, ...series.map((point) => point.gross));
@@ -242,6 +244,66 @@ export default async function AnalyticsPage({
               </li>
             ))}
           </ul>
+        )}
+      </section>
+
+      {/* Where the money came from */}
+      <section aria-labelledby="geography-heading" className="mt-8">
+        <h2 id="geography-heading" className="flex items-center gap-2 heading-3">
+          <MapPin className="h-4.5 w-4.5 text-accent-600" />
+          Revenue by state and city
+        </h2>
+        <p className="mt-1.5 text-sm text-muted-foreground">
+          From the delivery address recorded on each paid order, so it reconciles with the revenue
+          above. A customer moving house does not move past orders.
+        </p>
+
+        {places.length === 0 ? (
+          <p className="mt-2 text-sm text-muted-foreground">
+            No captured payments with a delivery address in this period.
+          </p>
+        ) : (
+          <div className="mt-3 overflow-x-auto rounded-lg border border-border">
+            <table className="w-full min-w-[44rem] text-left text-sm">
+              <thead className="bg-surface text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th scope="col" className="px-4 py-3 font-semibold">State</th>
+                  <th scope="col" className="px-4 py-3 font-semibold">Cities</th>
+                  <th scope="col" className="px-4 py-3 text-right font-semibold">Orders</th>
+                  <th scope="col" className="px-4 py-3 text-right font-semibold">Customers</th>
+                  <th scope="col" className="px-4 py-3 text-right font-semibold">Revenue</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border bg-card">
+                {places.map((place) => (
+                  <tr key={place.state}>
+                    <td className="px-4 py-3">
+                      <span className="font-medium text-foreground">{place.state}</span>
+                      {place.stateCode ? (
+                        <span className="tabular mt-0.5 block text-xs text-muted-foreground">
+                          GST code {place.stateCode}
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">
+                      {place.cities.length === 0
+                        ? '—'
+                        : place.cities
+                            .slice(0, 4)
+                            .map((city) => `${city.city} (${city.orders})`)
+                            .join(', ')}
+                      {place.cities.length > 4 ? ` +${place.cities.length - 4} more` : ''}
+                    </td>
+                    <td className="tabular px-4 py-3 text-right">{place.orders}</td>
+                    <td className="tabular px-4 py-3 text-right">{place.customers}</td>
+                    <td className="tabular px-4 py-3 text-right font-semibold text-foreground">
+                      {formatPrice(place.gross)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
 

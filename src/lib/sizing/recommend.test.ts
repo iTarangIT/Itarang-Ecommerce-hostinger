@@ -7,6 +7,7 @@ import type { ProductRecord } from '@/lib/products/types';
 import type { Product } from '@/lib/commerce/types';
 import { calculateSizing } from './calculator';
 import {
+  MAX_BANK_UNITS,
   SYSTEM_VOLTAGE_BY_NOMINAL,
   assess,
   parseDischargeAmps,
@@ -394,7 +395,10 @@ describe('4 · a voltage mismatch produces no recommendation', () => {
 /* -------------------------------------------------- 5 · never undersize */
 
 describe('5 · insufficient capacity produces no recommendation', () => {
-  it('refuses rather than offering a smaller battery', () => {
+  it('answers one Ah over a single pack with a two-pack bank', () => {
+    // Was a refusal before bank sizing. It is not "offering a smaller battery"
+    // — the alternative this suite has always guarded against — it is offering
+    // two of the right one, which is how the requirement is actually met.
     const requirement: SizingRequirement = {
       runningWatts: 300,
       requiredAh: 106, // one Ah above the documented capacity of the only 12V product
@@ -403,6 +407,22 @@ describe('5 · insufficient capacity produces no recommendation', () => {
       backupHours: 4,
     };
     const result = recommendBattery(PUBLISHED, requirement);
+    expect(result.status).toBe('matched');
+    expect(result.best!.units).toBe(2);
+  });
+
+  it('still refuses a load beyond the largest bank it will propose', () => {
+    // The property the original test existed for, at its new boundary: past
+    // `MAX_BANK_UNITS` the catalogue genuinely cannot serve the load and the
+    // engine says so rather than proposing a bank nobody would install.
+    const ah = domainFor(POWERCUBE_1_4).facets.batteryAh!;
+    const result = recommendBattery(PUBLISHED, {
+      runningWatts: 300,
+      requiredAh: ah * MAX_BANK_UNITS + 1,
+      requiredDcWatts: 353,
+      systemVoltage: 12,
+      backupHours: 4,
+    });
     expect(result.status).toBe('no-catalogue-match');
     expect(result.considered.find((e) => e.product.id === POWERCUBE_1_4)!.rejections).toContain(
       'capacity-below-requirement',
@@ -749,9 +769,11 @@ describe('12 · the engine holds no product definitions of its own', () => {
     };
 
     expect(recommendBattery([product], { ...base, requiredAh: ah }).status).toBe('matched');
-    expect(recommendBattery([product], { ...base, requiredAh: ah + 1 }).status).toBe(
-      'no-catalogue-match',
-    );
+    // Past what the largest permitted bank can supply, the same product stops
+    // being recommended — with no code change, which is the point.
+    expect(
+      recommendBattery([product], { ...base, requiredAh: ah * MAX_BANK_UNITS + 1 }).status,
+    ).toBe('no-catalogue-match');
   });
 });
 
@@ -797,5 +819,105 @@ describe('13 · the original dangerous case, /api/sizing?va=100&ah=45', () => {
       });
       expect(result.best?.spec.nominalVoltage ?? null).not.toBe(51);
     }
+  });
+});
+
+/* ------------------------------------------------------- 13 · bank sizing */
+
+describe('13 · parallel bank sizing', () => {
+  /**
+   * Batteries in parallel add ampere-hours at an unchanged voltage. The
+   * catalogue holds one sellable 12V home battery, so without this the
+   * calculator answered "nothing we stock matches" for every household load
+   * above roughly 160 W over four hours — a true statement about one battery
+   * and a false one about what we can supply.
+   *
+   * What must NOT change: the voltage barrier, the application barriers and the
+   * availability barrier are all per-product and a bank cannot launder any of
+   * them. The last two cases below hold that line.
+   */
+  const product = () => domainFor(POWERCUBE_1_4);
+  const base = { runningWatts: 200, requiredDcWatts: 236, systemVoltage: 12 as const, backupHours: 4 };
+
+  it('needs one unit when one is enough', () => {
+    const ah = product().facets.batteryAh!;
+    const result = recommendBattery([product()], { ...base, requiredAh: ah });
+    expect(result.status).toBe('matched');
+    expect(result.best!.units).toBe(1);
+  });
+
+  it('scales the unit count with the requirement', () => {
+    const ah = product().facets.batteryAh!;
+    for (const [multiplier, expected] of [
+      [1.01, 2],
+      [2, 2],
+      [2.01, 3],
+      [MAX_BANK_UNITS, MAX_BANK_UNITS],
+    ] as const) {
+      const result = recommendBattery([product()], {
+        ...base,
+        requiredAh: Math.ceil(ah * multiplier),
+      });
+      expect(result.best?.units, `at ${multiplier}x capacity`).toBe(expected);
+    }
+  });
+
+  it('refuses past the cap rather than proposing an absurd bank', () => {
+    const ah = product().facets.batteryAh!;
+    expect(
+      recommendBattery([product()], { ...base, requiredAh: ah * MAX_BANK_UNITS + 1 }).status,
+    ).toBe('no-catalogue-match');
+  });
+
+  it('explains the bank in the supporting reasons', () => {
+    const ah = product().facets.batteryAh!;
+    const result = recommendBattery([product()], { ...base, requiredAh: ah + 1 });
+    expect(result.best!.reasons.join(' ')).toMatch(/2 in parallel/i);
+  });
+
+  it('credits a bank with the current all its units can deliver', () => {
+    // Parallel units share the load, so two packs supply twice the current. A
+    // load one watt above a single pack's limit is served by two.
+    const ceiling = assess(product(), { ...base, requiredAh: 1, requiredDcWatts: 1 }).spec
+      .maxContinuousDischargeW!;
+    const ah = product().facets.batteryAh!;
+
+    const result = recommendBattery([product()], {
+      ...base,
+      requiredAh: ah + 1, // forces a 2-unit bank
+      requiredDcWatts: Math.round(ceiling) + 1,
+    });
+    expect(result.status).toBe('matched');
+    expect(result.best!.units).toBe(2);
+  });
+
+  it('never credits a one-unit answer with more current than one unit', () => {
+    // The bank must not be allowed to borrow capability it was not sized for:
+    // a requirement needing only one pack is checked against one pack's limit.
+    const ceiling = assess(product(), { ...base, requiredAh: 1, requiredDcWatts: 1 }).spec
+      .maxContinuousDischargeW!;
+
+    const result = recommendBattery([product()], {
+      ...base,
+      requiredAh: 10, // one unit is plenty
+      requiredDcWatts: Math.round(ceiling) + 1,
+    });
+    expect(result.status).toBe('no-catalogue-match');
+  });
+
+  it('reports no unit count for a product it rejected', () => {
+    // Nothing downstream may print "3 units" beside a traction pack.
+    const requirement = { ...base, requiredAh: 10 };
+    for (const entry of recommendBattery(PUBLISHED, requirement).considered) {
+      if (entry.rejections.length > 0) expect(entry.units).toBe(0);
+    }
+  });
+
+  it('does not let a bank satisfy a voltage mismatch', () => {
+    // Stacking packs in parallel changes capacity, never voltage. An EV pack
+    // stays refused however many of it there are.
+    const ev = domainFor('trontek-tk-liev-51105');
+    const result = recommendBattery([ev], { ...base, requiredAh: 1000 });
+    expect(result.status).not.toBe('matched');
   });
 });

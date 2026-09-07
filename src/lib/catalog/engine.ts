@@ -1,15 +1,17 @@
 import type {
   FacetGroup,
   FacetId,
+  FacetRange,
   Product,
   ProductListResult,
   ProductQuery,
   SearchSuggestion,
 } from '@/lib/commerce/types';
 import { FACET_DEFINITIONS, productMatchesFacet } from './facets';
+import { categoryName, subcategoryName } from './category-names';
 import { displayPrice, minSellingPrice } from './pricing';
 import { sortProducts } from './sort';
-import { categoryPath, productPath } from '@/lib/routes';
+import { categoryPath, productPath, subcategoryPath } from '@/lib/routes';
 
 /**
  * In-memory catalogue query engine.
@@ -23,36 +25,138 @@ import { categoryPath, productPath } from '@/lib/routes';
  * front and reused for every query against that snapshot.
  */
 
-/** Facets shown on search results, where no single category is in scope. */
+/**
+ * Facets shown on search results, where no single category is in scope.
+ *
+ * `subcategory` and `voltage` were both missing. A shopper who searched
+ * "lithium" landed on a page that could not tell a home battery from a traction
+ * pack, and could not filter by the one number that decides whether a pack fits
+ * their vehicle at all — the two refinements search results need most.
+ */
 export const SEARCH_FACET_IDS: FacetId[] = [
   'category',
-  'capacityVa',
+  'subcategory',
   'batteryAh',
+  'voltage',
+  'price',
+  'capacityVa',
   'technology',
   'warrantyMonths',
-  'price',
   'rating',
   'availability',
 ];
 
 function normalise(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9+]+/g, ' ').trim();
+  return value.toLowerCase().replace(/[^a-z0-9+.]+/g, ' ').trim();
 }
 
+/**
+ * Query words that mean something in this catalogue but do not appear in it.
+ *
+ * Each entry maps a token a shopper types to a **phrase** matched against the
+ * corpus, and the phrase form is the point. "2w" expanding to the two loose
+ * tokens `2` and `wheeler` would match a 3-wheeler pack just as well, because
+ * both corpora contain the word "wheeler"; expanding it to the contiguous
+ * string "2 wheeler" matches one and not the other.
+ *
+ * Kept deliberately short and derived from vocabulary that is already in the
+ * catalogue — subcategory names and the LiFePO4 chemistry — rather than a
+ * general thesaurus. A synonym nobody can point at a product for is how a
+ * search starts returning things that are merely adjacent.
+ */
+const QUERY_ALIASES: ReadonlyMap<string, string> = new Map([
+  ['2w', '2 wheeler'],
+  ['3w', '3 wheeler'],
+  ['2wheeler', '2 wheeler'],
+  ['3wheeler', '3 wheeler'],
+  ['erickshaw', 'rickshaw'],
+  ['rikshaw', 'rickshaw'],
+  ['ev2', '2 wheeler'],
+  ['ev3', '3 wheeler'],
+  ['lfp', 'lifepo4'],
+  ['lithiumion', 'lithium'],
+]);
+
+/**
+ * Everything a product can be found by.
+ *
+ * Three additions, each answering a search the meeting found returned nothing:
+ *
+ *   **Category and subcategory display names.** The corpus carried the *slugs*
+ *   — `batteries`, `ev-3-wheeler` — and nothing else, so the word "rickshaw"
+ *   appeared nowhere at all: it lives only in the name "3-Wheeler & E-Rickshaw
+ *   Batteries". Searching for the product line by the word the business itself
+ *   uses for it returned an empty page.
+ *
+ *   **Brand and model.** `Product.model` is the manufacturer's own identity —
+ *   "TK-LiFe-6145" — and was not indexed, so a customer reading it off a
+ *   quotation could not search for it. Variant SKUs were already here.
+ *
+ *   **Voltage.** Indexed as `51v` and as the bare `51`, matching how `batteryAh`
+ *   is already handled. A traction pack is chosen by voltage first, so "51V"
+ *   not matching anything was the single worst gap in the list.
+ */
 function searchCorpus(product: Product): string {
+  const { voltage, batteryAh, capacityVa } = product.facets;
   return normalise(
     [
       product.title,
       product.subtitle,
+      product.brand ?? '',
+      product.model ?? '',
       product.category,
+      categoryName(product.category),
       product.subcategory,
+      subcategoryName(product.subcategory),
       product.facets.technology ?? '',
-      product.facets.capacityVa ? `${product.facets.capacityVa}va` : '',
-      product.facets.batteryAh ? `${product.facets.batteryAh}ah` : '',
+      capacityVa ? `${capacityVa}va ${capacityVa}` : '',
+      batteryAh ? `${batteryAh}ah ${batteryAh}` : '',
+      voltage ? `${voltage}v ${voltage}` : '',
       product.highlights.join(' '),
       product.variants.map((v) => v.sku).join(' '),
     ].join(' '),
   );
+}
+
+/**
+ * A query, reduced to the terms worth matching.
+ *
+ * Two rules, and between them they are what fixes the reported searches.
+ *
+ * **A lone digit joins the word after it.** "2 wheeler" and "2-wheeler" both
+ * normalise to the tokens `2` and `wheeler`, and on their own those match every
+ * traction pack we sell, because a 3-wheeler pack is also a "wheeler". Joined
+ * into the phrase "2 wheeler" they match the two-wheeler line and nothing else
+ * — the same result the `2w` alias produces, which is the point: a shopper
+ * should not get a different answer for typing the abbreviation than for typing
+ * it out. The digit is only ever joined forwards, so "105" or "51" — real
+ * capacities and voltages — are untouched; this applies to single digits alone.
+ *
+ * **Single characters are dropped**, which is what fixes "e-rickshaw".
+ * `normalise` splits it into `e` and `rickshaw`; `score` requires *every* token
+ * to match something, so the stray `e` — which matches no word in any product —
+ * failed the whole query before `rickshaw` was ever considered. A one-letter
+ * fragment left over from splitting a hyphenated word carries no meaning on its
+ * own, so it cannot be allowed to veto the word that does.
+ */
+function queryTerms(term: string): string[] {
+  const raw = normalise(term).split(' ').filter(Boolean);
+
+  const joined: string[] = [];
+  for (let i = 0; i < raw.length; i += 1) {
+    const token = raw[i];
+    const next = raw[i + 1];
+    if (/^\d$/.test(token) && next && !/^\d/.test(next)) {
+      joined.push(`${token} ${next}`);
+      i += 1;
+      continue;
+    }
+    joined.push(token);
+  }
+
+  return joined
+    .map((token) => QUERY_ALIASES.get(token) ?? token)
+    .filter((token) => token.length > 1);
 }
 
 /** Cheap Levenshtein-1 check so "invertor" still finds "inverter". */
@@ -80,10 +184,29 @@ function isNearMatch(token: string, word: string): boolean {
   return edits + (token.length - i) + (word.length - j) <= 1;
 }
 
-function withinPrice(product: Product, min?: number, max?: number): boolean {
-  const price = minSellingPrice(product);
-  if (min !== undefined && price < min) return false;
-  if (max !== undefined && price > max) return false;
+/** Every facet that filters on a number, in `FACET_DEFINITIONS` order. */
+const RANGE_FACET_IDS = (Object.keys(FACET_DEFINITIONS) as FacetId[]).filter(
+  (id) => FACET_DEFINITIONS[id].type === 'range',
+);
+
+/**
+ * Does a product fall inside the window selected for one range facet?
+ *
+ * A product that states no value for the facet is **excluded** as soon as the
+ * shopper narrows it, and included while they have not. That asymmetry is
+ * deliberate and matches how the checkbox facets behave: filtering by voltage
+ * is a statement about voltage, and a product whose voltage nobody recorded
+ * cannot be claimed to satisfy it — but neither should it vanish from an
+ * unfiltered listing.
+ */
+function withinRange(product: Product, facetId: FacetId, range?: FacetRange): boolean {
+  if (!range || (range.min === undefined && range.max === undefined)) return true;
+
+  const value = FACET_DEFINITIONS[facetId].rangeValueOf?.(product);
+  if (value === undefined) return false;
+
+  if (range.min !== undefined && value < range.min) return false;
+  if (range.max !== undefined && value > range.max) return false;
   return true;
 }
 
@@ -102,9 +225,24 @@ export class CatalogEngine {
     return this.products;
   }
 
-  /** Relevance score for a product against a search term; 0 means no match. */
+  /**
+   * Relevance score for a product against a search term; 0 means no match.
+   *
+   * The weights are unchanged — title 6, corpus 3, fuzzy 1 — and so is the rule
+   * that every term must match something. Widening *that* would be how a
+   * catalogue of eight batteries starts answering every query with all eight.
+   * What changed is only which terms are asked for (`queryTerms`) and what
+   * there is to match them against (`searchCorpus`).
+   *
+   * A term reaching here may be a phrase from `QUERY_ALIASES` — "2 wheeler" —
+   * which is why `includes` on the whole corpus string carries the weight: the
+   * phrase has to appear contiguously, so a 3-wheeler pack is not a match for a
+   * 2-wheeler query. `isNearMatch` is per-word and is skipped for phrases,
+   * which is correct: fuzzy matching a multi-word phrase against a single word
+   * cannot succeed and should not be attempted.
+   */
   score(product: Product, term: string): number {
-    const tokens = normalise(term).split(' ').filter(Boolean);
+    const tokens = queryTerms(term);
     if (tokens.length === 0) return 1;
 
     const corpus = this.corpus.get(product.id) ?? '';
@@ -115,7 +253,7 @@ export class CatalogEngine {
     for (const token of tokens) {
       if (title.includes(token)) score += 6;
       else if (corpus.includes(token)) score += 3;
-      else if (words.some((w) => isNearMatch(token, w))) score += 1;
+      else if (!token.includes(' ') && words.some((w) => isNearMatch(token, w))) score += 1;
       else return 0; // every token must match somehow
     }
     if (title.startsWith(tokens[0])) score += 4;
@@ -149,7 +287,10 @@ export class CatalogEngine {
         if (facetId === skip) continue;
         if (!productMatchesFacet(product, facetId, selected)) return false;
       }
-      if (skip !== 'price' && !withinPrice(product, query.priceMin, query.priceMax)) return false;
+      for (const facetId of RANGE_FACET_IDS) {
+        if (facetId === skip) continue;
+        if (!withinRange(product, facetId, query.ranges[facetId])) return false;
+      }
       return true;
     });
   }
@@ -166,14 +307,27 @@ export class CatalogEngine {
       const pool = this.applyFacets(base, query, id);
 
       if (def.type === 'range') {
-        const prices = pool.map(minSellingPrice);
-        if (prices.length === 0) continue;
+        // Only products that state the figure contribute to the scale. A pack
+        // with no recorded voltage must not drag the minimum to zero and give
+        // the slider two-thirds of a track nothing lives in.
+        const values = pool
+          .map((product) => def.rangeValueOf?.(product))
+          .filter((value): value is number => value !== undefined);
+
+        // A single distinct value is not a range — one product, or four that
+        // all read 12.8 V, gives a slider with nowhere to go. The facet is
+        // dropped unless the shopper has already narrowed by it, which mirrors
+        // the "fewer than two options" rule the checkbox facets use below.
+        const distinct = new Set(values);
+        if (distinct.size < 2 && !query.ranges[id]) continue;
+        if (values.length === 0) continue;
+
         groups.push({
           id,
           label: def.label,
           type: 'range',
-          min: Math.min(...prices),
-          max: Math.max(...prices),
+          min: Math.min(...values),
+          max: Math.max(...values),
           unit: def.unit,
           collapsedByDefault: def.collapsedByDefault,
         });
@@ -241,6 +395,18 @@ export class CatalogEngine {
 
     const basePrices = base.map(minSellingPrice);
 
+    // Bounds from the *base* set, before facets, so a slider's track is the
+    // whole catalogue in scope rather than whatever is left after the shopper
+    // has already used it.
+    const rangeBounds: ProductListResult['rangeBounds'] = {};
+    for (const id of RANGE_FACET_IDS) {
+      const values = base
+        .map((product) => FACET_DEFINITIONS[id].rangeValueOf?.(product))
+        .filter((value): value is number => value !== undefined);
+      if (values.length === 0) continue;
+      rangeBounds[id] = { min: Math.min(...values), max: Math.max(...values) };
+    }
+
     return {
       items: sorted.slice(start, start + query.perPage),
       total,
@@ -248,6 +414,7 @@ export class CatalogEngine {
       perPage: query.perPage,
       totalPages,
       facets,
+      rangeBounds,
       priceBounds: {
         min: basePrices.length ? Math.min(...basePrices) : 0,
         max: basePrices.length ? Math.max(...basePrices) : 0,
@@ -270,28 +437,60 @@ export class CatalogEngine {
 export function buildSuggestions(
   term: string,
   products: Product[],
-  categories: Array<{ slug: string; name: string; tagline: string; subcategories: Array<{ name: string }> }>,
+  categories: Array<{
+    slug: string;
+    name: string;
+    tagline: string;
+    subcategories: Array<{ slug: string; name: string; description: string }>;
+  }>,
 ): SearchSuggestion[] {
   const trimmed = term.trim();
   if (trimmed.length < 2) return [];
 
-  const needle = normalise(trimmed);
+  /**
+   * Matched on the same terms the results page uses, so the dropdown and the
+   * page it leads to agree. The old code matched the raw query against the
+   * name in one piece, which meant "2W" suggested nothing — `QUERY_ALIASES` is
+   * where that is known, and it lives in `queryTerms`.
+   */
+  const terms = queryTerms(trimmed);
+  const matches = (name: string) => {
+    const haystack = normalise(name);
+    return terms.length > 0 && terms.every((t) => haystack.includes(t));
+  };
 
-  const categoryHits = categories
-    .filter(
-      (c) =>
-        normalise(c.name).includes(needle) ||
-        c.subcategories.some((s) => normalise(s.name).includes(needle)),
-    )
-    .slice(0, 3);
+  /**
+   * A subcategory match offers the subcategory, not its parent.
+   *
+   * "e-rickshaw" used to suggest "Batteries" — technically the container of the
+   * right answer, and one more click plus a filter away from it. The taxonomy
+   * is one family deep now, so the parent suggestion on its own says almost
+   * nothing; the useful navigational answer is always the subcategory.
+   */
+  const categoryHits: SearchSuggestion[] = [];
+  for (const category of categories) {
+    for (const sub of category.subcategories) {
+      if (categoryHits.length >= 3) break;
+      if (!matches(sub.name)) continue;
+      categoryHits.push({
+        type: 'category',
+        label: sub.name,
+        sublabel: sub.description,
+        href: subcategoryPath(category.slug, sub.slug),
+      });
+    }
+    if (categoryHits.length < 3 && matches(category.name)) {
+      categoryHits.push({
+        type: 'category',
+        label: category.name,
+        sublabel: category.tagline,
+        href: categoryPath(category.slug),
+      });
+    }
+  }
 
   const suggestions: SearchSuggestion[] = [
-    ...categoryHits.map<SearchSuggestion>((c) => ({
-      type: 'category',
-      label: c.name,
-      sublabel: c.tagline,
-      href: categoryPath(c.slug),
-    })),
+    ...categoryHits.slice(0, 3),
     ...products.map<SearchSuggestion>((p) => ({
       type: 'product',
       label: p.title,

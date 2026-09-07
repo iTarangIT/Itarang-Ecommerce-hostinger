@@ -8,6 +8,7 @@ import { invalidateCatalogSnapshot } from '@/lib/commerce';
 import { CATALOG_TAG } from '@/lib/commerce/db/db-provider';
 import type { BadgeKind, ProductFacetValues, ProductSection } from '@/lib/commerce/types';
 import { productRepository } from '@/lib/products/postgres-repository';
+import { dispatchStockAlertsInBackground } from '@/lib/stock/alerts';
 import {
   ALLOWED_MEDIA_TYPES,
   MAX_MEDIA_BYTES,
@@ -547,22 +548,30 @@ export async function updateProductPricingAction(formData: FormData): Promise<vo
   // could fail the variant write *after* the tax fields had committed —
   // leaving a product taxed at the new rate, priced at the old one, and an
   // error on screen implying nothing had been saved.
-  settle(
+  const result = await productRepository().updatePricing(
     productKey,
-    'pricing',
-    await productRepository().updatePricing(
-      productKey,
-      {
-        hsnCode,
-        // Entered as a percentage because that is how a GST rate is written
-        // and read; stored as the fraction `orders.gst_rate` uses.
-        taxRate: taxRatePercent === null ? null : taxRatePercent / 100,
-        emiEnabled,
-      },
-      variants,
-      actor,
-    ),
+    {
+      hsnCode,
+      // Entered as a percentage because that is how a GST rate is written
+      // and read; stored as the fraction `orders.gst_rate` uses.
+      taxRate: taxRatePercent === null ? null : taxRatePercent / 100,
+      emiEnabled,
+    },
+    variants,
+    actor,
   );
+
+  /**
+   * Setting a stock count to zero here records an out-of-stock transition
+   * inside that transaction; this sends the alert for it, after the commit.
+   *
+   * Fire-and-forget: an administrator saving a price must not wait on an SMTP
+   * round trip, and must not see a save fail because a mail server did.
+   * `settle` throws a redirect, so this has to happen before it.
+   */
+  if (result.ok) dispatchStockAlertsInBackground();
+
+  settle(productKey, 'pricing', result);
 }
 
 /* ----------------------------------------------------------------- parties */

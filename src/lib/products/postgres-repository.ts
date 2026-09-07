@@ -10,6 +10,11 @@ import type {
   ProductSection,
   SpecGroup,
 } from '@/lib/commerce/types';
+import {
+  recordStockTransitions,
+  transitionBetween,
+  type StockTransitionInput,
+} from '@/lib/stock/transitions';
 import { publicUrl } from './media';
 import { canTransitionProduct, publishBlockers } from './state-machine';
 import type { ProductRepository } from './repository';
@@ -374,6 +379,20 @@ const JSON_PATCH_COLUMNS = new Set([
 ]);
 
 /* ------------------------------------------------------------- repository */
+
+/**
+ * A SKU that vanished between validating an uploaded price list and writing it.
+ *
+ * Thrown rather than returned so that it unwinds the transaction: the import
+ * promises all-or-nothing, and returning from inside `transaction()` commits
+ * whatever the earlier iterations already wrote.
+ */
+class BulkPricingSkuMissing extends Error {
+  constructor(readonly sku: string) {
+    super(`No variant with SKU ${sku}`);
+    this.name = 'BulkPricingSkuMissing';
+  }
+}
 
 class PostgresProductRepository implements ProductRepository {
   /* ----------------------------------------------------------- hydration */
@@ -859,11 +878,42 @@ class PostgresProductRepository implements ProductRepository {
   }
 
   /** Delete-and-reinsert, inside a caller's transaction. */
+  /**
+   * Replace a product's variants, recording any stock level that crossed zero.
+   *
+   * The crossing has to be worked out *before* the DELETE, and keyed on SKU
+   * rather than row id: this method deletes and reinserts, so the surviving
+   * rows are new rows with new ids and nothing can be diffed afterwards.
+   *
+   * Only variants present both before and after produce a transition. A SKU
+   * appearing for the first time has not "come back into stock" — it has never
+   * been anywhere — and one that disappears has been withdrawn rather than sold
+   * out, which is not the event the business asked to hear about.
+   *
+   * A `null` stock on either side means untracked, which
+   * `0012_product_catalogue.sql` is explicit is not the same as zero;
+   * `transitionBetween` returns null for it, so switching inventory tracking on
+   * or off never fires an alert.
+   *
+   * Recorded inside the caller's transaction. No mail is sent from here — the
+   * action dispatches alerts after the commit.
+   */
   private async replaceVariantsWithin(
     client: PoolClient,
     id: number,
     variants: VariantInput[],
-  ): Promise<void> {
+  ): Promise<number> {
+    const before = await client.query<{ sku: string; stock: number | null; product_key: string }>(
+      `SELECT v.sku, v.stock, p.product_key
+         FROM product_variants v
+         JOIN products p ON p.id = v.product_id
+        WHERE v.product_id = $1`,
+      [id],
+    );
+
+    const previousStock = new Map(before.rows.map((row) => [row.sku, row.stock]));
+    const productKey = before.rows[0]?.product_key;
+
     await client.query('DELETE FROM product_variants WHERE product_id = $1', [id]);
 
     for (const [index, variant] of variants.entries()) {
@@ -886,6 +936,21 @@ class PostgresProductRepository implements ProductRepository {
         ],
       );
     }
+
+    if (!productKey) return 0;
+
+    const transitions: StockTransitionInput[] = [];
+    for (const variant of variants) {
+      const previous = previousStock.get(variant.sku);
+      if (previous === undefined) continue;
+      const direction = transitionBetween(previous, variant.stock);
+      if (direction) {
+        transitions.push({ productId: productKey, sku: variant.sku, direction, source: 'admin' });
+      }
+    }
+
+    await recordStockTransitions(client, transitions);
+    return transitions.length;
   }
 
   async setStatus(
@@ -976,6 +1041,60 @@ class PostgresProductRepository implements ProductRepository {
     }
   }
 
+  async listVariantSkus(): Promise<string[]> {
+    const rows = await query<{ sku: string }>('SELECT sku FROM product_variants ORDER BY sku');
+    return rows.map((row) => row.sku);
+  }
+
+  async updateVariantPricesBySku(
+    rows: ReadonlyArray<{ sku: string; mrp: number; selling: number }>,
+    actor: string,
+  ): Promise<{ ok: true; updated: number } | { ok: false; code: 'not_found'; sku: string }> {
+    if (rows.length === 0) return { ok: true, updated: 0 };
+
+    return transaction(async (client) => {
+      const touchedProducts = new Set<number>();
+
+      for (const row of rows) {
+        /**
+         * `RETURNING product_id` does double duty: it is how the parent gets
+         * stamped with `updated_by`, and it is the existence check.
+         *
+         * The SKUs were validated against `listVariantSkus()` before the file
+         * was accepted, but that read and this write are not the same instant —
+         * a variant deleted in between would otherwise update zero rows and be
+         * reported as a success. Throwing rolls the whole file back, which is
+         * the promised behaviour.
+         */
+        const updated = await client.query<{ product_id: number }>(
+          `UPDATE product_variants
+              SET mrp = $2, selling = $3
+            WHERE sku = $1
+            RETURNING product_id`,
+          [row.sku, row.mrp, row.selling],
+        );
+
+        if (updated.rows.length === 0) {
+          throw new BulkPricingSkuMissing(row.sku);
+        }
+        touchedProducts.add(updated.rows[0]!.product_id);
+      }
+
+      // One touch per product, not per variant, so a product with six variants
+      // in the file is not stamped six times.
+      for (const productId of touchedProducts) {
+        await this.touchWithin(client, productId, actor);
+      }
+
+      return { ok: true as const, updated: rows.length };
+    }).catch((error: unknown) => {
+      if (error instanceof BulkPricingSkuMissing) {
+        return { ok: false as const, code: 'not_found' as const, sku: error.sku };
+      }
+      throw error;
+    });
+  }
+
   async replaceVariants(
     productKey: string,
     variants: VariantInput[],
@@ -986,28 +1105,11 @@ class PostgresProductRepository implements ProductRepository {
         const id = await this.idWithin(client, productKey);
         if (!id) return { ok: false, code: 'not_found' } as ProductWriteResult;
 
-        await client.query('DELETE FROM product_variants WHERE product_id = $1', [id]);
-
-        for (const [index, variant] of variants.entries()) {
-          await client.query(
-            `INSERT INTO product_variants
-               (product_id, variant_key, sku, title, option_values, mrp, selling, stock,
-                availability, position)
-             VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10)`,
-            [
-              id,
-              variant.variantKey,
-              variant.sku,
-              variant.title ?? '',
-              JSON.stringify(variant.optionValues ?? {}),
-              variant.mrp,
-              variant.selling,
-              variant.stock,
-              variant.availability,
-              index,
-            ],
-          );
-        }
+        // Was an inline copy of `replaceVariantsWithin`'s delete-and-reinsert.
+        // Two copies meant stock-transition detection, added to one of them,
+        // would have applied to the pricing form and silently not to this path
+        // — the same class of divergence the duplication was already inviting.
+        await this.replaceVariantsWithin(client, id, variants);
 
         await this.touchWithin(client, id, actor);
         return { ok: true, value: undefined } as ProductWriteResult;

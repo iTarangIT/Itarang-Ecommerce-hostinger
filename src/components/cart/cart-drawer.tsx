@@ -88,8 +88,13 @@ export function CartDrawer() {
             appliances you actually run.
           </p>
           <div className="mt-6 flex w-full flex-col gap-2">
-            <ButtonLink href={categoryPath('combos')} variant="primary" fullWidth onClick={close}>
-              Shop combos
+            <ButtonLink
+              href={categoryPath('batteries')}
+              variant="primary"
+              fullWidth
+              onClick={close}
+            >
+              Shop batteries
             </ButtonLink>
             <ButtonLink
               href="/tools/load-calculator"

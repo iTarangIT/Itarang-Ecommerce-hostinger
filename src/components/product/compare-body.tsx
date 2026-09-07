@@ -15,7 +15,7 @@ import { StateBlock } from '@/components/ui/states';
 import { ProductRail } from '@/components/merch/product-rail';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
-import { categoryPath, productPath } from '@/lib/routes';
+import { categoryPath, productPath, subcategoryPath } from '@/lib/routes';
 
 /**
  * Side-by-side comparison.
@@ -90,8 +90,11 @@ export function CompareBody({ suggestions }: { suggestions: ProductSummary[] }) 
               description="Tap the compare icon on any product card, or the Compare button on a product page, to build a side-by-side table of capacity, technology, warranty and price."
               actions={
                 <>
-                  <ButtonLink href={categoryPath('inverters')} variant="primary">
-                    Browse inverters
+                  <ButtonLink
+                    href={subcategoryPath('batteries', 'ev-2-wheeler')}
+                    variant="primary"
+                  >
+                    Browse EV batteries
                   </ButtonLink>
                   <ButtonLink href={categoryPath('batteries')} variant="outline">
                     Browse batteries
@@ -196,6 +199,12 @@ export function CompareBody({ suggestions }: { suggestions: ProductSummary[] }) 
                   }
                 </CompareRow>
 
+                {/* Two states, matching the product page. `low-stock` used to
+                    render "Few left" here, which is the same disclosure the
+                    PDP and the cards have stopped making — and a comparison
+                    table is the worst place to make it, because it invites a
+                    shopper to read our inventory across several products at
+                    once. */}
                 <CompareRow label="Availability" entries={entries}>
                   {(entry) => (
                     <span
@@ -203,16 +212,10 @@ export function CompareBody({ suggestions }: { suggestions: ProductSummary[] }) 
                         'font-medium',
                         entry.availability === 'out-of-stock'
                           ? 'text-muted-foreground'
-                          : entry.availability === 'low-stock'
-                            ? 'text-warning'
-                            : 'text-success',
+                          : 'text-success',
                       )}
                     >
-                      {entry.availability === 'out-of-stock'
-                        ? 'Out of stock'
-                        : entry.availability === 'low-stock'
-                          ? 'Few left'
-                          : 'In stock'}
+                      {entry.availability === 'out-of-stock' ? 'Out of stock' : 'In stock'}
                     </span>
                   )}
                 </CompareRow>

@@ -458,8 +458,8 @@ function Wishlist({ suggestions, signedIn }: { suggestions: ProductSummary[]; si
           }
           actions={
             <>
-              <ButtonLink href={categoryPath('combos')} variant="primary">
-                Browse combos
+              <ButtonLink href={categoryPath('batteries')} variant="primary">
+                Browse batteries
               </ButtonLink>
               <ButtonLink href="/search" variant="outline">
                 Browse everything

@@ -21,6 +21,20 @@ export interface FacetDefinition {
   labelOf: (value: string) => string;
   /** Sort weight for options; lower first. Falls back to alphabetical. */
   order?: (value: string) => number;
+  /**
+   * The number a `range` facet filters on, or `undefined` when the product does
+   * not state one.
+   *
+   * Required for `type: 'range'` and meaningless otherwise. It exists because
+   * the engine used to hardcode *price* into its range branch — the only range
+   * facet there was — so adding a second one meant either a second hardcoded
+   * branch or this. A product returning `undefined` is excluded from the facet
+   * and from any filtering by it, which is the same rule `valuesOf` follows for
+   * a checkbox: nothing is filed under a guessed value.
+   */
+  rangeValueOf?: (product: Product) => number | undefined;
+  /** How many decimal places the range's URL and labels keep. */
+  precision?: number;
 }
 
 const BACKUP_BUCKETS: Array<{ value: string; label: string; test: (h: number) => boolean; order: number }> = [
@@ -62,27 +76,47 @@ export const FACET_DEFINITIONS: Record<FacetId, FacetDefinition> = {
     labelOf: (v) => `${Number(v).toLocaleString('en-IN')} VA`,
     order: (v) => Number(v),
   },
+  /**
+   * Capacity and voltage are ranges, not tick-boxes.
+   *
+   * As checkboxes they listed one option per distinct value in the catalogue —
+   * 30, 32, 45, 105 — which reads as a menu of the four batteries we happen to
+   * stock rather than as a way of narrowing. A shopper thinks "at least 45Ah",
+   * or "a 60-volt vehicle", and a range says that in one gesture; the tick-box
+   * version needed them to know in advance which values exist and to tick every
+   * one that qualifies.
+   *
+   * `valuesOf` still returns the raw value even though a range facet does not
+   * use it, so nothing breaks if either is turned back into a checkbox.
+   */
   batteryAh: {
     id: 'batteryAh',
-    label: 'Battery capacity',
-    type: 'checkbox',
+    label: 'Capacity (Ah)',
+    type: 'range',
     unit: 'Ah',
     valuesOf: (p) => (p.facets.batteryAh ? [String(p.facets.batteryAh)] : []),
     labelOf: (v) => `${v} Ah`,
     order: (v) => Number(v),
+    rangeValueOf: (p) => p.facets.batteryAh,
   },
   voltage: {
     id: 'voltage',
-    label: 'System voltage',
-    type: 'checkbox',
+    label: 'Voltage',
+    type: 'range',
     unit: 'V',
     // The first filter an EV buyer applies, and the one that decides whether a
     // pack fits at all: a 51V pack and a 73.6V pack are not alternatives for
-    // the same vehicle. Products that state no voltage — every home inverter
-    // battery — contribute nothing and are absent from the facet.
+    // the same vehicle. Products that state no voltage contribute nothing and
+    // are absent from the facet.
+    //
+    // One decimal place, because the catalogue's voltages are 12.8, 25.6, 60.8
+    // and 73.6 — rounding them to integers would put two distinct packs at the
+    // same figure and make the upper bound exclude the very product that set it.
     valuesOf: (p) => (p.facets.voltage ? [String(p.facets.voltage)] : []),
     labelOf: (v) => `${v} V`,
     order: (v) => Number(v),
+    rangeValueOf: (p) => p.facets.voltage,
+    precision: 1,
   },
   technology: {
     id: 'technology',
@@ -123,6 +157,9 @@ export const FACET_DEFINITIONS: Record<FacetId, FacetDefinition> = {
     type: 'range',
     valuesOf: () => [],
     labelOf: (v) => v,
+    // In paise, like every other money value in the codebase. `query.ts`
+    // converts to and from rupees at the URL boundary and nowhere else.
+    rangeValueOf: (p) => minSellingPrice(p),
   },
   availability: {
     id: 'availability',

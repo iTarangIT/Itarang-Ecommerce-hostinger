@@ -31,14 +31,27 @@ import { Skeleton } from '@/components/ui/skeleton';
  */
 export function ProductLoadCalculator({ product }: { product: Product }) {
   /**
-   * Which of the two things this product is, for copy purposes only.
+   * **Home and inverter products only.**
    *
-   * The same allow-list the recommendation engine matches on, imported rather
-   * than restated so the two cannot disagree about what a home battery is. It
-   * decides which paragraph is printed and nothing else — the engine applies
-   * its own barriers to this product regardless of what is written here.
+   * This section used to render on every product page, including the six EV
+   * traction packs, with a paragraph explaining that the tool did not apply to
+   * the product it was sitting under. That paragraph was accurate and the
+   * section was still wrong: putting a home-backup calculator on an e-rickshaw
+   * pack associates the two, and a shopper who works through it learns only
+   * that this battery is not what they were offered.
+   *
+   * `lib/sizing/recommend.ts` was already fail-closed — its subcategory
+   * allow-list, its `VEHICLE_APPLICATION` regex and its nominal-voltage table
+   * each refuse a traction pack independently, so no EV pack could ever be
+   * *recommended* for a home load. What was missing was the same restraint in
+   * the navigation, which is all this is.
+   *
+   * The allow-list is imported rather than restated so the page and the engine
+   * cannot disagree about what a home battery is. Nothing about vehicle sizing
+   * is offered in its place: the repository holds no vehicle compatibility
+   * data, so an EV selector remains a deferred item rather than a guess.
    */
-  const isHomeStorage = HOME_BACKUP_SUBCATEGORIES.has(product.subcategory);
+  if (!HOME_BACKUP_SUBCATEGORIES.has(product.subcategory)) return null;
 
   return (
     <section aria-labelledby="load-calculator-heading" className="mt-10 lg:mt-14">
@@ -51,42 +64,13 @@ export function ProductLoadCalculator({ product }: { product: Product }) {
             Load Calculator
           </h2>
 
-          {isHomeStorage ? (
-            <p className="mt-1.5 max-w-3xl text-sm leading-relaxed text-muted-foreground">
-              Check your home load and see which battery is suitable. Tick the appliances you
-              want running during a cut and how long you need them for — the calculator sizes the
-              requirement and checks it against what we actually stock, including whether{' '}
-              <span className="font-medium text-foreground">{product.title}</span> is the right
-              fit. If something else suits your load better, or if nothing we stock does, it says
-              so.
-            </p>
-          ) : (
-            /*
-             * An EV pack's page gets the calculator with its scope stated
-             * plainly, because the honest answer here is "this tool is not
-             * about this product".
-             *
-             * `lib/sizing/recommend.ts` will not return a traction pack for a
-             * home load under any input — the subcategory allow-list, the
-             * product type and the fail-closed nominal-voltage table each
-             * refuse it independently. So this section can never suggest this
-             * battery, and copy that implied otherwise would be setting up a
-             * result the engine is built to prevent.
-             *
-             * There is no vehicle sizing here and none is implied: the
-             * repository holds no vehicle compatibility data, which is why the
-             * EV selector is still a deferred item rather than a guess.
-             */
-            <p className="mt-1.5 max-w-3xl text-sm leading-relaxed text-muted-foreground">
-              This calculator sizes a{' '}
-              <span className="font-medium text-foreground">home backup</span> battery — lights,
-              fans, a fridge during a power cut. It does not size a traction pack for a vehicle,
-              and it will not suggest{' '}
-              <span className="font-medium text-foreground">{product.title}</span> for a household
-              load: an EV pack runs at a voltage no home inverter accepts. For which vehicles this
-              pack fits, confirm the controller, charger and connector with our team.
-            </p>
-          )}
+          <p className="mt-1.5 max-w-3xl text-sm leading-relaxed text-muted-foreground">
+            Check your home load and see which battery is suitable. Tick the appliances you want
+            running during a cut and how long you need them for — the calculator sizes the
+            requirement and checks it against what we actually stock, including whether{' '}
+            <span className="font-medium text-foreground">{product.title}</span> is the right fit.
+            If something else suits your load better, or if nothing we stock does, it says so.
+          </p>
         </div>
       </div>
 

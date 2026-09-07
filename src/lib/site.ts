@@ -9,7 +9,7 @@
  *   - support hours
  *   - service network coverage claim
  */
-import { categoryPath } from '@/lib/routes';
+import { categoryPath, subcategoryPath } from '@/lib/routes';
 
 export const SITE = {
   name: 'iTarang Products',
@@ -65,10 +65,17 @@ export const FOOTER_COLUMNS: NavGroup[] = [
     label: 'Shop',
     href: '/search',
     children: [
-      { label: 'Inverters', href: categoryPath('inverters') },
+      // Inverters, UPS systems and combos are gone from here because they are
+      // gone from the taxonomy — a footer link is still a link, and these four
+      // led to empty category pages. The subcategory links below are what the
+      // business actually sells.
       { label: 'Batteries', href: categoryPath('batteries') },
-      { label: 'UPS systems', href: categoryPath('ups') },
-      { label: 'Inverter + battery combos', href: categoryPath('combos') },
+      { label: 'Lithium batteries', href: subcategoryPath('batteries', 'lithium') },
+      { label: '2-wheeler EV batteries', href: subcategoryPath('batteries', 'ev-2-wheeler') },
+      {
+        label: '3-wheeler & e-rickshaw batteries',
+        href: subcategoryPath('batteries', 'ev-3-wheeler'),
+      },
       { label: 'Offers', href: '/offers' },
       { label: 'Compare products', href: '/compare' },
     ],

@@ -16,6 +16,7 @@ import { discountPercent, displayPrice } from './pricing';
 /** One page big enough to hold the whole catalogue. */
 const EVERYTHING: ProductQuery = {
   filters: {},
+  ranges: {},
   sort: 'featured',
   page: 1,
   perPage: 1000,
@@ -69,6 +70,22 @@ export async function byCategory(
   limit = 8,
 ): Promise<ProductSummary[]> {
   const result = await catalog().listProducts({ ...EVERYTHING, category, perPage: limit });
+  return result.items.map(toProductSummary);
+}
+
+/**
+ * A merchandising rail for one subcategory.
+ *
+ * The sibling of `byCategory`, and needed for the same reason it is: with the
+ * taxonomy down to a single family, "one category" no longer narrows anything,
+ * and the interesting distinction — home storage against traction packs — lives
+ * one level down.
+ */
+export async function bySubcategory(
+  subcategory: string,
+  limit = 8,
+): Promise<ProductSummary[]> {
+  const result = await catalog().listProducts({ ...EVERYTHING, subcategory, perPage: limit });
   return result.items.map(toProductSummary);
 }
 

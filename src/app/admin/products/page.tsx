@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { ArrowLeft, Package, Plus } from 'lucide-react';
+import { ArrowLeft, Package, PackageX, Plus, Upload } from 'lucide-react';
 import { productRepository } from '@/lib/products/postgres-repository';
 import { PRODUCT_STATUSES, type ProductStatus } from '@/lib/products/types';
 import type { CategorySlug } from '@/lib/commerce/types';
@@ -80,10 +80,20 @@ export default async function AdminProductsPage({
             {filtered ? ' matching these filters' : ''}
           </p>
         </div>
-        <ButtonLink href="/admin/products/new" size="sm">
-          <Plus className="h-4 w-4" />
-          New product
-        </ButtonLink>
+        <div className="flex flex-wrap items-center gap-2">
+          <ButtonLink href="/admin/products/out-of-stock" variant="outline" size="sm">
+            <PackageX className="h-4 w-4" />
+            Out of stock
+          </ButtonLink>
+          <ButtonLink href="/admin/products/bulk-pricing" variant="outline" size="sm">
+            <Upload className="h-4 w-4" />
+            Bulk pricing
+          </ButtonLink>
+          <ButtonLink href="/admin/products/new" size="sm">
+            <Plus className="h-4 w-4" />
+            New product
+          </ButtonLink>
+        </div>
       </div>
 
       {params.error ? (

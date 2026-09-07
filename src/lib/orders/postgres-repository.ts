@@ -1,6 +1,8 @@
 import type { PoolClient } from 'pg';
 import { revalidateTag } from 'next/cache';
 import { query, queryOne, transaction } from '@/lib/db/pool';
+import { dispatchStockAlertsInBackground } from '@/lib/stock/alerts';
+import { recordStockTransitions, transitionBetween } from '@/lib/stock/transitions';
 import { generateOrderNumber } from './numbering';
 import {
   canTransitionOrder,
@@ -770,6 +772,15 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
      */
     let stockChanged = false;
 
+    /**
+     * Whether a variant crossed to zero during this capture.
+     *
+     * Same pattern as `stockChanged` and for a sharper reason: the alert is an
+     * SMTP round trip, and doing it inside the payment transaction would make a
+     * mail-server timeout roll back a payment Razorpay has already taken.
+     */
+    let stockTransitionRecorded = false;
+
     const result = await transaction(async (client) => {
       const current = await client.query<OrderRow>(
         `SELECT ${ORDER_COLUMNS} FROM orders WHERE id = $1 FOR UPDATE`,
@@ -856,8 +867,13 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
            * of it is inside the payment transaction, so the deduction commits
            * with the payment or not at all.
            */
-          const owned = await client.query<{ id: number; stock: number | null }>(
-            `SELECT v.id, v.stock
+          const owned = await client.query<{
+            id: number;
+            stock: number | null;
+            sku: string;
+            product_key: string;
+          }>(
+            `SELECT v.id, v.stock, v.sku, p.product_key
                FROM product_variants v
                JOIN products p ON p.id = v.product_id
               WHERE p.product_key || ':' || v.variant_key = $1
@@ -916,6 +932,35 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
                   WHERE variant_id = $1`,
                 [variantId, after.rows[0]!.stock],
               );
+
+              /**
+               * Did this sale take the last unit?
+               *
+               * The `UPDATE ... RETURNING` above already yields the new count
+               * and `variant.stock` is the old one, so the crossing is free to
+               * detect and is recorded here, inside the payment transaction —
+               * the transition cannot exist for a deduction that rolled back,
+               * and the deduction cannot commit without it.
+               *
+               * **No mail is sent from here.** `dispatchStockAlertsInBackground`
+               * runs after the transaction commits; an SMTP timeout inside this
+               * block would roll back a payment Razorpay has already taken.
+               *
+               * `FOR UPDATE OF v` above serialises two captures of the same
+               * variant, so only one of them can observe the crossing.
+               */
+              const direction = transitionBetween(variant.stock, after.rows[0]!.stock);
+              if (direction) {
+                await recordStockTransitions(client, [
+                  {
+                    productId: variant.product_key,
+                    sku: variant.sku,
+                    direction,
+                    source: 'order',
+                  },
+                ]);
+                stockTransitionRecorded = true;
+              }
 
               stockChanged = true;
             }
@@ -984,6 +1029,16 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
         );
       }
     }
+
+    /**
+     * The out-of-stock alert, after the commit and outside the transaction.
+     *
+     * Fire-and-forget and non-fatal, like the cache purge above: the payment is
+     * recorded either way, and an unsent alert is still visible in the admin
+     * out-of-stock list. Nothing about mail may affect whether a capture
+     * stands.
+     */
+    if (stockTransitionRecorded) dispatchStockAlertsInBackground();
 
     return result;
   }

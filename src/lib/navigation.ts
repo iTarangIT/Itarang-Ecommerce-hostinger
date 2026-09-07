@@ -62,6 +62,25 @@ export const buildNavigation = cache(async (): Promise<NavCategory[]> => {
   return categories.map((category) => {
     const inCategory = products.filter((p) => p.category === category.slug);
 
+    /**
+     * Subcategories a shopper can actually browse.
+     *
+     * A section with a count of zero is a dead end: the panel offers it, the
+     * page loads, and there is nothing on it. That was the whole complaint
+     * against UPS and Combos, and removing those two from the taxonomy fixes it
+     * only for as long as nobody adds a third — `home-inverter` is already
+     * defined and empty, deliberately, so it would be the third today.
+     *
+     * Hiding by count rather than by a flag means this is self-correcting in
+     * both directions: the section appears on its own the day its first product
+     * is published, and disappears again if the last one is withdrawn. Nothing
+     * is deleted — the URL, the heading and the SEO copy all still work for
+     * anyone who has the link.
+     */
+    const stocked = category.subcategories.filter((sub) =>
+      inCategory.some((p) => p.subcategory === sub.slug),
+    );
+
     const featuredProduct =
       inCategory.find((p) => p.badges.includes('bestseller')) ??
       [...inCategory].sort((a, b) => a.popularityRank - b.popularityRank)[0];
@@ -76,7 +95,7 @@ export const buildNavigation = cache(async (): Promise<NavCategory[]> => {
       href: categoryPath(category.slug),
       icon: category.icon,
       highlights: category.highlights,
-      subcategories: category.subcategories.map((sub) => ({
+      subcategories: stocked.map((sub) => ({
         name: sub.name,
         href: subcategoryPath(category.slug, sub.slug),
         description: sub.description,

@@ -1,4 +1,5 @@
 import type { CategorySlug, FacetId, ProductQuery, SortId } from '@/lib/commerce/types';
+import { FACET_DEFINITIONS } from './facets';
 import { DEFAULT_SORT, isSortId } from './sort';
 
 export const PER_PAGE = 12;
@@ -8,14 +9,35 @@ export const URL_FACET_IDS: FacetId[] = [
   'category',
   'subcategory',
   'capacityVa',
-  'batteryAh',
-  'voltage',
   'technology',
   'backupHours',
   'warrantyMonths',
   'availability',
   'rating',
   'solarReady',
+];
+
+/**
+ * Range facets, and the URL parameter pair each one uses.
+ *
+ * Written out rather than derived from the facet id so the query string stays
+ * readable and stable: `priceMin`/`priceMax` are what shared links and search
+ * engines already carry, and renaming them to fit a scheme would break every
+ * one of those for no gain.
+ *
+ * `scale` is what the URL is divided by. Price is stored in paise and shown in
+ * rupees, which is the only reason that conversion existed as a special case;
+ * capacity and voltage are already in the unit a shopper reads, so their scale
+ * is 1 and the same code path serves all three.
+ */
+export const URL_RANGE_FACETS: ReadonlyArray<{
+  id: FacetId;
+  param: string;
+  scale: number;
+}> = [
+  { id: 'price', param: 'price', scale: 100 },
+  { id: 'batteryAh', param: 'ah', scale: 1 },
+  { id: 'voltage', param: 'volt', scale: 1 },
 ];
 
 /** Next.js `searchParams` shape. */
@@ -38,6 +60,27 @@ function toInt(value: string | string[] | undefined): number | undefined {
 }
 
 /**
+ * A decimal from the URL.
+ *
+ * `parseInt` truncates, and the catalogue's voltages are 12.8, 25.6, 60.8 and
+ * 73.6 — a `voltMax=73.6` read as 73 would exclude the very pack whose voltage
+ * set the upper bound, so a shopper who dragged the slider to its maximum would
+ * watch a product disappear.
+ */
+function toFloat(value: string | string[] | undefined): number | undefined {
+  const first = Array.isArray(value) ? value[0] : value;
+  if (!first) return undefined;
+  const n = Number.parseFloat(first);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/** Trim a range value to the facet's own precision, so URLs stay tidy. */
+function roundTo(value: number, precision: number | undefined): number {
+  const factor = 10 ** (precision ?? 0);
+  return Math.round(value * factor) / factor;
+}
+
+/**
  * Parse a URL query into a validated `ProductQuery`.
  *
  * Every listing surface — category, subcategory and search — goes through this
@@ -56,8 +99,27 @@ export function parseProductQuery(
   const sortParam = Array.isArray(params.sort) ? params.sort[0] : params.sort;
   const sort: SortId = sortParam && isSortId(sortParam) ? sortParam : DEFAULT_SORT;
 
-  const priceMinRupees = toInt(params.priceMin);
-  const priceMaxRupees = toInt(params.priceMax);
+  const ranges: Partial<Record<FacetId, { min?: number; max?: number }>> = {};
+  for (const { id, param, scale } of URL_RANGE_FACETS) {
+    const rawMin = toFloat(params[`${param}Min`]);
+    const rawMax = toFloat(params[`${param}Max`]);
+    if (rawMin === undefined && rawMax === undefined) continue;
+
+    let min = rawMin !== undefined ? rawMin * scale : undefined;
+    let max = rawMax !== undefined ? rawMax * scale : undefined;
+
+    // An inverted window — from a hand-edited URL, or a stale link after the
+    // catalogue moved — used to match nothing at all and look like a broken
+    // filter. Swapping reads it as the range the shopper plainly meant.
+    if (min !== undefined && max !== undefined && min > max) [min, max] = [max, min];
+
+    // Negative bounds cannot describe a price, a capacity or a voltage.
+    if (min !== undefined && min < 0) min = 0;
+    if (max !== undefined && max < 0) max = 0;
+
+    ranges[id] = { min, max };
+  }
+
   const page = Math.max(1, toInt(params.page) ?? 1);
   const searchRaw = Array.isArray(params.q) ? params.q[0] : params.q;
 
@@ -66,8 +128,7 @@ export function parseProductQuery(
     subcategory: base.subcategory,
     search: searchRaw?.trim() || undefined,
     filters,
-    priceMin: priceMinRupees !== undefined ? priceMinRupees * 100 : undefined,
-    priceMax: priceMaxRupees !== undefined ? priceMaxRupees * 100 : undefined,
+    ranges,
     minRating: filters.rating?.length
       ? Math.min(...filters.rating.map((r) => Number(r)).filter(Number.isFinite))
       : undefined,
@@ -89,8 +150,18 @@ export function buildQueryString(query: ProductQuery, overrides: Partial<Product
     if (values && values.length > 0) params.set(id, values.join(','));
   }
 
-  if (merged.priceMin !== undefined) params.set('priceMin', String(Math.round(merged.priceMin / 100)));
-  if (merged.priceMax !== undefined) params.set('priceMax', String(Math.round(merged.priceMax / 100)));
+  for (const { id, param, scale } of URL_RANGE_FACETS) {
+    const range = merged.ranges[id];
+    if (!range) continue;
+    const precision = FACET_DEFINITIONS[id].precision;
+    if (range.min !== undefined) {
+      params.set(`${param}Min`, String(roundTo(range.min / scale, precision)));
+    }
+    if (range.max !== undefined) {
+      params.set(`${param}Max`, String(roundTo(range.max / scale, precision)));
+    }
+  }
+
   if (merged.sort && merged.sort !== DEFAULT_SORT) params.set('sort', merged.sort);
   if (merged.page && merged.page > 1) params.set('page', String(merged.page));
 
@@ -115,19 +186,38 @@ export function toggleFacetValue(
   return { ...query, filters, page: 1 };
 }
 
+/** Narrow one range facet, or clear it by passing two undefined bounds. */
+export function setFacetRange(
+  query: ProductQuery,
+  facetId: FacetId,
+  min: number | undefined,
+  max: number | undefined,
+): ProductQuery {
+  const ranges = { ...query.ranges };
+  if (min === undefined && max === undefined) delete ranges[facetId];
+  else ranges[facetId] = { min, max };
+  return { ...query, ranges, page: 1 };
+}
+
 export function clearFacet(query: ProductQuery, facetId: FacetId): ProductQuery {
   const filters = { ...query.filters };
   delete filters[facetId];
-  return { ...query, filters, page: 1 };
+  const ranges = { ...query.ranges };
+  delete ranges[facetId];
+  return { ...query, filters, ranges, page: 1 };
 }
 
 export function clearAllFilters(query: ProductQuery): ProductQuery {
-  return { ...query, filters: {}, priceMin: undefined, priceMax: undefined, page: 1 };
+  return { ...query, filters: {}, ranges: {}, page: 1 };
 }
 
 /** Count of active refinements, used for the mobile filter badge. */
 export function activeFilterCount(query: ProductQuery): number {
   const facetCount = Object.values(query.filters).reduce((n, v) => n + (v?.length ?? 0), 0);
-  const priceCount = query.priceMin !== undefined || query.priceMax !== undefined ? 1 : 0;
-  return facetCount + priceCount;
+  // One per narrowed range, however many ends of it were set — a shopper who
+  // gave both a floor and a ceiling for voltage has applied one filter, not two.
+  const rangeCount = Object.values(query.ranges).filter(
+    (range) => range && (range.min !== undefined || range.max !== undefined),
+  ).length;
+  return facetCount + rangeCount;
 }

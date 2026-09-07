@@ -155,11 +155,13 @@ export function ProductCard({
           </button>
         </div>
 
-        {product.availability === 'low-stock' && !soldOut ? (
-          <p className="absolute inset-x-0 bottom-0 z-10 bg-warning-soft px-3 py-1.5 text-center text-xs font-semibold text-warning">
-            Only {product.stock} left
-          </p>
-        ) : null}
+        {/* The "Only N left" strip that used to sit here is gone. A count is
+            inventory, not a product attribute, and printing it told every
+            visitor — competitors included — exactly how many units we hold.
+            `low-stock` survives as an internal state the admin console reads;
+            a shopper now sees the same card whether we hold three or three
+            hundred. See `lib/commerce/summary.ts` for the matching change to
+            what the API serialises. */}
       </div>
 
       <div className="flex flex-1 flex-col gap-1.5 p-3 sm:p-4">

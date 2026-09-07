@@ -23,7 +23,7 @@ import type { CartItem } from '@/lib/store/types';
 import type { QuoteIssue } from '@/lib/orders/quote';
 import type { ServiceabilityResult } from '@/lib/support/serviceability';
 import { formatPrice } from '@/lib/catalog/pricing';
-import { STATES } from '@/lib/checkout/validation';
+import { GSTIN_PATTERN, PINCODE_PATTERN, STATES } from '@/lib/checkout/validation';
 import type { CustomerAddress } from '@/lib/account/addresses';
 import { addAddressAction } from '@/lib/account/address-actions';
 import { useCart } from '@/lib/store/hooks';
@@ -254,8 +254,9 @@ export function CheckoutFlow({
       if (address.line1.trim().length < 4) errors.line1 = 'Enter the flat or house number and street.';
       if (address.city.trim().length < 2) errors.city = 'Enter your city.';
       if (!address.state) errors.state = 'Select your state.';
-      if (!/^\d{6}$/.test(address.pincode)) errors.pincode = 'Enter a valid 6-digit pincode.';
-      if (wantsGstInvoice && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(gstin))
+      if (!PINCODE_PATTERN.test(address.pincode))
+        errors.pincode = 'Enter a valid 6-digit pincode.';
+      if (wantsGstInvoice && !GSTIN_PATTERN.test(gstin))
         errors.gstin = 'That does not look like a valid 15-character GSTIN.';
     }
 
@@ -460,8 +461,8 @@ export function CheckoutFlow({
         description="Add something to your cart before checking out."
         actions={
           <>
-            <ButtonLink href={categoryPath('combos')} variant="primary">
-              Shop combos
+            <ButtonLink href={categoryPath('batteries')} variant="primary">
+              Shop batteries
             </ButtonLink>
             <ButtonLink href="/cart" variant="outline">
               Back to cart

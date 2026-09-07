@@ -7,7 +7,13 @@ import { useRouter } from 'next/navigation';
 import { Check, Heart, Loader2, PackageCheck, ShoppingCart } from 'lucide-react';
 import type { Paise, Product, ProductOption, ProductVariant } from '@/lib/commerce/types';
 import { discountPercent, formatPrice } from '@/lib/catalog/pricing';
-import { PURCHASE_BLOCK_NOTE, purchaseBlockFor } from '@/lib/commerce/purchase';
+import {
+  PURCHASE_BLOCK_NOTE,
+  customerMaxQuantity,
+  purchaseBlockFor,
+} from '@/lib/commerce/purchase';
+import { HOME_BACKUP_SUBCATEGORIES } from '@/lib/sizing/recommend';
+import { NO_NOTIFY_STATE, type NotifyState } from '@/lib/stock/notify-types';
 import { SITE } from '@/lib/site';
 import { useCart, useRecentlyViewed, useWishlist } from '@/lib/store/hooks';
 import { useUI } from '@/lib/store/ui-provider';
@@ -15,8 +21,8 @@ import { track } from '@/lib/analytics/track';
 import { Button } from '@/components/ui/button';
 import { QuantityStepper } from '@/components/cart/quantity-stepper';
 import { PriceBlock } from './price-block';
-import { DeliveryCheck } from './delivery-check';
 import { PurchaseButton } from './purchase-button';
+import { NotifyMe } from './notify-me';
 import { ServiceStrip } from './service-strip';
 import { cn } from '@/lib/utils';
 
@@ -52,7 +58,14 @@ function optionHasPriceSpread(product: Product, option: ProductOption): boolean 
   return new Set(prices).size > 1;
 }
 
-export function BuyBox({ product }: { product: Product }) {
+export function BuyBox({
+  product,
+  notify = NO_NOTIFY_STATE,
+}: {
+  product: Product;
+  /** Opening state for the sold-out "Notify me" control, resolved on the server. */
+  notify?: NotifyState;
+}) {
   const cart = useCart();
   const wishlist = useWishlist();
   const recentlyViewed = useRecentlyViewed();
@@ -79,6 +92,8 @@ export function BuyBox({ product }: { product: Product }) {
    * the live row before it prices anything.
    */
   const block = purchaseBlockFor(product, variant);
+  // Mirrors `ProductLoadCalculator` and `lib/sizing/recommend.ts`.
+  const isHomeBackupProduct = HOME_BACKUP_SUBCATEGORIES.has(product.subcategory);
   const discount = discountPercent(variant.price);
 
   React.useEffect(() => {
@@ -106,7 +121,7 @@ export function BuyBox({ product }: { product: Product }) {
   }, [product.id]);
 
   React.useEffect(() => {
-    setQuantity((q) => Math.min(Math.max(1, q), Math.max(1, variant.stock)));
+    setQuantity((q) => Math.min(Math.max(1, q), customerMaxQuantity(variant.stock)));
   }, [variant.stock]);
 
   const addToCart = () => {
@@ -248,15 +263,17 @@ export function BuyBox({ product }: { product: Product }) {
         );
       })}
 
-      {/* Availability */}
+      {/* Availability — two states, never a number.
+          `low-stock` used to print "Only {variant.stock} left" here. It now
+          reads exactly like a healthy variant, because a customer's decision
+          turns on whether they can buy the thing, and the count is inventory
+          data we have no reason to publish. The state itself is untouched:
+          `to-domain.ts` still derives it, the admin console still shows the
+          real figure, and order processing still works from it. */}
       <div className="flex flex-wrap items-center gap-3 text-sm">
         {soldOut ? (
           <span className="inline-flex items-center gap-1.5 font-semibold text-muted-foreground">
             <PackageCheck className="h-4 w-4" /> Out of stock
-          </span>
-        ) : variant.availability === 'low-stock' ? (
-          <span className="inline-flex items-center gap-1.5 font-semibold text-warning">
-            <PackageCheck className="h-4 w-4" /> Only {variant.stock} left
           </span>
         ) : (
           <span className="inline-flex items-center gap-1.5 font-semibold text-success">
@@ -276,7 +293,7 @@ export function BuyBox({ product }: { product: Product }) {
             <QuantityStepper
               value={quantity}
               onChange={setQuantity}
-              max={Math.max(1, variant.stock)}
+              max={customerMaxQuantity(variant.stock)}
               disabled={block !== null}
             />
           </div>
@@ -315,16 +332,44 @@ export function BuyBox({ product }: { product: Product }) {
           </PurchaseButton>
         </div>
 
+        {/* Sold out is the one purchase block with something to offer, so it
+            gets the notify control rather than the sentence below. The product
+            page itself stays fully readable either way — nothing here gates the
+            page on availability.
+
+            Keyed on the SKU so switching variants resets the form: "you are on
+            the list" is true of one pack and not of its neighbour, and a
+            component that kept its state across the switch would claim
+            otherwise. */}
+        {soldOut ? (
+          <NotifyMe
+            key={variant.sku}
+            productId={product.id}
+            sku={variant.sku}
+            defaultEmail={notify.email}
+            alreadySubscribed={notify.subscribedSku === variant.sku}
+          />
+        ) : null}
+
+        {/* The load-calculator offer is made only for home and inverter
+            products — the same allow-list the recommendation engine uses. On a
+            traction pack it pointed at a tool that cannot size a vehicle and
+            will never return this product, so the enquiry link stands alone
+            there. */}
         {block !== null && block !== 'out-of-stock' ? (
           <p id={noteId} className="text-xs text-muted-foreground">
             {PURCHASE_BLOCK_NOTE[block]} Meanwhile you can{' '}
-            <Link
-              href="/tools/load-calculator"
-              className="font-semibold text-primary underline-offset-4 hover:underline"
-            >
-              size your system
-            </Link>{' '}
-            or{' '}
+            {isHomeBackupProduct ? (
+              <>
+                <Link
+                  href="/tools/load-calculator"
+                  className="font-semibold text-primary underline-offset-4 hover:underline"
+                >
+                  size your system
+                </Link>{' '}
+                or{' '}
+              </>
+            ) : null}
             <a
               href={`mailto:${SITE.email}?subject=${encodeURIComponent(`Enquiry: ${product.title}`)}`}
               className="font-semibold text-primary underline-offset-4 hover:underline"
@@ -357,12 +402,13 @@ export function BuyBox({ product }: { product: Product }) {
         </Button>
       </div>
 
-      {/* Delivery date, then the service promises. The warranty and
-          installation assurances that used to sit here are stated by the
-          service strip and again in the specification grid — three times on
-          one page was two too many. */}
-      <DeliveryCheck installationIncluded={product.installationIncluded} />
-
+      {/* The pincode / serviceability block that used to sit here is gone.
+          It could not answer the question it asked: there is no coverage
+          dataset and no courier integration, so the honest version was a
+          paragraph telling shoppers we would confirm delivery separately —
+          which is what `/support` is for, and what the service strip below
+          already says. `lib/support/serviceability.ts` is untouched; checkout
+          and the order quote still read it. */}
       <ServiceStrip
         installationIncluded={product.installationIncluded}
         returnWindowDays={product.returnWindowDays}
