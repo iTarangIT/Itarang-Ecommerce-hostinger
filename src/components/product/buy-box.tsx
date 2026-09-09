@@ -13,7 +13,6 @@ import {
   purchaseBlockFor,
 } from '@/lib/commerce/purchase';
 import { HOME_BACKUP_SUBCATEGORIES } from '@/lib/sizing/recommend';
-import { NO_NOTIFY_STATE, type NotifyState } from '@/lib/stock/notify-types';
 import { SITE } from '@/lib/site';
 import { useCart, useRecentlyViewed, useWishlist } from '@/lib/store/hooks';
 import { useUI } from '@/lib/store/ui-provider';
@@ -58,14 +57,7 @@ function optionHasPriceSpread(product: Product, option: ProductOption): boolean 
   return new Set(prices).size > 1;
 }
 
-export function BuyBox({
-  product,
-  notify = NO_NOTIFY_STATE,
-}: {
-  product: Product;
-  /** Opening state for the sold-out "Notify me" control, resolved on the server. */
-  notify?: NotifyState;
-}) {
+export function BuyBox({ product }: { product: Product }) {
   const cart = useCart();
   const wishlist = useWishlist();
   const recentlyViewed = useRecentlyViewed();
@@ -340,15 +332,10 @@ export function BuyBox({
             Keyed on the SKU so switching variants resets the form: "you are on
             the list" is true of one pack and not of its neighbour, and a
             component that kept its state across the switch would claim
-            otherwise. */}
+            otherwise. The key also re-runs the control's own session lookup,
+            which is per variant for the same reason. */}
         {soldOut ? (
-          <NotifyMe
-            key={variant.sku}
-            productId={product.id}
-            sku={variant.sku}
-            defaultEmail={notify.email}
-            alreadySubscribed={notify.subscribedSku === variant.sku}
-          />
+          <NotifyMe key={variant.sku} productId={product.id} sku={variant.sku} />
         ) : null}
 
         {/* The load-calculator offer is made only for home and inverter

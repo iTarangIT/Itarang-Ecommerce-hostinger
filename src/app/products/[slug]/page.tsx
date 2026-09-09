@@ -26,7 +26,6 @@ import { CollapsibleCard } from '@/components/product/collapsible-card';
 import { ProductSpecs } from '@/components/product/product-specs';
 import { ProductLoadCalculator } from '@/components/product/product-load-calculator';
 import { HOME_BACKUP_SUBCATEGORIES } from '@/lib/sizing/recommend';
-import { notifyStateFor } from '@/lib/stock/notify-state';
 import { OfferStack } from '@/components/product/offer-stack';
 import { SizeChart } from '@/components/product/size-chart';
 import { SellerDetail } from '@/components/product/seller-info';
@@ -191,19 +190,21 @@ export default async function ProductPage({ params }: PageProps) {
   const isHomeBackupProduct = HOME_BACKUP_SUBCATEGORIES.has(product.subcategory);
 
   /**
-   * What the "Notify me" control on a sold-out product should open with.
+   * Nothing on this page may read the session.
    *
-   * Resolved on the server because both halves need a session: the address to
-   * prefill, and whether this customer has already asked. A guest gets nulls
-   * and an empty field — being told a product is back does not require an
-   * account.
+   * `cookies()` opts a route out of static generation, and this route is
+   * prerendered from `generateStaticParams`. A session read here does not fail
+   * the build and prints no warning — it silently drops whichever products
+   * reached it off the prerendered set, leaving them to be rendered per request
+   * while every other product page serves cached HTML.
    *
-   * `subscribedSku` rather than a boolean, because the shopper can switch
-   * variants on the page and the answer is per variant. The control compares it
-   * with whichever variant is selected, so switching to a different one shows
-   * the form again rather than claiming they are already on its list.
+   * That is not hypothetical. Resolving the sold-out "Notify me" control's
+   * opening state here cost exactly the sold-out products their static pages;
+   * in production the one sold-out product was the only page on the storefront
+   * rendered on demand, and the only one returning 500. The control now
+   * resolves its own state after mount — see `components/product/notify-me.tsx`
+   * — and the page is a pure function of the catalogue again.
    */
-  const notify = await notifyStateFor(product);
 
   const warrantyMonths = product.warrantyMonths;
 
@@ -284,7 +285,7 @@ export default async function ProductPage({ params }: PageProps) {
             </div>
 
             {/* Price, selectors, buy controls, delivery and the service row. */}
-            <BuyBox product={product} notify={notify} />
+            <BuyBox product={product} />
 
             {/* The selling points, as the bullet list a retail page opens its
                 description with. The prose sits in the panel below. */}
