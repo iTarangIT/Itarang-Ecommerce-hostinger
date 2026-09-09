@@ -128,9 +128,15 @@ function rupees(paise: number | null): number | '' {
  * actually differ. A re-uploaded untouched template therefore changes nothing
  * and stamps nothing, and the report says so in as many words.
  *
- * Product and variant titles ride along in two extra columns. `mapHeader`
- * matches columns by name, so extra ones are ignored on the way back in; they
- * exist purely so a human can tell which row is which without looking up a SKU.
+ * The product title rides along in an extra column so a human can tell which row
+ * is which without looking up a SKU. `mapHeader` matches columns by name, so
+ * extra ones are ignored on the way back in.
+ *
+ * **The Variant column appears only when some variant has a title.** Every
+ * product in the catalogue today is single-variant with an empty variant title,
+ * so the column was rendered blank on every row — a column of nothing, in a
+ * sheet whose whole purpose is to be typed into. It earns its place the moment
+ * a product has two variants to tell apart, and not before.
  */
 export async function buildPricingTemplate(
   variants: readonly CataloguePriceRow[],
@@ -139,11 +145,13 @@ export async function buildPricingTemplate(
   workbook.creator = 'iTarang';
   workbook.created = new Date();
 
+  const showVariant = variants.some((variant) => variant.variantTitle.trim() !== '');
+
   const sheet = workbook.addWorksheet('Prices');
   sheet.columns = [
     { header: TEMPLATE_COLUMNS[0], key: 'sku', width: 28 },
     { header: 'Product', key: 'product', width: 42 },
-    { header: 'Variant', key: 'variant', width: 22 },
+    ...(showVariant ? [{ header: 'Variant', key: 'variant', width: 22 }] : []),
     { header: TEMPLATE_COLUMNS[1], key: 'mrp', width: 16 },
     { header: TEMPLATE_COLUMNS[2], key: 'selling', width: 16 },
   ];
@@ -154,7 +162,7 @@ export async function buildPricingTemplate(
     const row = sheet.addRow({
       sku: variant.sku,
       product: variant.productTitle,
-      variant: variant.variantTitle,
+      ...(showVariant ? { variant: variant.variantTitle } : {}),
       mrp: rupees(variant.mrp),
       selling: rupees(variant.selling),
     });
@@ -162,14 +170,14 @@ export async function buildPricingTemplate(
     // number so an administrator can type over it without fighting a text cell.
     row.getCell('mrp').numFmt = '#,##0.00';
     row.getCell('selling').numFmt = '#,##0.00';
-    // The two identifying columns are reference, not input. Greyed so it is
+    // The identifying columns are reference, not input. Greyed so it is
     // visually obvious which two columns this file is for.
     row.getCell('product').font = { color: { argb: 'FF6B7280' } };
-    row.getCell('variant').font = { color: { argb: 'FF6B7280' } };
+    if (showVariant) row.getCell('variant').font = { color: { argb: 'FF6B7280' } };
   }
 
   if (variants.length === 0) {
-    sheet.addRow({ sku: 'YOUR-SKU-HERE', product: '', variant: '', mrp: '', selling: '' });
+    sheet.addRow({ sku: 'YOUR-SKU-HERE', product: '', mrp: '', selling: '' });
   }
 
   const notes = workbook.addWorksheet('How to use');
@@ -182,11 +190,14 @@ export async function buildPricingTemplate(
     'Admin → Products → Bulk pricing.',
     '',
     'SKU is the identifier. Only the product with that SKU is changed.',
-    'Enter amounts in rupees. Both MRP and selling price are required on every row.',
+    'Enter amounts in rupees.',
+    'Fill in BOTH MRP and selling price, or neither. A row with only one of them is rejected.',
+    'A row with both cells empty is left alone — that is how a product with no price yet arrives,',
+    'and how you tell us to skip one.',
     'The selling price cannot be higher than the MRP.',
     'A row you do not edit matches the catalogue and is left alone — nothing is rewritten.',
     'Do not list the same SKU twice.',
-    'The Product and Variant columns are there to help you find the row. They are ignored.',
+    'The Product column is there to help you find the row. It is ignored on upload.',
     '',
     'Nothing else about the product is changed — not stock, not availability, not the title.',
     'If any row is wrong, the whole file is rejected and nothing is updated.',

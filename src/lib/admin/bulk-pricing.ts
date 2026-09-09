@@ -26,6 +26,13 @@
  * trail — every product stamped `updated_by` and `updated_at` by an
  * administrator who changed two of them. So a row identical to the catalogue is
  * classified as unchanged, reported as such, and never reaches the UPDATE.
+ *
+ * **An empty pair of price cells is not an error.** A variant may legitimately
+ * carry no price — the catalogue holds such rows deliberately, awaiting a
+ * business answer — and the template renders those as two blank cells. A row
+ * that names a SKU and states no price has made no statement, so it is skipped.
+ * Getting this wrong is not a small matter: one unpriced variant made every row
+ * in the file unusable, because the import is all or nothing.
  */
 
 import { z } from 'zod';
@@ -104,6 +111,12 @@ export interface CatalogueSkuPrice {
   selling: number | null;
 }
 
+/** A row that names a product and states no price for it. */
+export interface BlankRow {
+  rowNumber: number;
+  sku: string;
+}
+
 export interface RejectedRow {
   rowNumber: number;
   sku: string;
@@ -115,6 +128,14 @@ export interface PricingImportReport {
   accepted: AcceptedRow[];
   /** Valid rows that match the catalogue exactly. Not an error, and not written. */
   unchanged: UnchangedRow[];
+  /**
+   * Rows naming a SKU with both price cells empty.
+   *
+   * Not an error and not a change — the file simply said nothing about that
+   * product. Reported so an administrator who meant to fill one in can see
+   * which they left, rather than the row disappearing silently.
+   */
+  blank: BlankRow[];
   rejected: RejectedRow[];
   /** SKUs in the catalogue the file said nothing about. Not an error. */
   untouchedSkuCount: number;
@@ -196,6 +217,7 @@ export function buildPricingImportReport(
 
   const accepted: AcceptedRow[] = [];
   const unchanged: UnchangedRow[] = [];
+  const blank: BlankRow[] = [];
   const rejected: RejectedRow[] = [];
 
   for (const row of rows) {
@@ -225,10 +247,40 @@ export function buildPricingImportReport(
       reject('invalid-price');
       continue;
     }
-    // Both are required together. Writing one and leaving the other would put
-    // the variant into a state the publish rules refuse — a price with no MRP
-    // renders a nonsensical discount — and "I only meant to change the selling
-    // price" is exactly the intent a two-column file cannot express.
+
+    /**
+     * Both cells blank means "leave this product alone".
+     *
+     * **This is what broke the upload.** The template used to arrive with every
+     * price cell blank and the instruction "leave a row blank to leave that
+     * product unchanged", and a wholly empty line — no SKU either — was dropped
+     * by the reader before it ever got here. Pre-filling the sheet changed
+     * that: every row now carries its SKU, so a variant with no price in the
+     * catalogue produces a row that is *present* with two empty price cells.
+     * That was classified `missing-price`, and because the import is all or
+     * nothing, one unpriced variant refused the entire file. The catalogue has
+     * exactly one such variant today and it is a deliberate NULL awaiting a
+     * business answer, so in practice no price list could be uploaded at all.
+     *
+     * Skipped rather than rejected, and skipped rather than silently ignored:
+     * it goes into `blank` so the report can say which rows said nothing. The
+     * SKU is deliberately not added to `mentioned` below, so it also counts as
+     * untouched — the file genuinely made no statement about its price.
+     */
+    if (mrp === null && selling === null) {
+      blank.push({ rowNumber: row.rowNumber, sku });
+      continue;
+    }
+
+    /**
+     * Exactly one of the two is still a mistake, and still rejects the file.
+     *
+     * Writing one and leaving the other would put the variant into a state the
+     * publish rules refuse — a price with no MRP renders a nonsensical discount
+     * — and "I only meant to change the selling price" is exactly the intent a
+     * two-column file cannot express. Unchanged from the original rule; only
+     * the both-blank case above was ever wrong.
+     */
     if (mrp === null || selling === null) {
       reject('missing-price');
       continue;
@@ -264,6 +316,7 @@ export function buildPricingImportReport(
   return {
     accepted,
     unchanged,
+    blank,
     rejected,
     untouchedSkuCount: catalogue.filter((entry) => !mentioned.has(normaliseSku(entry.sku))).length,
     applicable: rejected.length === 0 && accepted.length > 0,

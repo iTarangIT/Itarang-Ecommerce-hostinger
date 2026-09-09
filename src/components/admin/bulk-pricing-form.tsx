@@ -35,7 +35,7 @@ export function BulkPricingForm() {
     report !== undefined &&
     report.rejected.length === 0 &&
     report.accepted.length === 0 &&
-    report.unchanged.length > 0;
+    report.unchanged.length + report.blank.length > 0;
 
   return (
     <div className="mt-6 space-y-6">
@@ -141,9 +141,9 @@ export function BulkPricingForm() {
                 </>
               ) : noChanges ? (
                 <>
-                  <strong className="font-semibold">Nothing to change.</strong> All{' '}
-                  {report.unchanged.length} row{report.unchanged.length === 1 ? '' : 's'} in the
-                  file already carry the prices the catalogue holds, so nothing was written.
+                  <strong className="font-semibold">Nothing to change.</strong> Every row in the
+                  file either already carries the price the catalogue holds or states no price at
+                  all, so nothing was written.
                 </>
               ) : (
                 <>
@@ -155,6 +155,25 @@ export function BulkPricingForm() {
               )}
             </span>
           </div>
+
+          {/* Named, not merely counted.
+              A blank pair of price cells is how a product with no price yet
+              comes back, and it is also what an administrator leaves behind
+              when they meant to fill one in. Listing the SKUs is the difference
+              between those two, and it costs one line each. */}
+          {report.blank.length > 0 ? (
+            <p className="flex items-start gap-2 rounded-lg border border-border bg-surface p-3 text-sm text-muted-foreground">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+              <span>
+                {report.blank.length} row{report.blank.length === 1 ? '' : 's'} stated no price and{' '}
+                {report.blank.length === 1 ? 'was' : 'were'} left alone:{' '}
+                <span className="tabular font-medium text-foreground">
+                  {report.blank.map((row) => row.sku).join(', ')}
+                </span>
+                . Fill in both MRP and selling price to set one.
+              </span>
+            </p>
+          ) : null}
 
           {report.rejected.length > 0 ? (
             <ReportTable title={`Rows to correct (${report.rejected.length})`}>

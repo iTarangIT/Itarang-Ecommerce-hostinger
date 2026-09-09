@@ -92,26 +92,40 @@ describe('reading an uploaded workbook', () => {
  * and a sheet nobody edited asks for nothing.
  */
 describe('the price-list template', () => {
+  /**
+   * Empty variant titles, because that is what the catalogue holds.
+   *
+   * Every product is single-variant today and stores `''` for the variant
+   * title. The fixture said `'12V 100Ah'` and so exercised a shape the console
+   * never generates — which is how a blank Variant column reached a real
+   * administrator's spreadsheet with the tests green.
+   */
   const CATALOGUE: CataloguePriceRow[] = [
     {
       sku: 'TK12100-01',
       productTitle: 'Powercube 1.4',
-      variantTitle: '12V 100Ah',
+      variantTitle: '',
       mrp: 4800000,
       selling: 4200000,
     },
     {
       sku: 'TK-LiFe-5145-01',
       productTitle: 'LiFe 5145',
-      variantTitle: '51V 45Ah',
+      variantTitle: '',
       mrp: 3500000,
       selling: 3200000,
     },
   ];
 
-  /** Column positions in the generated sheet, 1-based as ExcelJS counts them. */
-  const MRP_CELL = 4;
-  const SELLING_CELL = 5;
+  /**
+   * Column positions in the generated sheet, 1-based as ExcelJS counts them.
+   *
+   * Four columns, not five: the Variant column is only emitted when some
+   * variant actually has a title, and none in this fixture does — nor does any
+   * product in the catalogue today.
+   */
+  const MRP_CELL = 3;
+  const SELLING_CELL = 4;
 
   async function openTemplate(rows: CataloguePriceRow[]) {
     const workbook = new ExcelJS.Workbook();
@@ -181,6 +195,57 @@ describe('the price-list template', () => {
 
     expect(sheet.getRow(2).getCell(MRP_CELL).value ?? '').toBe('');
     expect(sheet.getRow(2).getCell(SELLING_CELL).value ?? '').toBe('');
+  });
+
+  /**
+   * The whole failure, reproduced through real .xlsx bytes.
+   *
+   * The unit tests prove the classification rule; this proves the file the
+   * console actually generates survives being handed straight back to it. One
+   * unpriced variant used to make the entire upload a no-op.
+   */
+  it('round-trips a catalogue containing an unpriced variant', async () => {
+    const withDraft: CataloguePriceRow[] = [
+      ...CATALOGUE,
+      { sku: 'DRAFT-1', productTitle: 'Unpriced', variantTitle: '', mrp: null, selling: null },
+    ];
+
+    const workbook = await openTemplate(withDraft);
+    const sheet = workbook.worksheets[0];
+    // Edit one real price, exactly as an administrator would.
+    sheet.getRow(2).getCell(MRP_CELL).value = 45000;
+    sheet.getRow(2).getCell(SELLING_CELL).value = 39999;
+
+    const rows = await readPricingWorkbook((await workbook.xlsx.writeBuffer()) as ArrayBuffer);
+    const report = buildPricingImportReport(rows, withDraft);
+
+    expect(report.rejected).toEqual([]);
+    expect(report.applicable, 'the edit must be applicable despite the unpriced row').toBe(true);
+    expect(report.accepted.map((r) => r.sku)).toEqual(['TK12100-01']);
+    expect(report.blank.map((r) => r.sku)).toEqual(['DRAFT-1']);
+  });
+
+  it('omits the Variant column when no variant has a title', async () => {
+    // Every product in the catalogue is single-variant today, so the column was
+    // blank on every row of a sheet whose purpose is to be typed into.
+    const sheet = (await openTemplate(CATALOGUE)).worksheets[0];
+    const header = (sheet.getRow(1).values as unknown[]).slice(1);
+
+    expect(header).toEqual(['SKU', 'Product', 'MRP', 'Selling Price']);
+  });
+
+  it('includes the Variant column once a variant has a title to show', async () => {
+    // It earns its place when there are two variants to tell apart.
+    const sheet = (
+      await openTemplate([
+        { ...CATALOGUE[0]!, variantTitle: '12V 100Ah' },
+        { ...CATALOGUE[1]!, variantTitle: '12V 150Ah' },
+      ])
+    ).worksheets[0];
+    const header = (sheet.getRow(1).values as unknown[]).slice(1);
+
+    expect(header).toEqual(['SKU', 'Product', 'Variant', 'MRP', 'Selling Price']);
+    expect(sheet.getRow(2).getCell(3).value).toBe('12V 100Ah');
   });
 
   it('still produces a usable sheet when the catalogue is empty', async () => {

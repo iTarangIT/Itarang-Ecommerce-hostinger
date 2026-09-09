@@ -175,6 +175,70 @@ describe('rows that say nothing new', () => {
   });
 });
 
+/**
+ * The bug that made every upload fail, and the rule that fixes it.
+ *
+ * The template used to arrive blank and said "leave a row blank to leave that
+ * product unchanged" — a wholly empty line, SKU included, which the reader
+ * dropped before classification. Pre-filling the sheet put a SKU on every row,
+ * so a variant with no price in the catalogue came back as a present row with
+ * two empty price cells. That was `missing-price`, and since the import is all
+ * or nothing, one unpriced variant refused the whole file.
+ *
+ * `TK-LiFe-7332-01` is unpriced in the fixture for exactly this reason.
+ */
+describe('rows that state no price', () => {
+  it('skips a row with both price cells empty instead of rejecting it', () => {
+    const report = buildPricingImportReport([row(2, 'TK12100-01', '', '')], CATALOGUE);
+
+    expect(report.rejected).toEqual([]);
+    expect(report.accepted).toEqual([]);
+    expect(report.blank).toEqual([{ rowNumber: 2, sku: 'TK12100-01' }]);
+  });
+
+  it('counts a skipped row as a SKU the file did not mention', () => {
+    // It made no statement about that price, which is what "untouched" means.
+    const report = buildPricingImportReport([row(2, 'TK12100-01', '', '')], CATALOGUE);
+    expect(report.untouchedSkuCount).toBe(3);
+  });
+
+  it('lets the rest of the file through — the actual regression', () => {
+    // A downloaded template with one unpriced variant in it, one price edited.
+    // Before the fix this reported `applicable: false` and wrote nothing.
+    const report = buildPricingImportReport(
+      [
+        row(2, 'TK12100-01', '45000', '39999'),
+        row(3, 'TK-LiFe-5145-01', '35000', '32000'),
+        row(4, 'TK-LiFe-7332-01', '', ''),
+      ],
+      CATALOGUE,
+    );
+
+    expect(report.rejected).toEqual([]);
+    expect(report.applicable).toBe(true);
+    expect(report.accepted.map((r) => r.sku)).toEqual(['TK12100-01']);
+    expect(report.unchanged.map((r) => r.sku)).toEqual(['TK-LiFe-5145-01']);
+    expect(report.blank.map((r) => r.sku)).toEqual(['TK-LiFe-7332-01']);
+  });
+
+  it('still refuses a file whose only rows state no price', () => {
+    // Nothing to write is not something to write. Not an error either.
+    const report = buildPricingImportReport([row(2, 'TK12100-01', '', '')], CATALOGUE);
+    expect(report.applicable).toBe(false);
+    expect(report.rejected).toEqual([]);
+  });
+
+  it('accepts a price for a variant that had none, from a blank template cell', () => {
+    // The other half: an unpriced variant is priced by typing into those cells.
+    const report = buildPricingImportReport(
+      [row(2, 'TK-LiFe-7332-01', '52000', '48000')],
+      CATALOGUE,
+    );
+    expect(report.blank).toEqual([]);
+    expect(report.accepted[0]).toMatchObject({ sku: 'TK-LiFe-7332-01', previousMrp: null });
+  });
+});
+
 describe('rows that are rejected', () => {
   const reject = (r: RawPriceRow) => buildPricingImportReport([r], CATALOGUE).rejected[0];
 
@@ -197,6 +261,13 @@ describe('rows that are rejected', () => {
   it('rejects a row with only one of the two prices', () => {
     expect(reject(row(2, 'TK12100-01', '45000', '')).problem).toBe('missing-price');
     expect(reject(row(2, 'TK12100-01', '', '39999')).problem).toBe('missing-price');
+  });
+
+  it('does not reject a row with neither price', () => {
+    // The regression. See the "rows that state no price" block below.
+    expect(buildPricingImportReport([row(2, 'TK12100-01', '', '')], CATALOGUE).rejected).toEqual(
+      [],
+    );
   });
 
   it('rejects a selling price above the MRP', () => {
@@ -263,8 +334,17 @@ describe('the header row', () => {
   });
 
   it('reads the template this console generates', () => {
-    // The generated sheet carries Product and Variant columns for legibility.
-    // They are ignored on the way back in; this is the assertion that says so.
+    // The generated sheet carries a Product column for legibility, ignored on
+    // the way back in. This is the assertion that says so.
+    expect(mapHeader(['SKU', 'Product', 'MRP', 'Selling Price'])).toEqual({
+      sku: 0,
+      mrp: 2,
+      selling: 3,
+    });
+  });
+
+  it('reads it with the Variant column too, for a multi-variant catalogue', () => {
+    // The column is conditional, so both shapes must import.
     expect(mapHeader(['SKU', 'Product', 'Variant', 'MRP', 'Selling Price'])).toEqual({
       sku: 0,
       mrp: 3,
