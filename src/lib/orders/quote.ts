@@ -2,7 +2,7 @@ import type { Paise, Product, ProductVariant } from '@/lib/commerce/types';
 import { allProducts } from '@/lib/catalog/collections';
 import { calculateTotals, type CartTotals } from '@/lib/store/totals';
 import type { AppliedCoupon, CartItem } from '@/lib/store/types';
-import { validateCoupon } from '@/lib/offers/coupons';
+import { COUPONS_ENABLED, validateCoupon } from '@/lib/offers/coupons';
 import { activeProviderName } from '@/lib/commerce';
 import {
   PURCHASABLE_PROVIDER,
@@ -243,8 +243,19 @@ export async function buildQuote(request: QuoteRequest): Promise<QuoteResult> {
 
   /* ----------------------------------------------------------- coupon */
 
+  /**
+   * A code sent while coupons are switched off is *dropped*, not reported.
+   *
+   * `validateCoupon` refuses it either way, so no discount can be applied — the
+   * only question is whether the customer is told. A cart saved in
+   * `localStorage` before the switch was thrown still carries its code, and
+   * telling that customer their coupon is invalid at checkout blames them for a
+   * feature we turned off. The cart field clears the stored code on sight; this
+   * is the second half of the same decision, for the shopper who reaches
+   * checkout without opening the cart page.
+   */
   let coupon: AppliedCoupon | null = null;
-  if (request.couponCode) {
+  if (request.couponCode && COUPONS_ENABLED) {
     const result = validateCoupon(request.couponCode, items);
     if (result.ok) {
       coupon = result.coupon;

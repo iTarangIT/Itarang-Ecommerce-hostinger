@@ -1,5 +1,6 @@
 import type { ProductFaq, ProductSection, SpecGroup } from '@/lib/commerce/types';
 import type {
+  CataloguePriceRow,
   CreateProductInput,
   Manufacturer,
   ManufacturerInput,
@@ -92,6 +93,22 @@ export interface ProductRepository {
 
   /** Every SKU in the catalogue, for validating an uploaded price list. */
   listVariantSkus(): Promise<string[]>;
+
+  /**
+   * Every SKU with the prices it carries right now.
+   *
+   * One read serving both halves of the bulk-pricing round trip: the downloaded
+   * template is filled in with these figures, and the uploaded file is
+   * classified against them — which is what lets an unchanged row be recognised
+   * as unchanged and skipped rather than rewritten with the value it already
+   * holds.
+   *
+   * `mrp` and `selling` are nullable in the schema so a draft can exist before
+   * its commercial terms do, and that null is carried through rather than
+   * flattened to zero. A template cell for an unpriced variant is blank, which
+   * is the truth; a zero would read as "free".
+   */
+  listVariantPrices(): Promise<CataloguePriceRow[]>;
 
   /**
    * Set MRP and selling price on many variants at once, keyed on SKU.

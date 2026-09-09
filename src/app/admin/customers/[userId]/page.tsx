@@ -1,8 +1,10 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ArrowLeft, UserRound } from 'lucide-react';
+import { ArrowLeft, Package, UserRound } from 'lucide-react';
 import { customerDetail } from '@/lib/admin/funnel';
+import { customerPurchases } from '@/lib/admin/customers';
+import { formatPrice } from '@/lib/catalog/pricing';
 
 export const dynamic = 'force-dynamic';
 
@@ -82,17 +84,27 @@ export default async function CustomerActivityPage({
   const parsed = Number.parseInt(userId, 10);
   if (!Number.isSafeInteger(parsed) || parsed <= 0) notFound();
 
-  const customer = await customerDetail(parsed);
+  const [customer, purchases] = await Promise.all([
+    customerDetail(parsed),
+    customerPurchases(parsed),
+  ]);
   if (!customer) notFound();
+
+  const spend = purchases.reduce((sum, product) => sum + product.value, 0);
+  const units = purchases.reduce((sum, product) => sum + product.quantity, 0);
 
   return (
     <div className="container py-8">
+      {/* Points at this route's own parent rather than at the funnel.
+          The funnel still links here, and so does the customers tab; sending
+          everybody back to whichever one happens to be named would be wrong
+          half the time, and /admin/customers is the list this page belongs to. */}
       <Link
-        href="/admin/funnel"
+        href="/admin/customers"
         className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="h-4 w-4" />
-        Customer funnel
+        All customers
       </Link>
 
       <h1 className="heading-2 mt-4 flex items-center gap-2">
@@ -126,6 +138,69 @@ export default async function CustomerActivityPage({
         <Row label="Account since" value={IST_DATETIME.format(new Date(customer.createdAt))} />
         <Row label="Events" value={String(customer.timeline.length)} />
       </dl>
+
+      {/* What they have actually bought.
+          Placed above the activity timeline on purpose: browsing is a long
+          list of maybes, and a purchase is the fact somebody opening this page
+          is most often looking for. Unwindowed — this is the whole
+          relationship, not a reporting period. */}
+      <h2 className="heading-3 mt-8 flex items-center gap-2">
+        <Package className="h-4.5 w-4.5 text-accent-600" />
+        Products ordered
+      </h2>
+      <p className="mt-1.5 text-sm text-muted-foreground">
+        Every paid, prepaid order this customer has placed, whenever it happened. Quantities and
+        totals are summed across orders, so a product bought twice appears once.
+      </p>
+
+      {purchases.length === 0 ? (
+        <p className="mt-3 rounded-lg border border-border bg-surface p-4 text-sm text-muted-foreground">
+          No captured payments. This customer has an account and has not completed a purchase.
+        </p>
+      ) : (
+        <div className="mt-3 overflow-x-auto rounded-lg border border-border">
+          <table className="w-full min-w-[36rem] text-left text-sm">
+            <thead className="bg-surface text-xs uppercase tracking-wide text-muted-foreground">
+              <tr>
+                <th scope="col" className="px-4 py-3 font-semibold">Product</th>
+                <th scope="col" className="px-4 py-3 font-semibold">SKU</th>
+                <th scope="col" className="px-4 py-3 text-right font-semibold">Units</th>
+                <th scope="col" className="px-4 py-3 text-right font-semibold">Spend</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border bg-card">
+              {purchases.map((product) => (
+                <tr key={product.sku}>
+                  <td className="px-4 py-3">
+                    <span className="font-medium text-foreground">{product.title}</span>
+                    {product.variantTitle ? (
+                      <span className="mt-0.5 block text-xs text-muted-foreground">
+                        {product.variantTitle}
+                      </span>
+                    ) : null}
+                  </td>
+                  <td className="tabular px-4 py-3 text-xs text-muted-foreground">{product.sku}</td>
+                  <td className="tabular px-4 py-3 text-right">{product.quantity}</td>
+                  <td className="tabular px-4 py-3 text-right font-semibold text-foreground">
+                    {formatPrice(product.value)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot className="bg-surface">
+              <tr>
+                <td className="px-4 py-3 text-xs uppercase tracking-wide text-muted-foreground" colSpan={2}>
+                  Lifetime
+                </td>
+                <td className="tabular px-4 py-3 text-right font-semibold">{units}</td>
+                <td className="tabular px-4 py-3 text-right font-semibold text-foreground">
+                  {formatPrice(spend)}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
 
       <h2 className="heading-3 mt-8">Activity</h2>
       <p className="mt-1.5 text-sm text-muted-foreground">

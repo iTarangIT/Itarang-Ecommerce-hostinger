@@ -4,12 +4,13 @@ import { productRepository } from '@/lib/products/postgres-repository';
 import { buildPricingTemplate } from '@/lib/admin/pricing-workbook';
 
 /**
- * The downloadable sample spreadsheet.
+ * The downloadable working copy of the price list.
  *
  * Generated per request rather than served as a static asset, because it is
- * pre-filled with the catalogue's current SKUs — which is what stops the most
- * common cause of a rejected upload, a SKU typed from memory. That is also why
- * it is gated: the SKU list is not public.
+ * pre-filled with the catalogue's live SKUs *and their current prices*. That is
+ * what makes it a round trip: whatever the last upload changed is what the next
+ * download shows. It is also why it is gated — neither the SKU list nor the
+ * price list is public.
  *
  * `currentUser()` rather than `requireAdmin()`, per the note in
  * `lib/auth/guards.ts` — those helpers redirect, which is the wrong answer from
@@ -29,8 +30,8 @@ export async function GET(): Promise<Response> {
   }
   if (user.role !== 'admin') return new Response('Not found', { status: 404 });
 
-  const skus = await productRepository().listVariantSkus();
-  const workbook = await buildPricingTemplate(skus);
+  const variants = await productRepository().listVariantPrices();
+  const workbook = await buildPricingTemplate(variants);
 
   const stamp = new Date().toISOString().slice(0, 10);
 

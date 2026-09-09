@@ -5,6 +5,7 @@ import {
   claimNotificationSends,
   hasStockNotification,
   interestedCustomers,
+  markRequestsNotified,
   notifyMeCountFor,
   releaseNotificationSend,
   requestStockNotification,
@@ -304,9 +305,9 @@ describe.skipIf(!CONFIGURED)('interested customers', () => {
   it('lists an explicit request', async () => {
     await requestStockNotification({ productId: KEY, sku: SKU, email: ALICE, userId: null });
 
-    const list = await interestedCustomers(KEY, null);
-    expect(list).toHaveLength(1);
-    expect(list[0]).toMatchObject({ email: ALICE, source: 'notify-me', notified: false });
+    const { waiting } = await interestedCustomers(KEY, null);
+    expect(waiting).toHaveLength(1);
+    expect(waiting[0]).toMatchObject({ email: ALICE, source: 'notify-me' });
   });
 
   it('includes a customer who only saved the product, labelled as such', async () => {
@@ -319,8 +320,8 @@ describe.skipIf(!CONFIGURED)('interested customers', () => {
       KEY,
     ]);
 
-    const list = await interestedCustomers(KEY, null);
-    expect(list.find((c) => c.email === BOB)?.source).toBe('wishlist');
+    const { waiting } = await interestedCustomers(KEY, null);
+    expect(waiting.find((c) => c.email === BOB)?.source).toBe('wishlist');
   });
 
   it('keeps the strongest signal when somebody did both', async () => {
@@ -339,19 +340,104 @@ describe.skipIf(!CONFIGURED)('interested customers', () => {
       userId: user!.id,
     });
 
-    const list = await interestedCustomers(KEY, null);
-    const alice = list.filter((c) => c.email === ALICE);
+    const { waiting } = await interestedCustomers(KEY, null);
+    const alice = waiting.filter((c) => c.email === ALICE);
     expect(alice).toHaveLength(1);
     expect(alice[0]!.source).toBe('notify-me');
   });
 
-  it('marks who has already been told about a restock', async () => {
+  /**
+   * The rule the business asked for: somebody who has been told is off the
+   * list. Both halves of it are exercised, because they are enforced by
+   * different mechanisms — a request is spent by `notified_at`, and a wishlist
+   * entry, which has no request to spend, by its send row.
+   */
+  it('drops a customer who has been told about this restock', async () => {
     await requestStockNotification({ productId: KEY, sku: SKU, email: ALICE, userId: null });
     const id = await seedTransition('back-in-stock');
     await claimNotificationSends(id, [ALICE], ACTOR);
 
-    const list = await interestedCustomers(KEY, id);
-    expect(list.find((c) => c.email === ALICE)?.notified).toBe(true);
+    const { waiting, alreadyNotified } = await interestedCustomers(KEY, id);
+    expect(waiting.find((c) => c.email === ALICE)).toBeUndefined();
+    expect(alreadyNotified).toBe(1);
+  });
+
+  it('drops a wishlist customer who has been told, who has no request to spend', async () => {
+    const [user] = await query<{ id: number }>(
+      `INSERT INTO users (email, password_hash, role) VALUES ($1, 'x', 'customer') RETURNING id`,
+      [BOB],
+    );
+    await query(`INSERT INTO wishlist_items (user_id, product_id) VALUES ($1, $2)`, [
+      user!.id,
+      KEY,
+    ]);
+    const id = await seedTransition('back-in-stock');
+    await claimNotificationSends(id, [BOB], ACTOR);
+
+    const { waiting, alreadyNotified } = await interestedCustomers(KEY, id);
+    expect(waiting).toHaveLength(0);
+    expect(alreadyNotified).toBe(1);
+  });
+
+  it('drops a fulfilled request even against a later restock', async () => {
+    // The send row is keyed on one transition, so it stops covering the person
+    // the moment a second restock happens. `notified_at` is what makes a spent
+    // opt-in stay spent: the customer asked for one message and got it.
+    await requestStockNotification({ productId: KEY, sku: SKU, email: ALICE, userId: null });
+    expect(await markRequestsNotified(KEY, [ALICE])).toBe(1);
+
+    const later = await seedTransition('back-in-stock');
+    const { waiting } = await interestedCustomers(KEY, later);
+    expect(waiting).toHaveLength(0);
+  });
+
+  it('puts a customer back on the list when they ask again', async () => {
+    await requestStockNotification({ productId: KEY, sku: SKU, email: ALICE, userId: null });
+    await markRequestsNotified(KEY, [ALICE]);
+
+    // The second sign-up updates the same row — the unique index guarantees
+    // one per person per variant — and must re-open it rather than being
+    // swallowed as a duplicate.
+    const again = await requestStockNotification({
+      productId: KEY,
+      sku: SKU,
+      email: ALICE,
+      userId: null,
+    });
+    expect(again.alreadyRequested).toBe(false);
+
+    const { waiting } = await interestedCustomers(KEY, null);
+    expect(waiting.map((c) => c.email)).toEqual([ALICE]);
+  });
+
+  it('reports a live request as already made', async () => {
+    await requestStockNotification({ productId: KEY, sku: SKU, email: ALICE, userId: null });
+    const again = await requestStockNotification({
+      productId: KEY,
+      sku: SKU,
+      email: ALICE,
+      userId: null,
+    });
+    expect(again.alreadyRequested).toBe(true);
+  });
+
+  it('leaves a request the customer re-opened mid-send alone', async () => {
+    // `markRequestsNotified` only spends live requests, so a person who signed
+    // up again between the mail going out and the bookkeeping is not silently
+    // removed by it. Modelled here as a cancelled request: neither is live.
+    await requestStockNotification({ productId: KEY, sku: SKU, email: ALICE, userId: null });
+    await cancelStockNotification(KEY, SKU, ALICE);
+
+    expect(await markRequestsNotified(KEY, [ALICE])).toBe(0);
+  });
+
+  it('does not count someone who has never been told', async () => {
+    await requestStockNotification({ productId: KEY, sku: SKU, email: ALICE, userId: null });
+    const id = await seedTransition('back-in-stock');
+
+    const { waiting, alreadyNotified } = await interestedCustomers(KEY, id);
+    expect(waiting).toHaveLength(1);
+    expect(alreadyNotified).toBe(0);
   });
 });
 

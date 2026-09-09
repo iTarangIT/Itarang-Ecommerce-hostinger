@@ -8,7 +8,7 @@ import type { CartItem } from '@/lib/store/types';
 import type { CartTotals } from '@/lib/store/totals';
 import { FREE_SHIPPING_THRESHOLD } from '@/lib/store/totals';
 import { formatPrice } from '@/lib/catalog/pricing';
-import { validateCoupon } from '@/lib/offers/coupons';
+import { COUPONS_DISABLED_NOTE, COUPONS_ENABLED, validateCoupon } from '@/lib/offers/coupons';
 import { useCart } from '@/lib/store/hooks';
 import { useUI } from '@/lib/store/ui-provider';
 import { Button } from '@/components/ui/button';
@@ -168,6 +168,52 @@ export function CouponField() {
   const { toast } = useUI();
   const [code, setCode] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
+
+  /**
+   * A cart saved before coupons were switched off still carries its code.
+   *
+   * Dropping it here is what stops a stale discount being shown in the summary
+   * beside a total the server will not honour. It is a cheap belt to the
+   * server's braces — `buildQuote` ignores the code as well — and it runs from
+   * an effect rather than during render because it writes to the cart store.
+   */
+  const applyCoupon = cart.applyCoupon;
+  const hasCoupon = Boolean(cart.coupon);
+  React.useEffect(() => {
+    if (!COUPONS_ENABLED && hasCoupon) applyCoupon(null);
+  }, [hasCoupon, applyCoupon]);
+
+  /**
+   * Switched off, and shown rather than hidden.
+   *
+   * The business asked for the feature to exist and be unavailable, so the
+   * field keeps its place in the summary and says why it does nothing. A
+   * removed field would look like a build that never had coupons and would
+   * quietly change the layout of a screen people are used to.
+   */
+  if (!COUPONS_ENABLED) {
+    return (
+      <div className="rounded-md border border-dashed border-border bg-surface px-3 py-2.5">
+        <p className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+          <Tag className="h-4 w-4 shrink-0" />
+          {COUPONS_DISABLED_NOTE}
+        </p>
+        <div className="mt-2 flex gap-2">
+          <Input
+            value=""
+            readOnly
+            disabled
+            placeholder="Coupon code"
+            aria-label="Coupon code"
+            className="uppercase"
+          />
+          <Button type="button" variant="outline" className="shrink-0" disabled>
+            Apply
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   if (cart.coupon) {
     return (

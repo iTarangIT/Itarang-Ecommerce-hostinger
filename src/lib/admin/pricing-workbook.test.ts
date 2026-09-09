@@ -1,5 +1,6 @@
 import ExcelJS from 'exceljs';
 import { describe, expect, it } from 'vitest';
+import type { CataloguePriceRow } from '@/lib/products/types';
 import { buildPricingImportReport } from './bulk-pricing';
 import { WorkbookError, buildPricingTemplate, readPricingWorkbook } from './pricing-workbook';
 
@@ -84,54 +85,111 @@ describe('reading an uploaded workbook', () => {
   });
 });
 
-describe('the sample template', () => {
-  it('round-trips through the reader it is a template for', async () => {
-    // The strongest check available: generate the sample, fill in two prices,
-    // and read it back with the production parser.
-    const template = await buildPricingTemplate(['TK12100-01', 'TK-LiFe-5145-01']);
+/**
+ * The template, which is a working copy of the live price list rather than a
+ * blank form. Every assertion here is about the round trip: what comes out
+ * carries current prices, what goes back in is read by the production parser,
+ * and a sheet nobody edited asks for nothing.
+ */
+describe('the price-list template', () => {
+  const CATALOGUE: CataloguePriceRow[] = [
+    {
+      sku: 'TK12100-01',
+      productTitle: 'Powercube 1.4',
+      variantTitle: '12V 100Ah',
+      mrp: 4800000,
+      selling: 4200000,
+    },
+    {
+      sku: 'TK-LiFe-5145-01',
+      productTitle: 'LiFe 5145',
+      variantTitle: '51V 45Ah',
+      mrp: 3500000,
+      selling: 3200000,
+    },
+  ];
 
+  /** Column positions in the generated sheet, 1-based as ExcelJS counts them. */
+  const MRP_CELL = 4;
+  const SELLING_CELL = 5;
+
+  async function openTemplate(rows: CataloguePriceRow[]) {
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(template as unknown as ArrayBuffer);
+    await workbook.xlsx.load((await buildPricingTemplate(rows)) as unknown as ArrayBuffer);
+    return workbook;
+  }
+
+  it('round-trips through the reader it is a template for', async () => {
+    // The strongest check available: generate the sheet, edit one price the way
+    // an administrator would, and read it back with the production parser.
+    const workbook = await openTemplate(CATALOGUE);
     const sheet = workbook.worksheets[0];
-    sheet.getRow(2).getCell(2).value = 45000;
-    sheet.getRow(2).getCell(3).value = 39999;
-    sheet.getRow(3).getCell(2).value = 30000;
-    sheet.getRow(3).getCell(3).value = 28000;
+    sheet.getRow(2).getCell(MRP_CELL).value = 45000;
+    sheet.getRow(2).getCell(SELLING_CELL).value = 39999;
 
     const rows = await readPricingWorkbook((await workbook.xlsx.writeBuffer()) as ArrayBuffer);
-    const report = buildPricingImportReport(rows, ['TK12100-01', 'TK-LiFe-5145-01']);
+    const report = buildPricingImportReport(rows, CATALOGUE);
 
     expect(report.rejected).toEqual([]);
     expect(report.applicable).toBe(true);
+    // Only the edited row is a write. The second row came back exactly as it
+    // was generated, which is the whole point of pre-filling the sheet.
     expect(report.accepted).toEqual([
-      { rowNumber: 2, sku: 'TK12100-01', mrp: 4500000, selling: 3999900 },
-      { rowNumber: 3, sku: 'TK-LiFe-5145-01', mrp: 3000000, selling: 2800000 },
+      {
+        rowNumber: 2,
+        sku: 'TK12100-01',
+        mrp: 4500000,
+        selling: 3999900,
+        previousMrp: 4800000,
+        previousSelling: 4200000,
+      },
     ]);
+    expect(report.unchanged.map((r) => r.sku)).toEqual(['TK-LiFe-5145-01']);
   });
 
-  it('lists the catalogue SKUs with the price columns left blank', async () => {
-    // Blank on purpose: a template pre-filled with today's prices is one
-    // accidental upload away from silently re-applying stale ones.
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(
-      (await buildPricingTemplate(['A-1', 'B-2'])) as unknown as ArrayBuffer,
-    );
-    const sheet = workbook.worksheets[0];
+  it('asks for nothing when it is uploaded exactly as downloaded', async () => {
+    // The accident the blank-cell design was guarding against, tested directly:
+    // an untouched round trip must write nothing rather than re-apply every
+    // price it was carrying.
+    const workbook = await openTemplate(CATALOGUE);
+    const rows = await readPricingWorkbook((await workbook.xlsx.writeBuffer()) as ArrayBuffer);
+    const report = buildPricingImportReport(rows, CATALOGUE);
 
-    expect(sheet.getRow(2).getCell(1).value).toBe('A-1');
-    expect(sheet.getRow(3).getCell(1).value).toBe('B-2');
-    expect(sheet.getRow(2).getCell(2).value ?? '').toBe('');
+    expect(report.rejected).toEqual([]);
+    expect(report.accepted).toEqual([]);
+    expect(report.applicable).toBe(false);
+    expect(report.unchanged).toHaveLength(2);
+  });
+
+  it('lists every SKU with the price it currently carries, in rupees', async () => {
+    const sheet = (await openTemplate(CATALOGUE)).worksheets[0];
+
+    expect(sheet.getRow(2).getCell(1).value).toBe('TK12100-01');
+    expect(sheet.getRow(2).getCell(2).value).toBe('Powercube 1.4');
+    expect(sheet.getRow(2).getCell(MRP_CELL).value).toBe(48000);
+    expect(sheet.getRow(2).getCell(SELLING_CELL).value).toBe(42000);
+  });
+
+  it('leaves an unpriced variant blank rather than writing zero', async () => {
+    // Nullable on purpose, so a draft can exist before its commercial terms do.
+    // A zero in this cell would read as an offer to give the product away.
+    const sheet = (
+      await openTemplate([
+        { sku: 'DRAFT-1', productTitle: 'Unpriced', variantTitle: '', mrp: null, selling: null },
+      ])
+    ).worksheets[0];
+
+    expect(sheet.getRow(2).getCell(MRP_CELL).value ?? '').toBe('');
+    expect(sheet.getRow(2).getCell(SELLING_CELL).value ?? '').toBe('');
   });
 
   it('still produces a usable sheet when the catalogue is empty', async () => {
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load((await buildPricingTemplate([])) as unknown as ArrayBuffer);
+    const workbook = await openTemplate([]);
     expect(workbook.worksheets[0].getRow(2).getCell(1).value).toBe('YOUR-SKU-HERE');
   });
 
   it('ships an instructions sheet', async () => {
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load((await buildPricingTemplate([])) as unknown as ArrayBuffer);
+    const workbook = await openTemplate([]);
     expect(workbook.worksheets.map((s) => s.name)).toContain('How to use');
   });
 });

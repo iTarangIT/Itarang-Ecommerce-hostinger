@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { AlertTriangle, Check, Loader2, Mail, Users } from 'lucide-react';
+import { AlertTriangle, Loader2, Mail, Users } from 'lucide-react';
 import {
   interestedCustomersAction,
   sendBackInStockAction,
@@ -50,6 +50,7 @@ export function InterestedCustomers({
   const [loading, setLoading] = React.useState(false);
   const [customers, setCustomers] = React.useState<InterestedCustomer[] | null>(null);
   const [restockId, setRestockId] = React.useState<number | null>(null);
+  const [alreadyNotified, setAlreadyNotified] = React.useState(0);
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const [sending, setSending] = React.useState(false);
   const [result, setResult] = React.useState<SendResult | null>(null);
@@ -60,12 +61,14 @@ export function InterestedCustomers({
       const data = await interestedCustomersAction(productKey);
       setCustomers(data.customers);
       setRestockId(data.restockId);
+      setAlreadyNotified(data.alreadyNotified);
       // Only explicit opt-ins are pre-selected. Anything else is a decision
-      // somebody has to make on purpose.
+      // somebody has to make on purpose. Everyone returned is still waiting —
+      // the query no longer lists people who have been told.
       setSelected(
         new Set(
           data.customers
-            .filter((customer) => customer.source === 'notify-me' && !customer.notified)
+            .filter((customer) => customer.source === 'notify-me')
             .map((customer) => customer.email),
         ),
       );
@@ -79,6 +82,9 @@ export function InterestedCustomers({
     setOpen(next);
     if (next && customers === null) void load();
   };
+
+  const total = customers?.length ?? 0;
+  const allSelected = total > 0 && selected.size === total;
 
   const send = async () => {
     setSending(true);
@@ -112,10 +118,37 @@ export function InterestedCustomers({
             </p>
           ) : !customers || customers.length === 0 ? (
             <p className="text-xs text-muted-foreground">
-              Nobody has asked about this product, saved it, or put it in a cart.
+              {alreadyNotified > 0
+                ? `Everybody interested in this product has been told — ${alreadyNotified} customer${alreadyNotified === 1 ? '' : 's'} notified about this restock.`
+                : 'Nobody has asked about this product, saved it, or put it in a cart.'}
             </p>
           ) : (
             <>
+              {/* One control for the whole list, because the business case is
+                  "eleven people want this, tell all of them". Ticking eleven
+                  boxes to do the obvious thing is the sort of friction that
+                  ends with somebody missing the twelfth. */}
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2">
+                <label className="flex items-center gap-2 text-xs font-medium text-foreground">
+                  <Checkbox
+                    checked={allSelected}
+                    onChange={() =>
+                      setSelected(
+                        allSelected ? new Set() : new Set(customers.map((c) => c.email)),
+                      )
+                    }
+                    aria-label="Select every interested customer"
+                  />
+                  {allSelected ? 'Clear selection' : `Select all ${customers.length}`}
+                </label>
+                <span className="text-2xs text-muted-foreground">
+                  {selected.size} selected
+                  {alreadyNotified > 0
+                    ? ` · ${alreadyNotified} already told and no longer listed`
+                    : ''}
+                </span>
+              </div>
+
               <ul className="space-y-1.5">
                 {customers.map((customer) => (
                   <li key={customer.email} className="flex flex-wrap items-center gap-2 text-xs">
@@ -140,12 +173,6 @@ export function InterestedCustomers({
                     >
                       {SOURCE_LABEL[customer.source]}
                     </span>
-                    {customer.notified ? (
-                      <span className="inline-flex items-center gap-1 text-2xs font-semibold text-success">
-                        <Check className="h-3 w-3" />
-                        Already told about this restock
-                      </span>
-                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -175,7 +202,9 @@ export function InterestedCustomers({
                   ) : (
                     <Mail className="h-4 w-4" />
                   )}
-                  Send “back in stock” to {selected.size}
+                  {allSelected && total > 1
+                    ? `Send “back in stock” to all ${total}`
+                    : `Send “back in stock” to ${selected.size}`}
                 </Button>
 
                 {!notificationsEnabled ? (
@@ -200,7 +229,9 @@ export function InterestedCustomers({
                     `${result.sent} sent` +
                       (result.skipped > 0 ? `, ${result.skipped} already notified` : '') +
                       (result.failed > 0 ? `, ${result.failed} failed` : '') +
-                      '.'}
+                      (result.sent > 0
+                        ? '. Everyone told has been taken off this list.'
+                        : '.')}
                 </p>
               ) : null}
             </>

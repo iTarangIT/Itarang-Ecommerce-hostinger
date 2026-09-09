@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { BadgePercent, CreditCard, Layers, Smartphone, Tag, Truck } from 'lucide-react';
 import type { Offer, OfferKind } from '@/lib/commerce/types';
+import { COUPONS_ENABLED } from '@/lib/offers/coupons';
 
 const ICONS: Record<OfferKind, typeof Tag> = {
   bank: CreditCard,
@@ -18,7 +19,10 @@ const ICONS: Record<OfferKind, typeof Tag> = {
  * what the terms are.
  */
 export function OfferStack({ offers }: { offers: Offer[] }) {
-  if (offers.length === 0) return null;
+  // Same rule as the offers strip: a code the cart refuses is not an offer.
+  const shown = COUPONS_ENABLED ? offers : offers.filter((offer) => offer.kind !== 'coupon');
+
+  if (shown.length === 0) return null;
 
   return (
     <section aria-labelledby="offers-heading" className="rounded-lg border border-border bg-card">
@@ -29,7 +33,7 @@ export function OfferStack({ offers }: { offers: Offer[] }) {
         Available offers
       </h2>
       <ul className="divide-y divide-border">
-        {offers.slice(0, 4).map((offer) => {
+        {shown.slice(0, 4).map((offer) => {
           const Icon = ICONS[offer.kind];
           return (
             <li key={offer.id} className="flex gap-3 px-4 py-3">

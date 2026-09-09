@@ -8,6 +8,30 @@ import type { AppliedCoupon, CartItem } from '@/lib/store/types';
  * round trip. When checkout is built, the server re-validates the same rules —
  * client-side validation is a convenience, never the authority.
  */
+
+/**
+ * The master switch, kept as one constant so there is one thing to flip.
+ *
+ * **Off.** The discount rules below have never been confirmed by the business —
+ * the amounts, the categories and the minimum cart values are all placeholders
+ * — and a coupon is the one part of the checkout a customer can hold us to. So
+ * the feature stays built and stays wired, and nothing accepts a code until
+ * somebody signs off on what the codes are worth.
+ *
+ * Modelled on `PURCHASE_ENABLED` in `lib/commerce/purchase.ts`, deliberately:
+ * one boolean, annotated `boolean` rather than left as a literal so the
+ * compiler does not narrow either branch to unreachable code and the enabled
+ * path stays type-checked while it is switched off.
+ *
+ * Flipping this to `true` restores the feature everywhere at once. The single
+ * choke point is `validateCoupon` below — every surface that can apply a
+ * discount, the cart field and the server quote alike, goes through it, so
+ * there is no path that can honour a code while this is false.
+ */
+export const COUPONS_ENABLED: boolean = false;
+
+/** What a shopper is told where the coupon field would be. */
+export const COUPONS_DISABLED_NOTE = 'Coupon codes are not active at the moment.';
 export interface CouponRule {
   code: string;
   label: string;
@@ -77,7 +101,18 @@ export type CouponResult =
   | { ok: true; coupon: AppliedCoupon }
   | { ok: false; reason: string };
 
+/**
+ * The one place a code is turned into a discount.
+ *
+ * Both the cart field and `buildQuote` call it, which is why the master switch
+ * is tested here rather than in either of them: a surface that forgot the check
+ * would otherwise be able to apply a discount the server would then honour.
+ * Checked before the code is even looked up, so a disabled build cannot be
+ * probed for which codes exist.
+ */
 export function validateCoupon(code: string, items: CartItem[]): CouponResult {
+  if (!COUPONS_ENABLED) return { ok: false, reason: COUPONS_DISABLED_NOTE };
+
   const normalised = code.trim().toUpperCase();
   if (!normalised) return { ok: false, reason: 'Enter a coupon code.' };
 

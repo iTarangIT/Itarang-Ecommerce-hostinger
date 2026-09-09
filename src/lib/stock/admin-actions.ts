@@ -5,12 +5,14 @@ import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { currentUser } from '@/lib/auth/session';
 import { mailerIsLive, sendMail } from '@/lib/email/mailer';
-import { backInStockMessage } from '@/lib/email/templates';
+import { backInStockMessage, type BackInStockProduct } from '@/lib/email/templates';
 import { productRepository } from '@/lib/products/postgres-repository';
+import type { ProductRecord } from '@/lib/products/types';
 import { productPath } from '@/lib/routes';
 import {
   claimNotificationSends,
   interestedCustomers,
+  markRequestsNotified,
   releaseNotificationSend,
 } from './notifications';
 import { setStockNotificationsEnabled, stockNotificationSettingsOf } from './settings';
@@ -119,6 +121,11 @@ export async function sendBackInStockAction(
     return { sent: 0, skipped: 0, failed: 0, error: 'That product no longer exists.' };
   }
 
+  // Composed once, outside the loop: it is the same product for every
+  // recipient, and building it per address would re-read nothing but would
+  // invite somebody to make it depend on the recipient later.
+  const details = backInStockDetails(product);
+
   const claimed = await claimNotificationSends(
     restock.id,
     parsed.data.emails,
@@ -126,13 +133,13 @@ export async function sendBackInStockAction(
   );
   const skipped = parsed.data.emails.length - claimed.length;
 
-  let sent = 0;
+  const delivered: string[] = [];
   let failed = 0;
 
   for (const email of claimed) {
     try {
-      await sendMail(backInStockMessage(email, product.title, productPath(product.slug)));
-      sent += 1;
+      await sendMail(backInStockMessage(email, details));
+      delivered.push(email);
     } catch (error) {
       failed += 1;
       await releaseNotificationSend(restock.id, email).catch(() => {});
@@ -140,20 +147,73 @@ export async function sendBackInStockAction(
     }
   }
 
+  /**
+   * Close the requests that were actually fulfilled.
+   *
+   * `delivered`, not `claimed`: an address whose send failed had its claim
+   * released above so it can be retried, and spending its request here would
+   * take it off the list having told it nothing.
+   *
+   * Best-effort. A failure leaves the request open, which shows the customer in
+   * the list again — where the claim in `stock_notification_sends` will refuse
+   * a second mail. Failing this write can therefore waste an administrator's
+   * attention but cannot produce a duplicate email, so it must not turn a
+   * successful send into a reported error.
+   */
+  if (delivered.length > 0) {
+    await markRequestsNotified(parsed.data.productKey, delivered).catch((error: unknown) => {
+      console.warn('[stock-notify] could not close fulfilled requests', error);
+    });
+  }
+
   revalidatePath(OUT_OF_STOCK);
   revalidatePath(`/admin/products/${parsed.data.productKey}`);
 
-  return { sent, skipped, failed };
+  return { sent: delivered.length, skipped, failed };
 }
 
-/** Everyone with a recorded interest, and whether they have been told. */
+/**
+ * The product as the notification email describes it.
+ *
+ * Read from the catalogue at send time, so the price in the message is the
+ * price on the page its button leads to.
+ *
+ * The variant chosen is the cheapest one that is actually in stock, falling
+ * back to the cheapest priced variant. That matters because this mail exists to
+ * say a product is buyable again: quoting the price of a variant that is still
+ * sold out would be true of the product and false of the offer.
+ */
+function backInStockDetails(product: ProductRecord): BackInStockProduct {
+  const priced = product.variants.filter((variant) => variant.selling !== null);
+  const inStock = priced.filter((variant) => (variant.stock ?? 0) > 0);
+  const cheapest = (rows: typeof priced) =>
+    rows.reduce<(typeof priced)[number] | null>(
+      (best, row) => (best === null || row.selling! < best.selling! ? row : best),
+      null,
+    );
+  const variant = cheapest(inStock) ?? cheapest(priced);
+
+  const image = product.media.find((item) => item.isPrimary) ?? product.media[0];
+
+  return {
+    title: product.title,
+    path: productPath(product.slug),
+    price: variant?.selling ?? null,
+    mrp: variant?.mrp ?? null,
+    // One sentence, not the whole description. This is a notification with a
+    // reminder of what the product is, not a product page in an inbox.
+    description: product.description[0] ?? product.subtitle ?? '',
+    imageUrl: image?.url ?? null,
+    imageAlt: image?.altText || product.title,
+  };
+}
+
+/** Everyone still waiting, and how many have already been told. */
 export async function interestedCustomersAction(productKey: string) {
   await requireAdminActor();
   const restock = await latestRestock(productKey);
-  return {
-    restockId: restock?.id ?? null,
-    customers: await interestedCustomers(productKey, restock?.id ?? null),
-  };
+  const { waiting, alreadyNotified } = await interestedCustomers(productKey, restock?.id ?? null);
+  return { restockId: restock?.id ?? null, customers: waiting, alreadyNotified };
 }
 
 /** The console's master switch for stock notification mail. */

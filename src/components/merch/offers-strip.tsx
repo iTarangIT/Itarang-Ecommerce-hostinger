@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { ArrowRight, BadgePercent, CreditCard, Smartphone, Tag, Truck, Layers } from 'lucide-react';
 import type { Offer, OfferKind } from '@/lib/commerce/types';
+import { COUPONS_ENABLED } from '@/lib/offers/coupons';
 import { SectionHeader } from '@/components/ui/section';
 
 const ICONS: Record<OfferKind, typeof Tag> = {
@@ -12,17 +13,33 @@ const ICONS: Record<OfferKind, typeof Tag> = {
   bundle: Layers,
 };
 
+/**
+ * Filtered here rather than at each of the two call sites.
+ *
+ * A `coupon` offer's whole content is a code to type into the cart, and the
+ * cart refuses every code while `COUPONS_ENABLED` is false. One filter in the
+ * component means neither the home page nor the offers page can advertise one
+ * by forgetting.
+ */
 export function OffersStrip({ offers }: { offers: Offer[] }) {
+  const shown = COUPONS_ENABLED ? offers : offers.filter((offer) => offer.kind !== 'coupon');
+
+  if (shown.length === 0) return null;
+
   return (
     <section className="container section-tight">
       <SectionHeader
         eyebrow="Ways to save"
         title="Offers running now"
-        description="Bank, UPI and EMI savings apply automatically at checkout. Coupon codes are entered in the cart."
+        description={
+          COUPONS_ENABLED
+            ? 'Bank, UPI and EMI savings apply automatically at checkout. Coupon codes are entered in the cart.'
+            : 'Bank, UPI and EMI savings apply automatically at checkout.'
+        }
         action={{ label: 'All offers and terms', href: '/offers' }}
       />
       <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {offers.slice(0, 6).map((offer) => {
+        {shown.slice(0, 6).map((offer) => {
           const Icon = ICONS[offer.kind];
           return (
             <li

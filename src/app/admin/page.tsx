@@ -109,6 +109,13 @@ export default async function AdminOrdersPage({
             Products
           </Link>
           <Link
+            href="/admin/customers"
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+          >
+            <UserRound className="h-4 w-4" />
+            Customers
+          </Link>
+          <Link
             href="/admin/funnel"
             className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
           >

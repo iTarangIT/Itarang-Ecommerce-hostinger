@@ -255,7 +255,14 @@ export default async function AnalyticsPage({
         </h2>
         <p className="mt-1.5 text-sm text-muted-foreground">
           From the delivery address recorded on each paid order, so it reconciles with the revenue
-          above. A customer moving house does not move past orders.
+          above. A customer moving house does not move past orders.{' '}
+          <Link
+            href="/admin/customers"
+            className="font-medium text-primary underline-offset-4 hover:text-accent-600 hover:underline"
+          >
+            See the customers behind these figures
+          </Link>
+          , with what each of them bought.
         </p>
 
         {places.length === 0 ? (

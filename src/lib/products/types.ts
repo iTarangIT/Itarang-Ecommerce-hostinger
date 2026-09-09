@@ -274,6 +274,26 @@ export interface VariantInput {
   availability: Availability | null;
 }
 
+/**
+ * One catalogue variant as the bulk-pricing round trip sees it.
+ *
+ * Deliberately the whole of what that feature needs and nothing more: a SKU to
+ * key on, two prices, and the titles a human uses to recognise the row in a
+ * spreadsheet. The product title is carried alongside the variant's own because
+ * a variant title is frequently empty — a single-variant product has nothing to
+ * distinguish — and "48V 100Ah" on its own is not a row anybody can identify.
+ *
+ * Both prices are nullable, as the column is. A variant may legitimately have
+ * no price yet.
+ */
+export interface CataloguePriceRow {
+  sku: string;
+  productTitle: string;
+  variantTitle: string;
+  mrp: Paise | null;
+  selling: Paise | null;
+}
+
 export interface MediaInput {
   storagePath: string;
   altText?: string;

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPricingImportReport,
   mapHeader,
+  type CatalogueSkuPrice,
   type RawPriceRow,
 } from './bulk-pricing';
 
@@ -12,9 +13,22 @@ import {
  * a currency-formatted cell, a SKU that has been lower-cased by a CSV round
  * trip, a row pasted twice. The point of the module being pure is that all of
  * them can be checked without a database.
+ *
+ * The catalogue below carries *prices*, not just SKUs, because the report's
+ * central question is no longer "is this row valid" but "does this row say
+ * anything new". The template ships pre-filled with current prices, so a real
+ * upload is mostly rows that agree with what is already stored.
+ *
+ * `TK-LiFe-7332-01` is deliberately unpriced. The column is nullable so a draft
+ * can exist before its commercial terms do, and giving such a variant a price
+ * is a change — with nothing to show as the previous value.
  */
 
-const KNOWN = ['TK12100-01', 'TK-LiFe-5145-01', 'TK-LiFe-7332-01'];
+const CATALOGUE: CatalogueSkuPrice[] = [
+  { sku: 'TK12100-01', mrp: 4800000, selling: 4200000 },
+  { sku: 'TK-LiFe-5145-01', mrp: 3500000, selling: 3200000 },
+  { sku: 'TK-LiFe-7332-01', mrp: null, selling: null },
+];
 
 function row(rowNumber: number, sku: string, mrp: string, selling: string): RawPriceRow {
   return { rowNumber, sku, mrp, selling };
@@ -22,51 +36,147 @@ function row(rowNumber: number, sku: string, mrp: string, selling: string): RawP
 
 describe('rows that are applied', () => {
   it('accepts a straightforward row and converts rupees to paise', () => {
-    const report = buildPricingImportReport([row(2, 'TK12100-01', '45000', '39999')], KNOWN);
+    const report = buildPricingImportReport([row(2, 'TK12100-01', '45000', '39999')], CATALOGUE);
     expect(report.rejected).toEqual([]);
     expect(report.accepted).toEqual([
-      { rowNumber: 2, sku: 'TK12100-01', mrp: 4500000, selling: 3999900 },
+      {
+        rowNumber: 2,
+        sku: 'TK12100-01',
+        mrp: 4500000,
+        selling: 3999900,
+        previousMrp: 4800000,
+        previousSelling: 4200000,
+      },
     ]);
     expect(report.applicable).toBe(true);
   });
 
   it('accepts paise in the sheet', () => {
-    const report = buildPricingImportReport([row(2, 'TK12100-01', '45000.50', '45000.50')], KNOWN);
+    const report = buildPricingImportReport(
+      [row(2, 'TK12100-01', '45000.50', '45000.50')],
+      CATALOGUE,
+    );
     expect(report.accepted[0].mrp).toBe(4500050);
   });
 
   it('accepts a currency-formatted cell', () => {
     // What a sheet exported from accounting software actually contains.
-    const report = buildPricingImportReport([row(2, 'TK12100-01', '₹ 45,000', '39,999')], KNOWN);
+    const report = buildPricingImportReport([row(2, 'TK12100-01', '₹ 45,000', '39,999')], CATALOGUE);
     expect(report.rejected).toEqual([]);
     expect(report.accepted[0]).toMatchObject({ mrp: 4500000, selling: 3999900 });
   });
 
   it('accepts a selling price equal to the MRP', () => {
-    const report = buildPricingImportReport([row(2, 'TK12100-01', '45000', '45000')], KNOWN);
+    const report = buildPricingImportReport([row(2, 'TK12100-01', '45000', '45000')], CATALOGUE);
     expect(report.rejected).toEqual([]);
   });
 
   it('accepts zero, which is how a price is withdrawn', () => {
-    const report = buildPricingImportReport([row(2, 'TK12100-01', '0', '0')], KNOWN);
+    const report = buildPricingImportReport([row(2, 'TK12100-01', '0', '0')], CATALOGUE);
     expect(report.accepted[0]).toMatchObject({ mrp: 0, selling: 0 });
   });
 
   it('matches a SKU whatever case and padding the file uses', () => {
-    const report = buildPricingImportReport([row(2, '  tk12100-01 ', '45000', '39999')], KNOWN);
+    const report = buildPricingImportReport([row(2, '  tk12100-01 ', '45000', '39999')], CATALOGUE);
     expect(report.rejected).toEqual([]);
     // Written back with the catalogue's spelling, so the UPDATE cannot miss.
     expect(report.accepted[0].sku).toBe('TK12100-01');
   });
 
   it('reports how many catalogue SKUs the file left alone', () => {
-    const report = buildPricingImportReport([row(2, 'TK12100-01', '45000', '39999')], KNOWN);
+    const report = buildPricingImportReport([row(2, 'TK12100-01', '45000', '39999')], CATALOGUE);
     expect(report.untouchedSkuCount).toBe(2);
+  });
+
+  it('prices a variant that had none, with no previous figure to show', () => {
+    const report = buildPricingImportReport(
+      [row(2, 'TK-LiFe-7332-01', '52000', '48000')],
+      CATALOGUE,
+    );
+    expect(report.accepted[0]).toMatchObject({
+      mrp: 5200000,
+      selling: 4800000,
+      previousMrp: null,
+      previousSelling: null,
+    });
+  });
+});
+
+/**
+ * The half of the feature that makes the round trip safe.
+ *
+ * The downloaded template carries every current price, so an administrator
+ * changing two products uploads a file that restates the other forty. Writing
+ * those forty would stamp `updated_by` and `updated_at` on products nobody
+ * touched, which is a false audit trail, and would push forty pointless rows
+ * through the catalogue invalidation.
+ */
+describe('rows that say nothing new', () => {
+  it('classifies a row matching the catalogue as unchanged, not accepted', () => {
+    const report = buildPricingImportReport([row(2, 'TK12100-01', '48000', '42000')], CATALOGUE);
+    expect(report.rejected).toEqual([]);
+    expect(report.accepted).toEqual([]);
+    expect(report.unchanged).toEqual([
+      { rowNumber: 2, sku: 'TK12100-01', mrp: 4800000, selling: 4200000 },
+    ]);
+  });
+
+  it('compares in paise, so formatting the same figure differently is still unchanged', () => {
+    // The three ways one price reaches us from a spreadsheet.
+    for (const [mrp, selling] of [
+      ['48000', '42000'],
+      ['₹48,000', '₹42,000'],
+      ['48000.00', '42000.00'],
+    ]) {
+      const report = buildPricingImportReport([row(2, 'TK12100-01', mrp!, selling!)], CATALOGUE);
+      expect(report.accepted).toEqual([]);
+      expect(report.unchanged).toHaveLength(1);
+    }
+  });
+
+  it('treats a half-change as a change', () => {
+    // Only the selling price moved. The row is still a write.
+    const report = buildPricingImportReport([row(2, 'TK12100-01', '48000', '39999')], CATALOGUE);
+    expect(report.accepted).toHaveLength(1);
+    expect(report.unchanged).toEqual([]);
+  });
+
+  it('does not count an unchanged row as a SKU the file failed to mention', () => {
+    // Both halves describe "left alone", and a row must land in exactly one of
+    // them or the report double-counts the catalogue.
+    const report = buildPricingImportReport(
+      [row(2, 'TK12100-01', '48000', '42000'), row(3, 'TK-LiFe-5145-01', '30000', '28000')],
+      CATALOGUE,
+    );
+    expect(report.unchanged).toHaveLength(1);
+    expect(report.accepted).toHaveLength(1);
+    expect(report.untouchedSkuCount).toBe(1);
+  });
+
+  it('is not applicable when every row is unchanged, and reports no rejections', () => {
+    // An administrator who downloads the template and uploads it untouched has
+    // not made a mistake. Nothing is written and nothing is wrong.
+    const report = buildPricingImportReport(
+      [row(2, 'TK12100-01', '48000', '42000'), row(3, 'TK-LiFe-5145-01', '35000', '32000')],
+      CATALOGUE,
+    );
+    expect(report.applicable).toBe(false);
+    expect(report.rejected).toEqual([]);
+    expect(report.unchanged).toHaveLength(2);
+  });
+
+  it('still rejects an invalid row that happens to sit beside unchanged ones', () => {
+    const report = buildPricingImportReport(
+      [row(2, 'TK12100-01', '48000', '42000'), row(3, 'TK-LiFe-5145-01', '30000', '31000')],
+      CATALOGUE,
+    );
+    expect(report.rejected.map((r) => r.problem)).toEqual(['selling-above-mrp']);
+    expect(report.applicable).toBe(false);
   });
 });
 
 describe('rows that are rejected', () => {
-  const reject = (r: RawPriceRow) => buildPricingImportReport([r], KNOWN).rejected[0];
+  const reject = (r: RawPriceRow) => buildPricingImportReport([r], CATALOGUE).rejected[0];
 
   it('rejects an empty SKU', () => {
     expect(reject(row(2, '   ', '45000', '39999')).problem).toBe('missing-sku');
@@ -98,7 +208,7 @@ describe('rows that are rejected', () => {
     // assumed to be the intended one, so neither is applied.
     const report = buildPricingImportReport(
       [row(2, 'TK12100-01', '45000', '39999'), row(3, 'tk12100-01', '46000', '41000')],
-      KNOWN,
+      CATALOGUE,
     );
     expect(report.accepted).toEqual([]);
     expect(report.rejected.map((r) => r.rowNumber)).toEqual([2, 3]);
@@ -118,7 +228,7 @@ describe('all or nothing', () => {
         row(3, 'NOT-A-SKU', '1000', '900'),
         row(4, 'TK-LiFe-5145-01', '30000', '28000'),
       ],
-      KNOWN,
+      CATALOGUE,
     );
 
     // The good rows are still reported as accepted, so the administrator can
@@ -129,7 +239,7 @@ describe('all or nothing', () => {
   });
 
   it('refuses an empty file rather than reporting a successful no-op', () => {
-    const report = buildPricingImportReport([], KNOWN);
+    const report = buildPricingImportReport([], CATALOGUE);
     expect(report.applicable).toBe(false);
   });
 });
@@ -149,6 +259,16 @@ describe('the header row', () => {
       sku: 2,
       mrp: 3,
       selling: 1,
+    });
+  });
+
+  it('reads the template this console generates', () => {
+    // The generated sheet carries Product and Variant columns for legibility.
+    // They are ignored on the way back in; this is the assertion that says so.
+    expect(mapHeader(['SKU', 'Product', 'Variant', 'MRP', 'Selling Price'])).toEqual({
+      sku: 0,
+      mrp: 3,
+      selling: 4,
     });
   });
 

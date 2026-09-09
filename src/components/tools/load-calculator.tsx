@@ -7,6 +7,7 @@ import {
   BatteryCharging,
   Check,
   Copy,
+  Home,
   Info,
   Minus,
   Plus,
@@ -189,9 +190,46 @@ export function LoadCalculator({ syncUrl = true, currentProductId }: LoadCalcula
 
   const applyPreset = (preset: (typeof HOME_PRESETS)[number]) => {
     setSelection(preset.selection);
+    // Starting again from a property type means starting again: a custom
+    // appliance left over from a previous attempt would be silently added to a
+    // preset that says nothing about it.
+    setCustom([]);
     setBackupHours(preset.hours);
     resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   };
+
+  /**
+   * Which property type is currently showing, if any.
+   *
+   * **Derived, not stored.** Remembering which button was pressed would leave
+   * "3 BHK" highlighted after the shopper had added an air conditioner and two
+   * more fans, which is a claim about their home that the screen can no longer
+   * support. Comparing the actual selection means the highlight is true by
+   * construction: it lights up when a preset is applied and goes out the moment
+   * the working diverges from it.
+   */
+  const activePreset = React.useMemo(() => {
+    if (custom.length > 0) return null;
+    const ids = Object.keys(selection);
+    if (ids.length === 0) return null;
+
+    return (
+      HOME_PRESETS.find((preset) => {
+        const keys = Object.keys(preset.selection);
+        return (
+          keys.length === ids.length &&
+          keys.every((key) => preset.selection[key] === selection[key])
+        );
+      })?.id ?? null
+    );
+  }, [selection, custom]);
+
+  /** How many appliances are switched on, for the summary line. */
+  const deviceCount =
+    Object.values(selection).reduce((sum, quantity) => sum + quantity, 0) +
+    custom.reduce((sum, entry) => sum + entry.quantity, 0);
+
+  const clampHours = (value: number) => Math.min(12, Math.max(1, value));
 
   return (
     <div className="grid gap-8 lg:grid-cols-12 lg:gap-10">
@@ -202,27 +240,57 @@ export function LoadCalculator({ syncUrl = true, currentProductId }: LoadCalcula
             <span className="mr-2 inline-grid h-6 w-6 place-items-center rounded-full bg-accent text-2xs font-bold text-accent-foreground">
               1
             </span>
-            What size is your home?
+            Choose your property type
           </h2>
           <p className="mt-1.5 text-sm text-muted-foreground">
             A starting point you can edit — nobody knows their connected load, but everybody knows
-            how many bedrooms they have.
+            how many bedrooms they have. These are household appliances only; this tool sizes home
+            backup and does not size electric-vehicle batteries.
           </p>
+          {/* The selected card is filled, not merely outlined.
+              A tint on a white card is easy to miss on a phone in daylight, and
+              this is the one control on the screen whose whole job is to say
+              "this is the home we are sizing for". `aria-pressed` carries the
+              same fact to a screen reader, which colour alone cannot. */}
           <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {HOME_PRESETS.map((preset) => (
-              <li key={preset.id}>
-                <button
-                  type="button"
-                  onClick={() => applyPreset(preset)}
-                  className="w-full rounded-lg border border-border bg-card p-3.5 text-left transition-colors hover:border-accent/50 hover:bg-surface"
-                >
-                  <span className="block text-sm font-semibold text-foreground">{preset.label}</span>
-                  <span className="mt-0.5 block text-xs text-muted-foreground">
-                    {preset.description}
-                  </span>
-                </button>
-              </li>
-            ))}
+            {HOME_PRESETS.map((preset) => {
+              const active = activePreset === preset.id;
+              return (
+                <li key={preset.id}>
+                  <button
+                    type="button"
+                    onClick={() => applyPreset(preset)}
+                    aria-pressed={active}
+                    className={cn(
+                      'flex w-full items-start gap-2.5 rounded-lg border p-3.5 text-left transition-colors',
+                      active
+                        ? 'border-accent bg-accent text-accent-foreground shadow-card'
+                        : 'border-border bg-card hover:border-accent/50 hover:bg-surface',
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        'mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full',
+                        active ? 'bg-accent-foreground/20' : 'bg-accent-50 text-accent-600',
+                      )}
+                    >
+                      <Home className="h-4 w-4" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-semibold">{preset.label}</span>
+                      <span
+                        className={cn(
+                          'mt-0.5 block text-xs',
+                          active ? 'text-accent-foreground/80' : 'text-muted-foreground',
+                        )}
+                      >
+                        {preset.description}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </section>
 
@@ -260,8 +328,8 @@ export function LoadCalculator({ syncUrl = true, currentProductId }: LoadCalcula
           >
             {(
               [
-                ['devices', 'By device'],
-                ['rooms', 'By room'],
+                ['devices', 'Select by devices'],
+                ['rooms', 'Select by rooms'],
               ] as const
             ).map(([id, label]) => (
               <button
@@ -271,15 +339,31 @@ export function LoadCalculator({ syncUrl = true, currentProductId }: LoadCalcula
                 aria-selected={mode === id}
                 onClick={() => setMode(id)}
                 className={cn(
-                  'rounded-md px-3.5 py-1.5 text-sm font-medium transition-colors',
+                  'rounded-md px-3.5 py-1.5 text-sm font-semibold transition-colors',
                   mode === id
-                    ? 'bg-card text-foreground shadow-card'
+                    ? 'bg-accent text-accent-foreground shadow-card'
                     : 'text-muted-foreground hover:text-foreground',
                 )}
               >
                 {label}
               </button>
             ))}
+          </div>
+
+          {/* The number the shopper is adding up in their head, printed once
+              and large. Everything below changes it, and without it the running
+              total only appears in the results panel — which on a phone is a
+              scroll away from the control being pressed. */}
+          <div className="mt-4 flex flex-wrap items-baseline justify-between gap-2 rounded-lg border border-accent/30 bg-accent-50 px-4 py-3">
+            <span className="text-sm font-medium text-foreground">Total connected load</span>
+            <span className="tabular font-display text-2xl font-bold text-foreground">
+              {sizing.runningWatts} Watts
+            </span>
+            <span className="w-full text-xs text-muted-foreground">
+              {deviceCount === 0
+                ? 'Nothing selected yet.'
+                : `${deviceCount} appliance${deviceCount === 1 ? '' : 's'} on backup.`}
+            </span>
           </div>
 
           {mode === 'rooms' ? (
@@ -308,9 +392,9 @@ export function LoadCalculator({ syncUrl = true, currentProductId }: LoadCalcula
             </div>
           )}
 
-          {/* Anything the list does not cover. Livguard calls it "Add Device";
-              the wattage is the shopper's, because we do not know their
-              appliance and will not invent a rating for it. */}
+          {/* Anything the list does not cover. The wattage is the shopper's,
+              because we do not know their appliance and will not invent a
+              rating for it. */}
           <CustomAppliances custom={custom} onChange={setCustom} />
         </section>
       </div>
@@ -325,30 +409,64 @@ export function LoadCalculator({ syncUrl = true, currentProductId }: LoadCalcula
               </span>
               How long do you need backup for?
             </h2>
-            <div className="mt-4 flex items-center gap-3">
-              <input
-                type="range"
-                min={1}
-                max={12}
-                step={1}
-                value={backupHours}
-                onChange={(e) => setBackupHours(Number(e.target.value))}
-                aria-label="Backup hours"
-                className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-border accent-[hsl(var(--accent))]"
-              />
-              <span className="tabular w-20 shrink-0 text-right font-display text-lg font-bold text-foreground">
-                {backupHours} {backupHours === 1 ? 'hour' : 'hours'}
+            {/* A stepper rather than a bare slider.
+                Backup hours is a small whole number a shopper has an opinion
+                about, and on a phone a twelve-stop slider is a guess. The
+                slider stays underneath for scrubbing; the buttons are what make
+                "four, exactly" reachable. */}
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <span className="text-sm text-card-foreground">I would require</span>
+              <div className="inline-flex items-center rounded-md border border-input bg-card">
+                <button
+                  type="button"
+                  onClick={() => setBackupHours(clampHours(backupHours - 1))}
+                  disabled={backupHours <= 1}
+                  aria-label="One hour less of backup"
+                  className="grid h-9 w-9 place-items-center text-foreground hover:bg-secondary disabled:opacity-40"
+                >
+                  <Minus className="h-4 w-4" />
+                </button>
+                <span className="tabular w-10 text-center font-display text-lg font-bold text-foreground">
+                  {backupHours}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setBackupHours(clampHours(backupHours + 1))}
+                  disabled={backupHours >= 12}
+                  aria-label="One hour more of backup"
+                  className="grid h-9 w-9 place-items-center text-foreground hover:bg-secondary disabled:opacity-40"
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+              </div>
+              <span className="text-sm text-card-foreground">
+                {backupHours === 1 ? 'hour' : 'hours'} of backup in a day
               </span>
             </div>
+
+            <input
+              type="range"
+              min={1}
+              max={12}
+              step={1}
+              value={backupHours}
+              onChange={(e) => setBackupHours(clampHours(Number(e.target.value)))}
+              aria-label="Backup hours"
+              className="mt-3 h-1.5 w-full cursor-pointer appearance-none rounded-full bg-border accent-[hsl(var(--accent))]"
+            />
 
             {/* Simultaneous use. Reduces the battery, never the inverter —
                 see `DIVERSITY_OPTIONS`. Defaulted to 100% so the shopper opts
                 in to the assumption rather than inheriting it. */}
             <fieldset className="mt-5">
               <legend className="text-sm font-medium text-card-foreground">
-                How much of it runs at the same time?
+                Average consumption — how much of it runs at the same time?
               </legend>
-              <div className="mt-2 flex flex-wrap gap-2">
+              {/* A segmented control filling its width, so the three options
+                  read as one choice with one answer selected. Three separate
+                  outlined buttons made the selected one look like a button that
+                  happened to be hovered. */}
+              <div className="mt-2 grid grid-cols-3 gap-1 rounded-lg border border-input bg-surface p-1">
                 {DIVERSITY_OPTIONS.map((option) => (
                   <button
                     key={option.value}
@@ -357,10 +475,10 @@ export function LoadCalculator({ syncUrl = true, currentProductId }: LoadCalcula
                     aria-pressed={diversity === option.value}
                     title={option.description}
                     className={cn(
-                      'rounded-md border px-3 py-1.5 text-sm font-medium transition-colors',
+                      'rounded-md px-3 py-2 text-sm font-semibold transition-colors',
                       diversity === option.value
-                        ? 'border-accent bg-accent text-accent-foreground'
-                        : 'border-input bg-card text-foreground hover:border-accent/50',
+                        ? 'bg-accent text-accent-foreground shadow-card'
+                        : 'text-muted-foreground hover:text-foreground',
                     )}
                   >
                     {option.label}
@@ -823,12 +941,37 @@ function ApplianceList({
 }) {
   if (appliances.length === 0) return null;
 
+  const groupWatts = appliances.reduce(
+    (sum, appliance) => sum + appliance.watts * (selection[appliance.id] ?? 0),
+    0,
+  );
+
   return (
     <div>
-      <h3 className="font-display text-sm font-semibold uppercase tracking-wide text-accent-600">
-        {title}
-      </h3>
-      <ul className="mt-2.5 divide-y divide-border rounded-lg border border-border bg-card">
+      <div className="flex items-baseline justify-between gap-3">
+        <h3 className="font-display text-sm font-semibold uppercase tracking-wide text-accent-600">
+          {title}
+        </h3>
+        {groupWatts > 0 ? (
+          <span className="tabular text-xs font-semibold text-foreground">{groupWatts} W</span>
+        ) : null}
+      </div>
+
+      {/* Column headings, so the row below reads as a table rather than as a
+          sentence with a stepper stuck on the end. Hidden from assistive
+          technology: each row already names its own figures, and a heading row
+          that is not a real table header would be announced as content. */}
+      <div
+        aria-hidden
+        className="mt-2.5 hidden grid-cols-[1fr_7rem_8.5rem_5.5rem] gap-3 px-3.5 pb-1.5 text-2xs font-semibold uppercase tracking-wide text-muted-foreground sm:grid"
+      >
+        <span>Device</span>
+        <span className="text-right">Usage per device</span>
+        <span className="text-center">Quantity</span>
+        <span className="text-right">Total</span>
+      </div>
+
+      <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
         {appliances.map((appliance) => {
           const quantity = selection[appliance.id] ?? 0;
           const active = quantity > 0;
@@ -836,26 +979,27 @@ function ApplianceList({
             <li
               key={appliance.id}
               className={cn(
-                'flex items-center gap-3 p-3 transition-colors sm:p-3.5',
-                active && 'bg-accent-50/60',
+                'gap-3 p-3 transition-colors sm:grid sm:grid-cols-[1fr_7rem_8.5rem_5.5rem] sm:items-center sm:p-3.5',
+                // The selected row is tinted and marked down its leading edge.
+                // The stripe survives at a glance and on a small screen, where
+                // a pale tint on one row of twenty does not.
+                active && 'border-l-[3px] border-l-accent bg-accent-50/70 pl-[calc(0.875rem-3px)]',
               )}
             >
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-foreground">{appliance.name}</p>
-                <p className="tabular text-xs text-muted-foreground">
-                  {appliance.watts} W each
-                  {appliance.surge > 1
-                    ? ` · surges to ~${Math.round(appliance.watts * appliance.surge)} W`
-                    : ''}
-                  {/* The running subtotal — the number a shopper is actually
-                      adding up in their head as they pick. */}
-                  {active ? (
-                    <span className="font-semibold text-foreground">
-                      {' '}
-                      · {appliance.watts * quantity} W total
-                    </span>
-                  ) : null}
+              <div className="min-w-0">
+                <p
+                  className={cn(
+                    'text-sm',
+                    active ? 'font-semibold text-foreground' : 'font-medium text-foreground',
+                  )}
+                >
+                  {appliance.name}
                 </p>
+                {appliance.surge > 1 ? (
+                  <p className="tabular text-xs text-muted-foreground">
+                    surges to ~{Math.round(appliance.watts * appliance.surge)} W on start-up
+                  </p>
+                ) : null}
                 {appliance.note && active ? (
                   <p className="mt-1 flex items-start gap-1 text-xs text-warning">
                     <Info className="mt-0.5 h-3 w-3 shrink-0" />
@@ -864,37 +1008,55 @@ function ApplianceList({
                 ) : null}
               </div>
 
-              {active ? (
-                <div className="inline-flex shrink-0 items-center rounded-md border border-input bg-card">
-                  <button
-                    type="button"
-                    onClick={() => onChange(appliance.id, quantity - 1)}
-                    aria-label={`Remove one ${appliance.name}`}
-                    className="grid h-9 w-9 place-items-center text-foreground hover:bg-secondary"
-                  >
-                    <Minus className="h-4 w-4" />
-                  </button>
-                  <span className="tabular w-8 text-center text-sm font-semibold">{quantity}</span>
-                  <button
-                    type="button"
-                    onClick={() => onChange(appliance.id, quantity + 1)}
-                    aria-label={`Add one ${appliance.name}`}
-                    className="grid h-9 w-9 place-items-center text-foreground hover:bg-secondary"
+              <p className="tabular mt-1 text-xs text-muted-foreground sm:mt-0 sm:text-right sm:text-sm">
+                {appliance.watts} Watts
+              </p>
+
+              <div className="mt-2 flex justify-start sm:mt-0 sm:justify-center">
+                {active ? (
+                  <div className="inline-flex shrink-0 items-center rounded-md border border-input bg-card">
+                    <button
+                      type="button"
+                      onClick={() => onChange(appliance.id, quantity - 1)}
+                      aria-label={`Remove one ${appliance.name}`}
+                      className="grid h-9 w-9 place-items-center text-foreground hover:bg-secondary"
+                    >
+                      <Minus className="h-4 w-4" />
+                    </button>
+                    <span className="tabular w-8 text-center text-sm font-semibold">{quantity}</span>
+                    <button
+                      type="button"
+                      onClick={() => onChange(appliance.id, quantity + 1)}
+                      aria-label={`Add one ${appliance.name}`}
+                      className="grid h-9 w-9 place-items-center text-foreground hover:bg-secondary"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+                  </div>
+                ) : (
+                  // Adds the typical count for the appliance, not one. A home
+                  // with lights has six of them, and six taps to say so is a
+                  // worse control than one tap and an adjustment.
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0"
+                    onClick={() => onChange(appliance.id, appliance.defaultQuantity)}
                   >
                     <Plus className="h-4 w-4" />
-                  </button>
-                </div>
-              ) : (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="shrink-0"
-                  onClick={() => onChange(appliance.id, appliance.defaultQuantity)}
-                >
-                  <Plus className="h-4 w-4" />
-                  Add
-                </Button>
-              )}
+                    Add
+                  </Button>
+                )}
+              </div>
+
+              <p
+                className={cn(
+                  'tabular mt-1 text-xs sm:mt-0 sm:text-right sm:text-sm',
+                  active ? 'font-semibold text-foreground' : 'text-muted-foreground',
+                )}
+              >
+                {active ? `${appliance.watts * quantity} Watts` : '—'}
+              </p>
             </li>
           );
         })}
@@ -954,8 +1116,12 @@ function CustomAppliances({
   return (
     <div className="mt-6">
       <h3 className="font-display text-sm font-semibold uppercase tracking-wide text-accent-600">
-        Something else
+        Add a device
       </h3>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Anything the lists above do not cover. Household appliances only — this tool sizes home
+        backup.
+      </p>
 
       {custom.length > 0 ? (
         <ul className="mt-2.5 divide-y divide-border rounded-lg border border-border bg-card">

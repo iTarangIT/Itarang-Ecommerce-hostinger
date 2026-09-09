@@ -19,6 +19,7 @@ import { publicUrl } from './media';
 import { canTransitionProduct, publishBlockers } from './state-machine';
 import type { ProductRepository } from './repository';
 import type {
+  CataloguePriceRow,
   CreateProductInput,
   Manufacturer,
   ManufacturerInput,
@@ -1044,6 +1045,46 @@ class PostgresProductRepository implements ProductRepository {
   async listVariantSkus(): Promise<string[]> {
     const rows = await query<{ sku: string }>('SELECT sku FROM product_variants ORDER BY sku');
     return rows.map((row) => row.sku);
+  }
+
+  /**
+   * Ordered by product then SKU, not by SKU alone.
+   *
+   * The rows become a spreadsheet somebody reads top to bottom, and a product's
+   * variants belong together in it — sorting on SKU scatters the three capacities
+   * of one battery across the sheet whenever their codes happen not to sort
+   * adjacently.
+   *
+   * `bigint` columns arrive from `pg` as strings, so both prices go through
+   * `Number` rather than being trusted as numeric. Null stays null: the
+   * difference between "no price yet" and "zero rupees" is the difference
+   * between a blank cell and an offer to give the product away.
+   */
+  async listVariantPrices(): Promise<CataloguePriceRow[]> {
+    const rows = await query<{
+      sku: string;
+      product_title: string;
+      variant_title: string;
+      mrp: string | number | null;
+      selling: string | number | null;
+    }>(
+      `SELECT v.sku,
+              p.title AS product_title,
+              v.title AS variant_title,
+              v.mrp,
+              v.selling
+         FROM product_variants v
+         JOIN products p ON p.id = v.product_id
+        ORDER BY p.title, v.sku`,
+    );
+
+    return rows.map((row) => ({
+      sku: row.sku,
+      productTitle: row.product_title,
+      variantTitle: row.variant_title,
+      mrp: row.mrp === null ? null : Number(row.mrp),
+      selling: row.selling === null ? null : Number(row.selling),
+    }));
   }
 
   async updateVariantPricesBySku(

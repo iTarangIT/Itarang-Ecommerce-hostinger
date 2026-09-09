@@ -30,7 +30,7 @@ export default function LoadCalculatorPage() {
               <Calculator className="h-6 w-6" />
             </span>
             <div>
-              <p className="eyebrow">Free sizing tool</p>
+              <p className="eyebrow">Free sizing tool for home backup</p>
               <h1 className="heading-1 mt-1 text-balance">
                 Size your inverter and battery properly
               </h1>
@@ -38,6 +38,15 @@ export default function LoadCalculatorPage() {
                 Tick what you want running during a power cut and how long you need it for. We work
                 out the inverter capacity and battery size, show the arithmetic, and point you at
                 whatever we stock for it. Nothing here needs an email address.
+              </p>
+              {/* Said on the page, not only enforced in the engine.
+                  `lib/sizing/recommend.ts` refuses to answer a home load with a
+                  traction pack — three independent barriers — but a shopper
+                  arriving with an e-rickshaw battery in mind should be told
+                  that before they fill in a form, not after. */}
+              <p className="mt-2 max-w-3xl text-pretty text-sm leading-relaxed text-muted-foreground">
+                This calculator covers <strong className="text-foreground">home appliances</strong>{' '}
+                only. It does not size electric-vehicle batteries.
               </p>
             </div>
           </div>

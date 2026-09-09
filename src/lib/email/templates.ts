@@ -1,3 +1,5 @@
+import type { Paise } from '@/lib/commerce/types';
+import { formatPrice } from '@/lib/catalog/pricing';
 import { env } from '@/lib/env';
 import type { Mail } from './mailer';
 
@@ -23,10 +25,23 @@ function link(path: string, token: string): string {
   return `${base}${path}?token=${encodeURIComponent(token)}`;
 }
 
-function wrap(heading: string, body: string, action: { label: string; href: string }): string {
+/**
+ * `block` is raw block-level HTML placed between the heading and the sentence.
+ *
+ * It exists because `body` is rendered inside a `<p>`, and a `<table>` — which
+ * is how a card has to be built for mail clients — is not valid inside one. Put
+ * anything block-level here, prose in `body`.
+ */
+function wrap(
+  heading: string,
+  body: string,
+  action: { label: string; href: string },
+  block?: string,
+): string {
   return `<!-- iTarang -->
 <div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#111">
   <h1 style="font-size:20px;margin:0 0 16px">${escapeHtml(heading)}</h1>
+  ${block ?? ''}
   <p style="font-size:15px;line-height:1.6;margin:0 0 20px">${body}</p>
   <p style="margin:0 0 24px">
     <a href="${action.href}" style="display:inline-block;background:#111;color:#fff;text-decoration:none;padding:12px 20px;border-radius:8px;font-size:15px">${escapeHtml(action.label)}</a>
@@ -166,13 +181,97 @@ export function resetPasswordMessage(to: string, token: string): Mail {
  * for the same restock: `stock_notification_sends` has a primary key on
  * (transition, email) and the send path inserts before it mails.
  */
-export function backInStockMessage(to: string, productTitle: string, productPath: string): Mail {
-  const href = `${env().NEXT_PUBLIC_SITE_URL.replace(/\/$/, '')}${productPath}`;
+export interface BackInStockProduct {
+  title: string;
+  /** Path within the site, e.g. `/products/powercube-1-4`. */
+  path: string;
+  /** Selling price in paise, or null where the variant carries none. */
+  price: Paise | null;
+  /** Struck through above the price when it is genuinely higher. */
+  mrp: Paise | null;
+  /** One sentence. The catalogue's first description paragraph. */
+  description: string;
+  /** Absolute URL of the primary photograph, or null when there is none. */
+  imageUrl: string | null;
+  imageAlt: string;
+}
+
+/**
+ * The product card that rides inside the notification.
+ *
+ * Built as a table rather than flexbox because that is what mail clients
+ * render: Outlook's word-processing engine has no meaningful flex support, and
+ * a card that collapses into a stack of unstyled text is worse than no card.
+ * Every colour and size is inline for the same reason — a `<style>` block is
+ * stripped by several clients.
+ *
+ * The image is a remote URL, not an attachment. Many clients block remote
+ * images until the reader allows them, so nothing the message needs to say is
+ * carried only by the picture: the name, the price and the description are all
+ * text beside it, and `alt` covers the gap.
+ */
+function productCard(product: BackInStockProduct): string {
+  const price =
+    product.price === null
+      ? ''
+      : `<p style="margin:0 0 6px;font-size:18px;font-weight:700;color:#111">${escapeHtml(
+          formatPrice(product.price),
+        )}${
+          product.mrp !== null && product.mrp > product.price
+            ? ` <span style="font-size:14px;font-weight:400;color:#666;text-decoration:line-through">${escapeHtml(
+                formatPrice(product.mrp),
+              )}</span>`
+            : ''
+        }</p>`;
+
+  const image = product.imageUrl
+    ? `<td width="120" valign="top" style="padding:0 16px 0 0">
+         <img src="${escapeHtml(product.imageUrl)}" width="120" alt="${escapeHtml(product.imageAlt)}"
+              style="display:block;width:120px;height:auto;border-radius:8px;border:1px solid #e5e7eb">
+       </td>`
+    : '';
+
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"
+                 style="border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin:0 0 20px">
+  <tr>
+    ${image}
+    <td valign="top">
+      <p style="margin:0 0 6px;font-size:16px;font-weight:600;color:#111">${escapeHtml(product.title)}</p>
+      ${price}
+      <p style="margin:0;font-size:14px;line-height:1.5;color:#444">${escapeHtml(product.description)}</p>
+    </td>
+  </tr>
+</table>`;
+}
+
+/**
+ * "It is back" — sent to a customer who asked to be told.
+ *
+ * Deliberately not a marketing email. It states the one fact the person asked
+ * for, shows them the product they were waiting for, links to it, and says why
+ * they are receiving it — which is the difference between a notification
+ * somebody requested and mail they did not.
+ *
+ * The product card carries the picture, the name, the price and one line of
+ * description because the alternative is a message that says a title and a URL:
+ * a customer who signed up weeks ago should not have to click to remember which
+ * battery this is. Everything in it comes from the catalogue row read at send
+ * time, so the price quoted is the price on the page the button leads to.
+ *
+ * Sent only by an explicit admin action, never automatically, and never twice
+ * for the same restock: `stock_notification_sends` has a primary key on
+ * (transition, email) and the send path inserts before it mails.
+ */
+export function backInStockMessage(to: string, product: BackInStockProduct): Mail {
+  const href = `${env().NEXT_PUBLIC_SITE_URL.replace(/\/$/, '')}${product.path}`;
+
   return {
     to,
-    subject: `${productTitle} is back in stock`,
+    subject: `${product.title} is back in stock`,
     text: [
-      `${productTitle} is available again.`,
+      `${product.title} is available again.`,
+      ...(product.price === null ? [] : ['', formatPrice(product.price)]),
+      ...(product.description ? ['', product.description] : []),
       '',
       href,
       '',
@@ -181,8 +280,9 @@ export function backInStockMessage(to: string, productTitle: string, productPath
     ].join('\n'),
     html: wrap(
       'It is back in stock',
-      `${escapeHtml(productTitle)} is available again.<br><br>You are getting this because you asked to be told when this product came back into stock. This is the only message we send about it.`,
+      'You are getting this because you asked to be told when this product came back into stock. This is the only message we send about it.',
       { label: 'View the product', href },
+      productCard(product),
     ),
   };
 }

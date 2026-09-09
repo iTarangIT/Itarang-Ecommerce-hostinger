@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { calculateTotals } from '@/lib/store/totals';
 import type { CartItem } from '@/lib/store/types';
-import { validateCoupon } from '@/lib/offers/coupons';
+import {
+  COUPONS_DISABLED_NOTE,
+  COUPONS_ENABLED,
+  validateCoupon,
+} from '@/lib/offers/coupons';
 
 /**
  * Pricing rules.
@@ -114,7 +118,47 @@ describe('totals', () => {
   });
 });
 
-describe('coupon rules are enforced server-side', () => {
+/**
+ * The master switch, which is currently off.
+ *
+ * Asserted rather than assumed, and asserted here rather than in a file of its
+ * own, because everything below reads differently depending on it: with coupons
+ * disabled the only correct answer to any code is "no".
+ */
+describe('the coupon master switch', () => {
+  const cart = [item({ category: 'combos', price: { mrp: 2500000, selling: 2100000 } })];
+
+  it('is off, and refuses every code while it is', () => {
+    // Turning it on is a deliberate act, and this test failing is how somebody
+    // learns they have made one.
+    expect(COUPONS_ENABLED).toBe(false);
+    expect(validateCoupon('COMBO1500', cart)).toEqual({
+      ok: false,
+      reason: COUPONS_DISABLED_NOTE,
+    });
+  });
+
+  it('refuses before looking the code up, so a disabled build is no oracle', () => {
+    // A real code and an invented one must be indistinguishable from outside;
+    // otherwise the switch leaks which codes exist. Same answer, same sentence.
+    expect(validateCoupon('COMBO1500', cart)).toEqual(validateCoupon('NOPE', cart));
+  });
+
+  it('refuses an empty code with the same sentence, not "enter a code"', () => {
+    // Prompting for input the field will not accept would be worse than useless.
+    expect(validateCoupon('', cart).ok).toBe(false);
+  });
+});
+
+/**
+ * The rules behind the switch, which must survive being switched off.
+ *
+ * Skipped rather than deleted while `COUPONS_ENABLED` is false: the business has
+ * not withdrawn the feature, it has not signed off on what the codes are worth,
+ * and a rule with no test is a rule that quietly rots. Flip the constant and
+ * every assertion here runs again.
+ */
+describe.skipIf(!COUPONS_ENABLED)('coupon rules are enforced server-side', () => {
   let cart: CartItem[];
 
   beforeEach(() => {

@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs';
+import type { CataloguePriceRow } from '@/lib/products/types';
 import { TEMPLATE_COLUMNS, mapHeader, type RawPriceRow } from './bulk-pricing';
 
 /**
@@ -105,17 +106,35 @@ export async function readPricingWorkbook(bytes: ArrayBuffer): Promise<RawPriceR
   return parsed;
 }
 
+/** Paise as a rupee figure a spreadsheet will treat as a number, or blank. */
+function rupees(paise: number | null): number | '' {
+  if (paise === null || !Number.isFinite(paise)) return '';
+  return Math.round(paise) / 100;
+}
+
 /**
- * The downloadable sample.
+ * The downloadable working copy.
  *
- * Carries the catalogue's own SKUs when they are supplied, because the single
- * most common way this import fails is a SKU typed from memory. A template
- * pre-filled with real identifiers turns the task into "overwrite two columns".
- * Prices are left blank rather than pre-filled with current ones: a template
- * that already contains today's prices is one accidental upload away from being
- * a no-op nobody notices, and worse, from re-applying stale prices later.
+ * **Pre-filled with the catalogue's current prices**, which is what makes this
+ * a round trip rather than a form. The administrator downloads what is live,
+ * edits the rows they mean to change, uploads the same file, and downloads it
+ * again later to find their own edits in it — the ordinary way a price list is
+ * maintained.
+ *
+ * The obvious objection to shipping today's prices — that an accidental upload
+ * re-applies stale figures to the whole catalogue — is answered on the import
+ * side rather than by leaving the cells blank: `buildPricingImportReport`
+ * compares each row against the catalogue and writes only the rows that
+ * actually differ. A re-uploaded untouched template therefore changes nothing
+ * and stamps nothing, and the report says so in as many words.
+ *
+ * Product and variant titles ride along in two extra columns. `mapHeader`
+ * matches columns by name, so extra ones are ignored on the way back in; they
+ * exist purely so a human can tell which row is which without looking up a SKU.
  */
-export async function buildPricingTemplate(skus: readonly string[]): Promise<Buffer> {
+export async function buildPricingTemplate(
+  variants: readonly CataloguePriceRow[],
+): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'iTarang';
   workbook.created = new Date();
@@ -123,30 +142,56 @@ export async function buildPricingTemplate(skus: readonly string[]): Promise<Buf
   const sheet = workbook.addWorksheet('Prices');
   sheet.columns = [
     { header: TEMPLATE_COLUMNS[0], key: 'sku', width: 28 },
+    { header: 'Product', key: 'product', width: 42 },
+    { header: 'Variant', key: 'variant', width: 22 },
     { header: TEMPLATE_COLUMNS[1], key: 'mrp', width: 16 },
     { header: TEMPLATE_COLUMNS[2], key: 'selling', width: 16 },
   ];
   sheet.getRow(1).font = { bold: true };
   sheet.views = [{ state: 'frozen', ySplit: 1 }];
 
-  for (const sku of skus) sheet.addRow({ sku, mrp: '', selling: '' });
-  if (skus.length === 0) sheet.addRow({ sku: 'YOUR-SKU-HERE', mrp: '', selling: '' });
+  for (const variant of variants) {
+    const row = sheet.addRow({
+      sku: variant.sku,
+      product: variant.productTitle,
+      variant: variant.variantTitle,
+      mrp: rupees(variant.mrp),
+      selling: rupees(variant.selling),
+    });
+    // Formatted as rupees so the sheet reads like money, and left as a real
+    // number so an administrator can type over it without fighting a text cell.
+    row.getCell('mrp').numFmt = '#,##0.00';
+    row.getCell('selling').numFmt = '#,##0.00';
+    // The two identifying columns are reference, not input. Greyed so it is
+    // visually obvious which two columns this file is for.
+    row.getCell('product').font = { color: { argb: 'FF6B7280' } };
+    row.getCell('variant').font = { color: { argb: 'FF6B7280' } };
+  }
+
+  if (variants.length === 0) {
+    sheet.addRow({ sku: 'YOUR-SKU-HERE', product: '', variant: '', mrp: '', selling: '' });
+  }
 
   const notes = workbook.addWorksheet('How to use');
   notes.columns = [{ width: 100 }];
   for (const line of [
     'Bulk price update — MRP and selling price only.',
     '',
-    'Fill in the Prices sheet and upload it at Admin → Products → Bulk pricing.',
+    'The Prices sheet already contains every SKU with the price it currently carries.',
+    'Change the MRP and Selling Price cells you want to update, then upload the file at',
+    'Admin → Products → Bulk pricing.',
     '',
     'SKU is the identifier. Only the product with that SKU is changed.',
-    'Enter amounts in rupees. Both MRP and selling price are required on every row you fill in.',
+    'Enter amounts in rupees. Both MRP and selling price are required on every row.',
     'The selling price cannot be higher than the MRP.',
-    'Leave a row blank to leave that product unchanged.',
+    'A row you do not edit matches the catalogue and is left alone — nothing is rewritten.',
     'Do not list the same SKU twice.',
+    'The Product and Variant columns are there to help you find the row. They are ignored.',
     '',
     'Nothing else about the product is changed — not stock, not availability, not the title.',
     'If any row is wrong, the whole file is rejected and nothing is updated.',
+    '',
+    'Download this template again after an upload and it will show your new prices.',
   ]) {
     notes.addRow([line]);
   }

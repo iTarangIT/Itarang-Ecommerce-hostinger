@@ -18,6 +18,14 @@
  * one: it leaves the catalogue in a state nobody has seen, mixing yesterday's
  * prices with today's, and the only way to find out which is which is to read
  * every row. So a file with any invalid row is reported and *not* applied.
+ *
+ * **Only changed rows are written.** The template ships pre-filled with the
+ * catalogue's current prices, so a file that changes two products still arrives
+ * carrying every other product's existing figures. Rewriting those with the
+ * values they already hold would be a no-op in the data and a lie in the audit
+ * trail — every product stamped `updated_by` and `updated_at` by an
+ * administrator who changed two of them. So a row identical to the catalogue is
+ * classified as unchanged, reported as such, and never reaches the UPDATE.
  */
 
 import { z } from 'zod';
@@ -55,6 +63,45 @@ export interface AcceptedRow {
   /** Paise, like every money column in the schema. */
   mrp: number;
   selling: number;
+  /**
+   * What the catalogue held before this row, in paise, or null where the
+   * variant had no price at all.
+   *
+   * Carried so the report can show the change rather than only the new figure.
+   * "MRP ₹45,000" tells an administrator nothing about what they just did;
+   * "₹48,000 → ₹45,000" is the thing they are checking.
+   */
+  previousMrp: number | null;
+  previousSelling: number | null;
+}
+
+/**
+ * A row that is valid and says nothing new.
+ *
+ * Carries the prices it agreed with so the report can show what was left alone
+ * rather than only counting it.
+ */
+export interface UnchangedRow {
+  rowNumber: number;
+  sku: string;
+  mrp: number;
+  selling: number;
+}
+
+/**
+ * What the catalogue currently holds for one SKU.
+ *
+ * Structurally the subset of `CataloguePriceRow` this module needs, declared
+ * here rather than imported so `bulk-pricing.ts` keeps depending on nothing but
+ * zod. The repository's richer row satisfies it by shape.
+ *
+ * Both prices are nullable because the column is: a draft variant may have no
+ * price yet, and every such row is a change the moment the file gives it one.
+ */
+export interface CatalogueSkuPrice {
+  sku: string;
+  mrp: number | null;
+  selling: number | null;
 }
 
 export interface RejectedRow {
@@ -64,7 +111,10 @@ export interface RejectedRow {
 }
 
 export interface PricingImportReport {
+  /** Valid rows that differ from the catalogue. These, and only these, are written. */
   accepted: AcceptedRow[];
+  /** Valid rows that match the catalogue exactly. Not an error, and not written. */
+  unchanged: UnchangedRow[];
   rejected: RejectedRow[];
   /** SKUs in the catalogue the file said nothing about. Not an error. */
   untouchedSkuCount: number;
@@ -117,17 +167,23 @@ function normaliseSku(sku: string): string {
 }
 
 /**
- * Classify every row against the catalogue's SKUs.
+ * Classify every row against the catalogue.
  *
- * `knownSkus` is the exact set from `product_variants.sku`; the returned
- * `AcceptedRow.sku` is always the catalogue's spelling, never the file's, so
- * the `UPDATE ... WHERE sku = $1` that follows cannot miss.
+ * `catalogue` is the exact set from `product_variants`, prices included; the
+ * returned `AcceptedRow.sku` is always the catalogue's spelling, never the
+ * file's, so the `UPDATE ... WHERE sku = $1` that follows cannot miss.
+ *
+ * The prices are what make "unchanged" answerable. Comparison is in paise on
+ * both sides — the file's rupees were rounded to paise by `parsePrice`, the
+ * catalogue's are stored in paise — so ₹45,000 typed as `45000`, `45,000` or
+ * `₹45000.00` all compare equal to the value already stored, and none of them
+ * produces a write.
  */
 export function buildPricingImportReport(
   rows: RawPriceRow[],
-  knownSkus: readonly string[],
+  catalogue: readonly CatalogueSkuPrice[],
 ): PricingImportReport {
-  const canonical = new Map(knownSkus.map((sku) => [normaliseSku(sku), sku]));
+  const canonical = new Map(catalogue.map((entry) => [normaliseSku(entry.sku), entry]));
 
   // Counted across the whole file first, so that *both* copies of a repeated
   // SKU are reported rather than the second one silently overwriting the first.
@@ -139,6 +195,7 @@ export function buildPricingImportReport(
   }
 
   const accepted: AcceptedRow[] = [];
+  const unchanged: UnchangedRow[] = [];
   const rejected: RejectedRow[] = [];
 
   for (const row of rows) {
@@ -154,11 +211,12 @@ export function buildPricingImportReport(
       reject('duplicate-sku');
       continue;
     }
-    const sku = canonical.get(key);
-    if (!sku) {
+    const current = canonical.get(key);
+    if (!current) {
       reject('unknown-sku');
       continue;
     }
+    const sku = current.sku;
 
     const mrp = parsePrice(row.mrp);
     const selling = parsePrice(row.selling);
@@ -180,15 +238,34 @@ export function buildPricingImportReport(
       continue;
     }
 
-    accepted.push({ rowNumber: row.rowNumber, sku, mrp, selling });
+    // The row is valid either way; the only question left is whether it says
+    // anything the catalogue does not already know.
+    if (current.mrp === mrp && current.selling === selling) {
+      unchanged.push({ rowNumber: row.rowNumber, sku, mrp, selling });
+      continue;
+    }
+
+    accepted.push({
+      rowNumber: row.rowNumber,
+      sku,
+      mrp,
+      selling,
+      previousMrp: current.mrp,
+      previousSelling: current.selling,
+    });
   }
 
-  const touched = new Set(accepted.map((row) => normaliseSku(row.sku)));
+  // "Untouched" counts SKUs the file did not mention at all. A row that
+  // repeated the current price *did* mention its SKU, so it belongs in
+  // `unchanged` and must not be counted here as well — the two together plus
+  // the accepted rows should account for the whole catalogue exactly once.
+  const mentioned = new Set([...accepted, ...unchanged].map((row) => normaliseSku(row.sku)));
 
   return {
     accepted,
+    unchanged,
     rejected,
-    untouchedSkuCount: knownSkus.filter((sku) => !touched.has(normaliseSku(sku))).length,
+    untouchedSkuCount: catalogue.filter((entry) => !mentioned.has(normaliseSku(entry.sku))).length,
     applicable: rejected.length === 0 && accepted.length > 0,
   };
 }

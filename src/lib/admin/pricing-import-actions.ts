@@ -70,11 +70,19 @@ export async function importPricingAction(
   }
 
   const repository = productRepository();
-  const report = buildPricingImportReport(rows, await repository.listVariantSkus());
+  // Prices as well as SKUs: the same read validates the file and decides which
+  // of its rows actually differ from what is stored. A template downloaded from
+  // this console arrives carrying every current price, so without the
+  // comparison a two-product change would rewrite the whole catalogue.
+  const report = buildPricingImportReport(rows, await repository.listVariantPrices());
 
   // Nothing is written while any row is wrong. The report still goes back so
   // the administrator can see exactly which rows to correct — a file that is
   // 39 rows right and one row wrong should not have to be diagnosed by trial.
+  //
+  // `applicable` is also false for a file that is entirely valid and entirely
+  // unchanged. That is not a failure, and the form says so from `report`
+  // rather than being told here.
   if (!report.applicable) return { report };
 
   const result = await repository.updateVariantPricesBySku(report.accepted, actor);

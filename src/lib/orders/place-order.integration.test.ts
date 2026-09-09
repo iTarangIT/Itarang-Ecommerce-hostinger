@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { closePool, query } from '@/lib/db/pool';
 import { inspectDatabaseUrl, isLocalHost } from '@/lib/db/guard';
 import { PRODUCTS } from '@/lib/commerce/mock/products';
+import { COUPONS_ENABLED } from '@/lib/offers/coupons';
 import type { Product } from '@/lib/commerce/types';
 
 /**
@@ -220,7 +221,19 @@ describe.skipIf(!CONFIGURED)('order placement', () => {
     });
   });
 
-  describe('single-use coupons', () => {
+  /**
+   * The one-redemption-per-customer rule, behind the master switch.
+   *
+   * Skipped while `COUPONS_ENABLED` is false: with coupons off, `buildQuote`
+   * drops the code entirely and no order carries a discount, so "accepts FIRST5
+   * once" has nothing to assert. The rule itself is untouched and these tests
+   * run again the moment the switch is flipped — which is the point of skipping
+   * rather than deleting them.
+   *
+   * What the switch actually does to order placement is asserted live, in the
+   * block after this one.
+   */
+  describe.skipIf(!COUPONS_ENABLED)('single-use coupons', () => {
     it('accepts FIRST5 once and refuses it on the next order', async () => {
       const first = await placeOrder(input({ couponCode: 'FIRST5' }));
       expect(first.ok, 'the first use should be accepted').toBe(true);
@@ -259,6 +272,35 @@ describe.skipIf(!CONFIGURED)('order placement', () => {
 
       expect(first.ok).toBe(true);
       expect(second.ok, 'FREESHIP must not be treated as single-use').toBe(true);
+    });
+  });
+
+  /**
+   * What a code does while coupons are switched off.
+   *
+   * The failure this guards against is a discount surviving the switch through
+   * some path that does not go via `validateCoupon` — which would mean money
+   * off an order the business never agreed to.
+   */
+  describe.skipIf(COUPONS_ENABLED)('coupons while the feature is switched off', () => {
+    it('places the order at full price and applies no discount', async () => {
+      // Not refused. A stale code in somebody's saved cart must not be able to
+      // stop them checking out.
+      const result = await placeOrder(input({ couponCode: 'FIRST5' }));
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.order.amounts.couponDiscount).toBe(0);
+    });
+
+    it('records no redemption, so nothing is spent', async () => {
+      await placeOrder(input({ couponCode: 'FIRST5' }));
+
+      const redemptions = await query(
+        `SELECT id FROM coupon_redemptions WHERE code = 'FIRST5' AND phone = $1`,
+        [PHONE],
+      );
+      expect(redemptions).toHaveLength(0);
     });
   });
 });
