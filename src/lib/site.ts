@@ -4,7 +4,6 @@
  * DEVELOPMENT PLACEHOLDERS — every value marked `PLACEHOLDER` below is carried
  * over from the current Hostinger storefront or stands in for information we do
  * not have yet. None of them should go live without being confirmed:
- *   - phone number (the live site currently shows an unformatted placeholder)
  *   - registered address, GSTIN, CIN
  *   - support hours
  *   - service network coverage claim
@@ -18,12 +17,10 @@ export const SITE = {
   description:
     'iTarang builds silent pure sine wave inverters, long-life lithium and tubular batteries, UPS systems and ready-to-install combos — with certified installation and documented warranty.',
   url: 'https://itarang.in',
-  email: 'care@itarang.in',
-  /** PLACEHOLDER — carried over from the current storefront footer. */
-  phone: '+91 90000 00000',
-  phoneHref: 'tel:+919000000000',
-  /** PLACEHOLDER — confirm before launch. */
-  whatsapp: 'https://wa.me/919000000000',
+  email: 'care@itarang.com',
+  phone: '+91-8076841497',
+  phoneHref: 'tel:+918076841497',
+  whatsapp: 'https://wa.me/918076841497',
   /** PLACEHOLDER — confirm hours with the support team. */
   supportHours: 'Mon – Sat, 9:00 AM – 7:00 PM',
   /** PLACEHOLDER — registered office address required for GST invoices. */

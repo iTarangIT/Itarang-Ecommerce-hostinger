@@ -443,9 +443,9 @@ Anything that cannot work without a backend says so on screen rather than simula
 - Account panels for orders/addresses/warranties say the data does not exist yet
 - Technician coverage says the result comes from development logic, not the live network
 
-Values marked `PLACEHOLDER` in `src/lib/site.ts` — phone number, registered address, support hours
-— must be confirmed before launch. Offer values in `mock/offers.ts` and `lib/offers/coupons.ts`
-are illustrative and need signed commercial terms; under `COMMERCE_PROVIDER=db` the product page
+Values marked `PLACEHOLDER` in `src/lib/site.ts` — registered address, support hours — must be
+confirmed before launch. The customer-care email and phone are confirmed and live. Offer values
+in `mock/offers.ts` and `lib/offers/coupons.ts` are illustrative and need signed commercial terms; under `COMMERCE_PROVIDER=db` the product page
 renders no offers card at all rather than borrowing them.
 
 Two claims still reach a product page from configuration rather than from the product, and both
