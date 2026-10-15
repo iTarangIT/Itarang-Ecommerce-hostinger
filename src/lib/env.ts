@@ -79,6 +79,14 @@ const schema = z
      * way. There is deliberately no NEXT_PUBLIC_ variant.
      */
     SUPABASE_SERVICE_ROLE_KEY: z.string().min(20).optional(),
+    /**
+     * The project's publishable (`sb_publishable_…`) or legacy `anon` key, for
+     * Supabase Auth. Not a secret — Supabase designs it to be public, and RLS
+     * with no policies keeps it from reading any table — but it is still only
+     * used server-side: the browser never talks to Supabase directly. Unset
+     * means Supabase sign-in is off and only the original sessions are read.
+     */
+    SUPABASE_ANON_KEY: z.string().min(20).optional(),
     /** Public bucket the product images live in. */
     SUPABASE_STORAGE_BUCKET: z.string().min(1).default('product-media'),
 
@@ -300,6 +308,7 @@ export function env(): Env {
     // yet. Absent and blank mean the same thing here.
     SUPABASE_URL: blank(process.env.SUPABASE_URL),
     SUPABASE_SERVICE_ROLE_KEY: blank(process.env.SUPABASE_SERVICE_ROLE_KEY),
+    SUPABASE_ANON_KEY: blank(process.env.SUPABASE_ANON_KEY),
     SUPABASE_STORAGE_BUCKET: blank(process.env.SUPABASE_STORAGE_BUCKET),
     PAYMENT_PROVIDER: process.env.PAYMENT_PROVIDER,
     RAZORPAY_KEY_ID: process.env.RAZORPAY_KEY_ID,
