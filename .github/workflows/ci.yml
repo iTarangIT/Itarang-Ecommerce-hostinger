@@ -71,5 +71,7 @@ jobs:
       - name: Build
         run: npm run build
 
+      # One file at a time: the integration suites share this database, and a
+      # suite that counts rows can see another suite's writes mid-run.
       - name: Test
-        run: npm run test
+        run: npm run test -- --no-file-parallelism

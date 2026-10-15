@@ -59,6 +59,14 @@ vi.mock('@/lib/catalog/collections', async (importOriginal) => {
   return { ...actual, allProducts: async () => catalogue };
 });
 
+// `buildQuote` only quotes our own catalogue (`PURCHASABLE_PROVIDER`). The
+// catalogue above is substituted, so the provider has to claim to be ours too,
+// or every line is refused as `not_purchasable` before pricing is reached.
+vi.mock('@/lib/commerce', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/commerce')>();
+  return { ...actual, activeProviderName: () => 'db' };
+});
+
 const PHONE = '9000000033';
 let userId: number;
 
