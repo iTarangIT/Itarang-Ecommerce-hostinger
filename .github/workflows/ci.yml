@@ -1,13 +1,24 @@
-# Checks every push and every pull request into main.
+# CI / CD for the storefront.
 #
-# This does NOT deploy. Hostinger deploys on its own when main changes; this
-# workflow exists so a broken change shows a red cross on the pull request
-# before anyone merges it.
+#   verify  — every push and every pull request into main: typecheck, lint,
+#             build and the full test suite. A broken change shows a red cross
+#             on the pull request before anyone merges it.
+#   deploy  — pushes to main only, and only after verify passes: builds the
+#             production site here with the credentials in GitHub Secrets, then
+#             ships it to Hostinger over SSH and restarts the app.
 #
-# Runs against a throwaway Postgres named `itarang_dev` on localhost — the only
-# local target src/lib/db/guard.ts accepts — so the database integration suite
-# runs here instead of skipping. No secrets are used and nothing external is
-# written to.
+# GitHub is the single place credentials live. Hostinger's own Git
+# auto-deployment must be switched OFF in hPanel, or it will rebuild the site
+# behind this pipeline without the secrets.
+#
+# Setup (Settings → Secrets and variables → Actions):
+#   Secrets    SSH_HOST, SSH_PORT, SSH_USER, SSH_PRIVATE_KEY
+#              plus every app variable named in APP_ENV_NAMES below
+#   Variables  APP_DIR          absolute path of the app on Hostinger
+#              SITE_URL         public URL checked after the deploy
+#              RESTART_COMMAND  optional; defaults to touching tmp/restart.txt
+# Any app variable may be a Variable instead of a Secret when it is not
+# sensitive (COD_ENABLED, SELLER_STATE_CODE, …); a Secret wins if both exist.
 name: CI
 
 on:
@@ -18,13 +29,18 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel main: a deploy interrupted mid-upload leaves the site half old,
+  # half new. Feature branches only need their latest push checked.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
+    # Runs against a throwaway Postgres named `itarang_dev` on localhost — the
+    # only local target src/lib/db/guard.ts accepts — so the database
+    # integration suite runs here instead of skipping. No secrets are used.
     services:
       postgres:
         image: postgres:16
@@ -75,3 +91,154 @@ jobs:
       # suite that counts rows can see another suite's writes mid-run.
       - name: Test
         run: npm run test -- --no-file-parallelism
+
+  deploy:
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: production
+      url: ${{ vars.SITE_URL }}
+
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+      # Every variable the app reads (src/lib/env.ts, next.config.mjs,
+      # src/lib/db/connection.ts). Unset ones are left out of the env file, so
+      # the app's own defaults apply exactly as they do today.
+      APP_ENV_NAMES: >-
+        NEXT_PUBLIC_SITE_URL COMMERCE_PROVIDER PAYMENT_PROVIDER
+        DATABASE_URL DB_SSL_CA_FILE DB_SSL_INSECURE DB_ALLOW_REMOTE DB_REMOTE_HOST DB_REMOTE_DATABASE
+        SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY SUPABASE_STORAGE_BUCKET
+        RAZORPAY_KEY_ID RAZORPAY_KEY_SECRET RAZORPAY_WEBHOOK_SECRET
+        AUTH_OTP_PEPPER
+        SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASSWORD EMAIL_FROM STOCK_ALERT_EMAIL
+        HOSTINGER_ECOMMERCE_API_URL HOSTINGER_ACCOUNT_API_URL HOSTINGER_API_TOKEN
+        HOSTINGER_SALES_CHANNEL_ID HOSTINGER_STORE_ID HOSTINGER_CATALOG_REVALIDATE HOSTINGER_INVENTORY_PUSH
+        RESERVATION_TTL_MINUTES COD_ENABLED COD_FEE_PAISE COD_MAX_ORDER_PAISE
+        SELLER_GSTIN SELLER_STATE_CODE
+
+    steps:
+      - name: Check deploy settings
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          APP_DIR: ${{ vars.APP_DIR }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          missing=""
+          for name in SSH_HOST SSH_USER SSH_PRIVATE_KEY APP_DIR DATABASE_URL; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Deploy is not configured. Missing:$missing (Settings → Secrets and variables → Actions)"
+            exit 1
+          fi
+          case "$APP_DIR" in /*) ;; *) echo "::error::APP_DIR must be an absolute path"; exit 1 ;; esac
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Written from GitHub Secrets / Variables. Next.js reads `.env.production`
+      # at build time (NEXT_PUBLIC_*, SUPABASE_URL for image hosts, the product
+      # pages it pre-renders from the database) and again at `next start` on the
+      # server, so the same file is used for both and then shipped.
+      - name: Write production env file
+        env:
+          ALL_SECRETS: ${{ toJSON(secrets) }}
+          ALL_VARS: ${{ toJSON(vars) }}
+        run: |
+          umask 077
+          : > .env.production
+          for name in $APP_ENV_NAMES; do
+            value=$(jq -r --arg n "$name" '.[$n] // empty' <<<"$ALL_SECRETS")
+            [ -n "$value" ] || value=$(jq -r --arg n "$name" '.[$n] // empty' <<<"$ALL_VARS")
+            [ -n "$value" ] || continue
+            if [[ "$value" == *$'\n'* ]]; then
+              echo "::error::$name contains a line break; env files cannot hold it"; exit 1
+            fi
+            printf '%s=%s\n' "$name" "$value" >> .env.production
+          done
+          echo "Wrote $(wc -l < .env.production) variable(s): $(cut -d= -f1 .env.production | tr '\n' ' ')"
+
+      # DB_SSL_CA_FILE in the env file is the server's absolute path. The build
+      # runs here, so point it at the repo's copy for this step only — the
+      # process environment wins over `.env.production`.
+      - name: Build
+        run: |
+          if grep -q '^DB_SSL_CA_FILE=' .env.production; then
+            export DB_SSL_CA_FILE="$GITHUB_WORKSPACE/db/prod-ca-2021.crt"
+          fi
+          npm run build
+
+      - name: Keep production dependencies only
+        run: npm prune --omit=dev
+
+      - name: Set up SSH
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '65002' }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "$SSH_PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          cat > ~/.ssh/config <<EOF
+          Host hostinger
+            HostName $SSH_HOST
+            Port $SSH_PORT
+            User $SSH_USER
+            IdentityFile ~/.ssh/deploy_key
+            IdentitiesOnly yes
+            ServerAliveInterval 30
+          EOF
+          ssh hostinger 'echo "connected as $(whoami) on $(hostname)"; node -v 2>/dev/null || echo "node not on PATH (fine — the app runner provides it)"'
+
+      # Only the paths the app owns are written. `.next` and `node_modules` are
+      # mirrored exactly (--delete) so stale chunks and removed packages go;
+      # anything else in APP_DIR — logs, tmp/, Hostinger's own files — is left
+      # untouched.
+      - name: Upload to Hostinger
+        env:
+          APP_DIR: ${{ vars.APP_DIR }}
+        run: |
+          ssh hostinger "mkdir -p '$APP_DIR'"
+          rsync -az --delete --exclude cache/ .next/ "hostinger:$APP_DIR/.next/"
+          rsync -az --delete node_modules/ "hostinger:$APP_DIR/node_modules/"
+          rsync -az --delete public/ "hostinger:$APP_DIR/public/"
+          rsync -az db/ "hostinger:$APP_DIR/db/"
+          rsync -az package.json package-lock.json next.config.mjs "hostinger:$APP_DIR/"
+          rsync -a --chmod=F600 .env.production "hostinger:$APP_DIR/.env.production"
+
+      - name: Restart the app
+        env:
+          APP_DIR: ${{ vars.APP_DIR }}
+          RESTART_COMMAND: ${{ vars.RESTART_COMMAND || 'mkdir -p tmp && touch tmp/restart.txt' }}
+        run: ssh hostinger "cd '$APP_DIR' && $RESTART_COMMAND"
+
+      - name: Check the site responds
+        if: vars.SITE_URL != ''
+        env:
+          SITE_URL: ${{ vars.SITE_URL }}
+        run: |
+          for attempt in $(seq 1 20); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$SITE_URL/" || true)
+            echo "attempt $attempt: HTTP $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 15
+          done
+          echo "::error::$SITE_URL did not return 200 after the deploy"
+          exit 1
+
+      - name: Remove credentials from the runner
+        if: always()
+        run: rm -f .env.production ~/.ssh/deploy_key
