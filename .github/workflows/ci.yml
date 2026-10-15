@@ -107,7 +107,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment:
-      name: production
+      name: sandbox
       url: ${{ vars.SITE_URL }}
 
     env:
@@ -160,9 +160,9 @@ jobs:
       # server, so the same file is used for both and then shipped.
       #
       # Two ways to supply values, combinable:
-      #   PRODUCTION_ENV  one secret holding a whole env file (NAME=value lines)
+      #   SANDBOX_ENV     one secret holding a whole env file (NAME=value lines)
       #   one secret or variable per name, which overrides the same name in
-      #   PRODUCTION_ENV — so a single value can be changed without re-pasting
+      #   SANDBOX_ENV — so a single value can be changed without re-pasting
       #   the file.
       #
       # Each name is mapped explicitly. Serialising the whole secrets context
@@ -205,12 +205,12 @@ jobs:
           COD_MAX_ORDER_PAISE: ${{ secrets.COD_MAX_ORDER_PAISE || vars.COD_MAX_ORDER_PAISE }}
           SELLER_GSTIN: ${{ secrets.SELLER_GSTIN || vars.SELLER_GSTIN }}
           SELLER_STATE_CODE: ${{ secrets.SELLER_STATE_CODE || vars.SELLER_STATE_CODE }}
-          PRODUCTION_ENV: ${{ secrets.PRODUCTION_ENV }}
+          SANDBOX_ENV: ${{ secrets.SANDBOX_ENV }}
         run: |
           umask 077
           # The pasted file, minus comments, blank lines, Windows line endings
           # and a leading `export `, which hPanel and editors sometimes add.
-          printf '%s\n' "$PRODUCTION_ENV" | tr -d '\r' \
+          printf '%s\n' "$SANDBOX_ENV" | tr -d '\r' \
             | sed -E 's/^[[:space:]]*export[[:space:]]+//' \
             | grep -E '^[A-Za-z_][A-Za-z0-9_]*=' > .env.production || true
           for name in $APP_ENV_NAMES; do
@@ -224,7 +224,7 @@ jobs:
             printf '%s=%s\n' "$name" "$value" >> .env.production
           done
           if ! grep -q '^DATABASE_URL=.' .env.production; then
-            echo "::error::DATABASE_URL is not set — add it to PRODUCTION_ENV or as its own secret"
+            echo "::error::DATABASE_URL is not set — add it to SANDBOX_ENV or as its own secret"
             exit 1
           fi
           echo "Wrote $(wc -l < .env.production) variable(s): $(cut -d= -f1 .env.production | tr '\n' ' ')"
