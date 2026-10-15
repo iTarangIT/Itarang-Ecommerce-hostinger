@@ -63,10 +63,13 @@ jobs:
       - name: Prepare test database
         run: |
           npm run db:migrate
+          npm run db:seed
           npm run products:import
+
+      # Before the tests: src/lib/security.test.ts greps the built client
+      # bundle for payment secrets, so it needs one to exist.
+      - name: Build
+        run: npm run build
 
       - name: Test
         run: npm run test
-
-      - name: Build
-        run: npm run build
