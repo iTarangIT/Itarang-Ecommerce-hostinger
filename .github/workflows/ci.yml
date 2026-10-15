@@ -1,0 +1,72 @@
+# Checks every push and every pull request into main.
+#
+# This does NOT deploy. Hostinger deploys on its own when main changes; this
+# workflow exists so a broken change shows a red cross on the pull request
+# before anyone merges it.
+#
+# Runs against a throwaway Postgres named `itarang_dev` on localhost — the only
+# local target src/lib/db/guard.ts accepts — so the database integration suite
+# runs here instead of skipping. No secrets are used and nothing external is
+# written to.
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: itarang_dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/itarang_dev
+      NEXT_TELEMETRY_DISABLED: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Prepare test database
+        run: |
+          npm run db:migrate
+          npm run products:import
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build
