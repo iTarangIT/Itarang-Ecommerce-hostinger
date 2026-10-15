@@ -14,9 +14,10 @@
 # Setup (Settings → Secrets and variables → Actions):
 #   Secrets    SSH_HOST, SSH_PORT, SSH_USER, SSH_PRIVATE_KEY
 #              plus every app variable named in APP_ENV_NAMES below
-#   Variables  APP_DIR          absolute path of the app on Hostinger
-#              SITE_URL         public URL checked after the deploy
-#              RESTART_COMMAND  optional; defaults to touching tmp/restart.txt
+#   Variables  APP_DIR   the site's `hbuilds` directory on Hostinger
+#                        (/home/<user>/domains/<domain>/hbuilds)
+#              SITE_URL  public URL checked after the deploy; a failed check
+#                        rolls the site back to the previous release
 # Any app variable may be a Variable instead of a Secret when it is not
 # sensitive (COD_ENABLED, SELLER_STATE_CODE, …); a Secret wins if both exist.
 name: CI
@@ -216,6 +217,8 @@ jobs:
       # runs here, so point it at the repo's copy for this step only — the
       # process environment wins over `.env.production`.
       - name: Build
+        env:
+          NEXT_OUTPUT: standalone
         run: |
           if grep -q '^DB_SSL_CA_FILE=' .env.production; then
             export DB_SSL_CA_FILE="$GITHUB_WORKSPACE/db/prod-ca-2021.crt"
@@ -227,8 +230,20 @@ jobs:
           done
           exit 1
 
-      - name: Keep production dependencies only
-        run: npm prune --omit=dev
+      # The standalone server plus the pieces Next leaves for the deployer to
+      # copy: static chunks, public/, and the env file. db/ carries the
+      # database CA certificate, which nothing in the build traces.
+      - name: Assemble the release
+        run: |
+          set -e
+          R=.next/standalone
+          test -f "$R/server.js"
+          mkdir -p "$R/.next" "$R/tmp"
+          cp -r .next/static "$R/.next/static"
+          cp -r public "$R/public"
+          cp -r db "$R/db"
+          install -m 600 .env.production "$R/.env.production"
+          du -sh "$R"
 
       - name: Set up SSH
         env:
@@ -250,44 +265,67 @@ jobs:
             IdentitiesOnly yes
             ServerAliveInterval 30
           EOF
-          ssh hostinger 'echo "connected as $(whoami) on $(hostname)"; node -v 2>/dev/null || echo "node not on PATH (fine — the app runner provides it)"'
+          ssh hostinger 'echo "connected as $(whoami)"'
 
-      # Only the paths the app owns are written. `.next` and `node_modules` are
-      # mirrored exactly (--delete) so stale chunks and removed packages go;
-      # anything else in APP_DIR — logs, tmp/, Hostinger's own files — is left
-      # untouched.
+      # Hostinger serves `$APP_DIR/current/nodejs/server.js` through Passenger,
+      # where `current` is a symlink into `versions/`. Each deploy uploads a
+      # new version beside the live one and only then swings the symlink, so a
+      # visitor never meets a half-uploaded site and the previous version is
+      # still on disk to roll back to.
       - name: Upload to Hostinger
+        id: upload
         env:
           APP_DIR: ${{ vars.APP_DIR }}
         run: |
-          ssh hostinger "mkdir -p '$APP_DIR'"
-          rsync -az --delete --exclude cache/ .next/ "hostinger:$APP_DIR/.next/"
-          rsync -az --delete node_modules/ "hostinger:$APP_DIR/node_modules/"
-          rsync -az --delete public/ "hostinger:$APP_DIR/public/"
-          rsync -az db/ "hostinger:$APP_DIR/db/"
-          rsync -az package.json package-lock.json next.config.mjs "hostinger:$APP_DIR/"
-          rsync -a --chmod=F600 .env.production "hostinger:$APP_DIR/.env.production"
+          set -e
+          release="gh-$(date -u +%Y%m%d%H%M%S)-${GITHUB_SHA::7}"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+          ssh hostinger "test -L '$APP_DIR/current' && mkdir -p '$APP_DIR/versions/$release'"
+          rsync -az --link-dest="$APP_DIR/current/nodejs/" \
+            .next/standalone/ "hostinger:$APP_DIR/versions/$release/nodejs/"
 
-      - name: Restart the app
+      - name: Switch the site to the new release
+        id: switch
         env:
           APP_DIR: ${{ vars.APP_DIR }}
-          RESTART_COMMAND: ${{ vars.RESTART_COMMAND || 'mkdir -p tmp && touch tmp/restart.txt' }}
-        run: ssh hostinger "cd '$APP_DIR' && $RESTART_COMMAND"
+          RELEASE: ${{ steps.upload.outputs.release }}
+        run: |
+          previous=$(ssh hostinger "readlink '$APP_DIR/current'")
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+          echo "live before: $previous"
+          ssh hostinger bash -s -- "$APP_DIR" "$RELEASE" <<'REMOTE'
+          set -e
+          cd "$1"
+          release="$2"
+          # The per-version .htaccess Hostinger keeps beside each build.
+          [ -d "versions/$release/public_html" ] || cp -a current/public_html "versions/$release/" 2>/dev/null || true
+          ln -sfn "versions/$release" current.next
+          mv -T current.next current
+          touch current/nodejs/tmp/restart.txt
+          echo "live now: $(readlink current)"
+          # Keep the three newest GitHub releases; Hostinger's own versions are never touched.
+          ls -1dt versions/gh-* 2>/dev/null | tail -n +4 | while read -r old; do
+            [ "$old" = "versions/$release" ] || rm -rf "$old"
+          done
+          REMOTE
 
       - name: Check the site responds
-        if: vars.SITE_URL != ''
         env:
           SITE_URL: ${{ vars.SITE_URL }}
+          APP_DIR: ${{ vars.APP_DIR }}
+          PREVIOUS: ${{ steps.switch.outputs.previous }}
         run: |
+          url="${SITE_URL:-https://firebrick-cassowary-579804.hostingersite.com}"
           for attempt in $(seq 1 20); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$SITE_URL/" || true)
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$url/" || true)
             echo "attempt $attempt: HTTP $code"
             [ "$code" = "200" ] && exit 0
             sleep 15
           done
-          echo "::error::$SITE_URL did not return 200 after the deploy"
+          echo "::error::$url did not return 200 — rolling back to $PREVIOUS"
+          ssh hostinger "cd '$APP_DIR' && ln -sfn '$PREVIOUS' current.next && mv -T current.next current && touch current/nodejs/tmp/restart.txt"
           exit 1
 
       - name: Remove credentials from the runner
         if: always()
-        run: rm -f .env.production ~/.ssh/deploy_key
+        run: rm -rf .env.production .next/standalone/.env.production ~/.ssh/deploy_key

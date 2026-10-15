@@ -104,6 +104,15 @@ const nextConfig = {
   distDir: process.env.NEXT_DIST_DIR ?? '.next',
 
   /**
+   * A self-contained server (`.next/standalone/server.js` with only the
+   * node_modules it needs) for the GitHub Actions deploy, which ships it to
+   * Hostinger. It is the same shape Hostinger's own builder produces, so the
+   * host's Passenger setup runs it unchanged. Off by default: local builds and
+   * the CI check keep the ordinary output that `next start` serves.
+   */
+  output: process.env.NEXT_OUTPUT === 'standalone' ? 'standalone' : undefined,
+
+  /**
    * The storefront's old URL prefixes, kept alive.
    *
    * Categories moved from `/c/batteries` to `/batteries` and products from
