@@ -84,8 +84,16 @@ jobs:
 
       # Before the tests: src/lib/security.test.ts greps the built client
       # bundle for payment secrets, so it needs one to exist.
+      # Retried because next/font downloads Plus Jakarta Sans from Google Fonts
+      # during the build, and that request occasionally fails on a runner.
       - name: Build
-        run: npm run build
+        run: |
+          for attempt in 1 2 3; do
+            npm run build && exit 0
+            echo "::warning::build attempt $attempt failed; retrying"
+            sleep 20
+          done
+          exit 1
 
       # One file at a time: the integration suites share this database, and a
       # suite that counts rows can see another suite's writes mid-run.
@@ -212,7 +220,12 @@ jobs:
           if grep -q '^DB_SSL_CA_FILE=' .env.production; then
             export DB_SSL_CA_FILE="$GITHUB_WORKSPACE/db/prod-ca-2021.crt"
           fi
-          npm run build
+          for attempt in 1 2 3; do
+            npm run build && exit 0
+            echo "::warning::build attempt $attempt failed; retrying"
+            sleep 20
+          done
+          exit 1
 
       - name: Keep production dependencies only
         run: npm prune --omit=dev
