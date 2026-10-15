@@ -8,7 +8,13 @@ import { resetPasswordMessage, verifyEmailMessage } from '@/lib/email/templates'
 import { LIMITS, callerIp, consume } from '@/lib/security/rate-limit';
 import { hashPassword, passwordProblem, verifyPassword } from './password';
 import { safeNext } from './redirects';
-import { createSession, currentUser, destroyAllSessions, destroySession } from './session';
+import {
+  createSession,
+  currentUser,
+  destroyAllSessions,
+  destroySession,
+  signOutSupabase,
+} from './session';
 import { linkVisitorToUser, visitorContext } from '@/lib/analytics/events';
 import {
   RESET_TTL_MINUTES,
@@ -262,6 +268,9 @@ export async function logoutAction(): Promise<void> {
 export async function logoutEverywhereAction(): Promise<void> {
   const user = await currentUser();
   if (user) await destroyAllSessions(user.id);
+  // Every Supabase session this identity holds, on any device. Runs before
+  // `destroySession`, which would otherwise clear the cookie that names it.
+  await signOutSupabase('global');
   // Drops the cookie as well. Without it the browser keeps sending a token
   // whose row is gone — harmless, since every read joins against `sessions`,
   // but it leaves a signed-out browser carrying a credential for no reason.

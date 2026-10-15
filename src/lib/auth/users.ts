@@ -80,6 +80,8 @@ export interface NewUser {
   role?: UserRole;
   mustChangePassword?: boolean;
   emailVerified?: boolean;
+  /** Supabase Auth identity this account is created already linked to. */
+  authUserId?: string;
 }
 
 /**
@@ -90,8 +92,8 @@ export interface NewUser {
 export async function createUser(input: NewUser): Promise<AuthUser | null> {
   const rows = await query<UserRow>(
     `INSERT INTO users (email, password_hash, full_name, phone, role,
-                        must_change_password, email_verified_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        must_change_password, email_verified_at, auth_user_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      ON CONFLICT (email) DO NOTHING
      RETURNING ${COLUMNS}`,
     [
@@ -102,6 +104,7 @@ export async function createUser(input: NewUser): Promise<AuthUser | null> {
       input.role ?? 'customer',
       input.mustChangePassword ?? false,
       input.emailVerified ? new Date() : null,
+      input.authUserId ?? null,
     ],
   );
   return rows[0] ? toUser(rows[0]) : null;
