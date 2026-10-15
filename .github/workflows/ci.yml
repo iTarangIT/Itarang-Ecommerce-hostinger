@@ -134,10 +134,9 @@ jobs:
           SSH_USER: ${{ secrets.SSH_USER }}
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           APP_DIR: ${{ vars.APP_DIR }}
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           missing=""
-          for name in SSH_HOST SSH_USER SSH_PRIVATE_KEY APP_DIR DATABASE_URL; do
+          for name in SSH_HOST SSH_USER SSH_PRIVATE_KEY APP_DIR; do
             [ -n "${!name}" ] || missing="$missing $name"
           done
           if [ -n "$missing" ]; then
@@ -159,6 +158,12 @@ jobs:
       # at build time (NEXT_PUBLIC_*, SUPABASE_URL for image hosts, the product
       # pages it pre-renders from the database) and again at `next start` on the
       # server, so the same file is used for both and then shipped.
+      #
+      # Two ways to supply values, combinable:
+      #   PRODUCTION_ENV  one secret holding a whole env file (NAME=value lines)
+      #   one secret or variable per name, which overrides the same name in
+      #   PRODUCTION_ENV — so a single value can be changed without re-pasting
+      #   the file.
       #
       # Each name is mapped explicitly. Serialising the whole secrets context
       # at once is the pattern GitHub holds as suspicious on a
@@ -200,17 +205,28 @@ jobs:
           COD_MAX_ORDER_PAISE: ${{ secrets.COD_MAX_ORDER_PAISE || vars.COD_MAX_ORDER_PAISE }}
           SELLER_GSTIN: ${{ secrets.SELLER_GSTIN || vars.SELLER_GSTIN }}
           SELLER_STATE_CODE: ${{ secrets.SELLER_STATE_CODE || vars.SELLER_STATE_CODE }}
+          PRODUCTION_ENV: ${{ secrets.PRODUCTION_ENV }}
         run: |
           umask 077
-          : > .env.production
+          # The pasted file, minus comments, blank lines, Windows line endings
+          # and a leading `export `, which hPanel and editors sometimes add.
+          printf '%s\n' "$PRODUCTION_ENV" | tr -d '\r' \
+            | sed -E 's/^[[:space:]]*export[[:space:]]+//' \
+            | grep -E '^[A-Za-z_][A-Za-z0-9_]*=' > .env.production || true
           for name in $APP_ENV_NAMES; do
             value="${!name}"
             [ -n "$value" ] || continue
             if [[ "$value" == *$'\n'* ]]; then
               echo "::error::$name contains a line break; env files cannot hold it"; exit 1
             fi
+            grep -v "^$name=" .env.production > .env.tmp || true
+            mv .env.tmp .env.production
             printf '%s=%s\n' "$name" "$value" >> .env.production
           done
+          if ! grep -q '^DATABASE_URL=.' .env.production; then
+            echo "::error::DATABASE_URL is not set — add it to PRODUCTION_ENV or as its own secret"
+            exit 1
+          fi
           echo "Wrote $(wc -l < .env.production) variable(s): $(cut -d= -f1 .env.production | tr '\n' ' ')"
 
       # DB_SSL_CA_FILE in the env file is the server's absolute path. The build
