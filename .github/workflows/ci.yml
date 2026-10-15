@@ -150,16 +150,52 @@ jobs:
       # at build time (NEXT_PUBLIC_*, SUPABASE_URL for image hosts, the product
       # pages it pre-renders from the database) and again at `next start` on the
       # server, so the same file is used for both and then shipped.
+      #
+      # Each name is mapped explicitly. Serialising the whole secrets context
+      # at once is the pattern GitHub holds as suspicious on a
+      # public repository, and it would hand this step secrets it never needs.
       - name: Write production env file
         env:
-          ALL_SECRETS: ${{ toJSON(secrets) }}
-          ALL_VARS: ${{ toJSON(vars) }}
+          NEXT_PUBLIC_SITE_URL: ${{ secrets.NEXT_PUBLIC_SITE_URL || vars.NEXT_PUBLIC_SITE_URL }}
+          COMMERCE_PROVIDER: ${{ secrets.COMMERCE_PROVIDER || vars.COMMERCE_PROVIDER }}
+          PAYMENT_PROVIDER: ${{ secrets.PAYMENT_PROVIDER || vars.PAYMENT_PROVIDER }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DB_SSL_CA_FILE: ${{ secrets.DB_SSL_CA_FILE || vars.DB_SSL_CA_FILE }}
+          DB_SSL_INSECURE: ${{ secrets.DB_SSL_INSECURE || vars.DB_SSL_INSECURE }}
+          DB_ALLOW_REMOTE: ${{ secrets.DB_ALLOW_REMOTE || vars.DB_ALLOW_REMOTE }}
+          DB_REMOTE_HOST: ${{ secrets.DB_REMOTE_HOST || vars.DB_REMOTE_HOST }}
+          DB_REMOTE_DATABASE: ${{ secrets.DB_REMOTE_DATABASE || vars.DB_REMOTE_DATABASE }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL || vars.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_STORAGE_BUCKET: ${{ secrets.SUPABASE_STORAGE_BUCKET || vars.SUPABASE_STORAGE_BUCKET }}
+          RAZORPAY_KEY_ID: ${{ secrets.RAZORPAY_KEY_ID || vars.RAZORPAY_KEY_ID }}
+          RAZORPAY_KEY_SECRET: ${{ secrets.RAZORPAY_KEY_SECRET }}
+          RAZORPAY_WEBHOOK_SECRET: ${{ secrets.RAZORPAY_WEBHOOK_SECRET }}
+          AUTH_OTP_PEPPER: ${{ secrets.AUTH_OTP_PEPPER }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST || vars.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT || vars.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER || vars.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM || vars.EMAIL_FROM }}
+          STOCK_ALERT_EMAIL: ${{ secrets.STOCK_ALERT_EMAIL || vars.STOCK_ALERT_EMAIL }}
+          HOSTINGER_ECOMMERCE_API_URL: ${{ secrets.HOSTINGER_ECOMMERCE_API_URL || vars.HOSTINGER_ECOMMERCE_API_URL }}
+          HOSTINGER_ACCOUNT_API_URL: ${{ secrets.HOSTINGER_ACCOUNT_API_URL || vars.HOSTINGER_ACCOUNT_API_URL }}
+          HOSTINGER_API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+          HOSTINGER_SALES_CHANNEL_ID: ${{ secrets.HOSTINGER_SALES_CHANNEL_ID || vars.HOSTINGER_SALES_CHANNEL_ID }}
+          HOSTINGER_STORE_ID: ${{ secrets.HOSTINGER_STORE_ID || vars.HOSTINGER_STORE_ID }}
+          HOSTINGER_CATALOG_REVALIDATE: ${{ secrets.HOSTINGER_CATALOG_REVALIDATE || vars.HOSTINGER_CATALOG_REVALIDATE }}
+          HOSTINGER_INVENTORY_PUSH: ${{ secrets.HOSTINGER_INVENTORY_PUSH || vars.HOSTINGER_INVENTORY_PUSH }}
+          RESERVATION_TTL_MINUTES: ${{ secrets.RESERVATION_TTL_MINUTES || vars.RESERVATION_TTL_MINUTES }}
+          COD_ENABLED: ${{ secrets.COD_ENABLED || vars.COD_ENABLED }}
+          COD_FEE_PAISE: ${{ secrets.COD_FEE_PAISE || vars.COD_FEE_PAISE }}
+          COD_MAX_ORDER_PAISE: ${{ secrets.COD_MAX_ORDER_PAISE || vars.COD_MAX_ORDER_PAISE }}
+          SELLER_GSTIN: ${{ secrets.SELLER_GSTIN || vars.SELLER_GSTIN }}
+          SELLER_STATE_CODE: ${{ secrets.SELLER_STATE_CODE || vars.SELLER_STATE_CODE }}
         run: |
           umask 077
           : > .env.production
           for name in $APP_ENV_NAMES; do
-            value=$(jq -r --arg n "$name" '.[$n] // empty' <<<"$ALL_SECRETS")
-            [ -n "$value" ] || value=$(jq -r --arg n "$name" '.[$n] // empty' <<<"$ALL_VARS")
+            value="${!name}"
             [ -n "$value" ] || continue
             if [[ "$value" == *$'\n'* ]]; then
               echo "::error::$name contains a line break; env files cannot hold it"; exit 1
