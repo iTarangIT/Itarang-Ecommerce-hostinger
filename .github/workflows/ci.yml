@@ -1,13 +1,25 @@
-# Checks every push and every pull request into main.
+# CI / CD for the storefront.
 #
-# This does NOT deploy. Hostinger deploys on its own when main changes; this
-# workflow exists so a broken change shows a red cross on the pull request
-# before anyone merges it.
+#   verify  — every push and every pull request into main: typecheck, lint,
+#             build and the full test suite. A broken change shows a red cross
+#             on the pull request before anyone merges it.
+#   deploy  — pushes to main only, and only after verify passes: builds the
+#             production site here with the credentials in GitHub Secrets, then
+#             ships it to Hostinger over SSH and restarts the app.
 #
-# Runs against a throwaway Postgres named `itarang_dev` on localhost — the only
-# local target src/lib/db/guard.ts accepts — so the database integration suite
-# runs here instead of skipping. No secrets are used and nothing external is
-# written to.
+# GitHub is the single place credentials live. Hostinger's own Git
+# auto-deployment must be switched OFF in hPanel, or it will rebuild the site
+# behind this pipeline without the secrets.
+#
+# Setup (Settings → Secrets and variables → Actions):
+#   Secrets    SSH_HOST, SSH_PORT, SSH_USER, SSH_PRIVATE_KEY
+#              plus every app variable named in APP_ENV_NAMES below
+#   Variables  APP_DIR   the site's `hbuilds` directory on Hostinger
+#                        (/home/<user>/domains/<domain>/hbuilds)
+#              SITE_URL  public URL checked after the deploy; a failed check
+#                        rolls the site back to the previous release
+# Any app variable may be a Variable instead of a Secret when it is not
+# sensitive (COD_ENABLED, SELLER_STATE_CODE, …); a Secret wins if both exist.
 name: CI
 
 on:
@@ -18,13 +30,18 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel main: a deploy interrupted mid-upload leaves the site half old,
+  # half new. Feature branches only need their latest push checked.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
+    # Runs against a throwaway Postgres named `itarang_dev` on localhost — the
+    # only local target src/lib/db/guard.ts accepts — so the database
+    # integration suite runs here instead of skipping. No secrets are used.
     services:
       postgres:
         image: postgres:16
@@ -68,10 +85,263 @@ jobs:
 
       # Before the tests: src/lib/security.test.ts greps the built client
       # bundle for payment secrets, so it needs one to exist.
+      # Retried because next/font downloads Plus Jakarta Sans from Google Fonts
+      # during the build, and that request occasionally fails on a runner.
       - name: Build
-        run: npm run build
+        run: |
+          for attempt in 1 2 3; do
+            npm run build && exit 0
+            echo "::warning::build attempt $attempt failed; retrying"
+            sleep 20
+          done
+          exit 1
 
       # One file at a time: the integration suites share this database, and a
       # suite that counts rows can see another suite's writes mid-run.
       - name: Test
         run: npm run test -- --no-file-parallelism
+
+  deploy:
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: sandbox
+      url: ${{ vars.SITE_URL }}
+
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+      # Every variable the app reads (src/lib/env.ts, next.config.mjs,
+      # src/lib/db/connection.ts). Unset ones are left out of the env file, so
+      # the app's own defaults apply exactly as they do today.
+      APP_ENV_NAMES: >-
+        NEXT_PUBLIC_SITE_URL COMMERCE_PROVIDER PAYMENT_PROVIDER
+        DATABASE_URL DB_SSL_CA_FILE DB_SSL_INSECURE DB_ALLOW_REMOTE DB_REMOTE_HOST DB_REMOTE_DATABASE
+        SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY SUPABASE_STORAGE_BUCKET
+        RAZORPAY_KEY_ID RAZORPAY_KEY_SECRET RAZORPAY_WEBHOOK_SECRET
+        AUTH_OTP_PEPPER
+        SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASSWORD EMAIL_FROM STOCK_ALERT_EMAIL
+        HOSTINGER_ECOMMERCE_API_URL HOSTINGER_ACCOUNT_API_URL HOSTINGER_API_TOKEN
+        HOSTINGER_SALES_CHANNEL_ID HOSTINGER_STORE_ID HOSTINGER_CATALOG_REVALIDATE HOSTINGER_INVENTORY_PUSH
+        RESERVATION_TTL_MINUTES COD_ENABLED COD_FEE_PAISE COD_MAX_ORDER_PAISE
+        SELLER_GSTIN SELLER_STATE_CODE
+
+    steps:
+      - name: Check deploy settings
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          APP_DIR: ${{ vars.APP_DIR }}
+        run: |
+          missing=""
+          for name in SSH_HOST SSH_USER SSH_PRIVATE_KEY APP_DIR; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Deploy is not configured. Missing:$missing (Settings → Secrets and variables → Actions)"
+            exit 1
+          fi
+          case "$APP_DIR" in /*) ;; *) echo "::error::APP_DIR must be an absolute path"; exit 1 ;; esac
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Written from GitHub Secrets / Variables. Next.js reads `.env.production`
+      # at build time (NEXT_PUBLIC_*, SUPABASE_URL for image hosts, the product
+      # pages it pre-renders from the database) and again at `next start` on the
+      # server, so the same file is used for both and then shipped.
+      #
+      # Two ways to supply values, combinable:
+      #   SANDBOX_ENV     one secret holding a whole env file (NAME=value lines)
+      #   one secret or variable per name, which overrides the same name in
+      #   SANDBOX_ENV — so a single value can be changed without re-pasting
+      #   the file.
+      #
+      # Each name is mapped explicitly. Serialising the whole secrets context
+      # at once is the pattern GitHub holds as suspicious on a
+      # public repository, and it would hand this step secrets it never needs.
+      - name: Write production env file
+        env:
+          NEXT_PUBLIC_SITE_URL: ${{ secrets.NEXT_PUBLIC_SITE_URL || vars.NEXT_PUBLIC_SITE_URL }}
+          COMMERCE_PROVIDER: ${{ secrets.COMMERCE_PROVIDER || vars.COMMERCE_PROVIDER }}
+          PAYMENT_PROVIDER: ${{ secrets.PAYMENT_PROVIDER || vars.PAYMENT_PROVIDER }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DB_SSL_CA_FILE: ${{ secrets.DB_SSL_CA_FILE || vars.DB_SSL_CA_FILE }}
+          DB_SSL_INSECURE: ${{ secrets.DB_SSL_INSECURE || vars.DB_SSL_INSECURE }}
+          DB_ALLOW_REMOTE: ${{ secrets.DB_ALLOW_REMOTE || vars.DB_ALLOW_REMOTE }}
+          DB_REMOTE_HOST: ${{ secrets.DB_REMOTE_HOST || vars.DB_REMOTE_HOST }}
+          DB_REMOTE_DATABASE: ${{ secrets.DB_REMOTE_DATABASE || vars.DB_REMOTE_DATABASE }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL || vars.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_STORAGE_BUCKET: ${{ secrets.SUPABASE_STORAGE_BUCKET || vars.SUPABASE_STORAGE_BUCKET }}
+          RAZORPAY_KEY_ID: ${{ secrets.RAZORPAY_KEY_ID || vars.RAZORPAY_KEY_ID }}
+          RAZORPAY_KEY_SECRET: ${{ secrets.RAZORPAY_KEY_SECRET }}
+          RAZORPAY_WEBHOOK_SECRET: ${{ secrets.RAZORPAY_WEBHOOK_SECRET }}
+          AUTH_OTP_PEPPER: ${{ secrets.AUTH_OTP_PEPPER }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST || vars.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT || vars.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER || vars.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM || vars.EMAIL_FROM }}
+          STOCK_ALERT_EMAIL: ${{ secrets.STOCK_ALERT_EMAIL || vars.STOCK_ALERT_EMAIL }}
+          HOSTINGER_ECOMMERCE_API_URL: ${{ secrets.HOSTINGER_ECOMMERCE_API_URL || vars.HOSTINGER_ECOMMERCE_API_URL }}
+          HOSTINGER_ACCOUNT_API_URL: ${{ secrets.HOSTINGER_ACCOUNT_API_URL || vars.HOSTINGER_ACCOUNT_API_URL }}
+          HOSTINGER_API_TOKEN: ${{ secrets.HOSTINGER_API_TOKEN }}
+          HOSTINGER_SALES_CHANNEL_ID: ${{ secrets.HOSTINGER_SALES_CHANNEL_ID || vars.HOSTINGER_SALES_CHANNEL_ID }}
+          HOSTINGER_STORE_ID: ${{ secrets.HOSTINGER_STORE_ID || vars.HOSTINGER_STORE_ID }}
+          HOSTINGER_CATALOG_REVALIDATE: ${{ secrets.HOSTINGER_CATALOG_REVALIDATE || vars.HOSTINGER_CATALOG_REVALIDATE }}
+          HOSTINGER_INVENTORY_PUSH: ${{ secrets.HOSTINGER_INVENTORY_PUSH || vars.HOSTINGER_INVENTORY_PUSH }}
+          RESERVATION_TTL_MINUTES: ${{ secrets.RESERVATION_TTL_MINUTES || vars.RESERVATION_TTL_MINUTES }}
+          COD_ENABLED: ${{ secrets.COD_ENABLED || vars.COD_ENABLED }}
+          COD_FEE_PAISE: ${{ secrets.COD_FEE_PAISE || vars.COD_FEE_PAISE }}
+          COD_MAX_ORDER_PAISE: ${{ secrets.COD_MAX_ORDER_PAISE || vars.COD_MAX_ORDER_PAISE }}
+          SELLER_GSTIN: ${{ secrets.SELLER_GSTIN || vars.SELLER_GSTIN }}
+          SELLER_STATE_CODE: ${{ secrets.SELLER_STATE_CODE || vars.SELLER_STATE_CODE }}
+          SANDBOX_ENV: ${{ secrets.SANDBOX_ENV }}
+        run: |
+          umask 077
+          # The pasted file, minus comments, blank lines, Windows line endings
+          # and a leading `export `, which hPanel and editors sometimes add.
+          printf '%s\n' "$SANDBOX_ENV" | tr -d '\r' \
+            | sed -E 's/^[[:space:]]*export[[:space:]]+//' \
+            | grep -E '^[A-Za-z_][A-Za-z0-9_]*=' > .env.production || true
+          for name in $APP_ENV_NAMES; do
+            value="${!name}"
+            [ -n "$value" ] || continue
+            if [[ "$value" == *$'\n'* ]]; then
+              echo "::error::$name contains a line break; env files cannot hold it"; exit 1
+            fi
+            grep -v "^$name=" .env.production > .env.tmp || true
+            mv .env.tmp .env.production
+            printf '%s=%s\n' "$name" "$value" >> .env.production
+          done
+          if ! grep -q '^DATABASE_URL=.' .env.production; then
+            echo "::error::DATABASE_URL is not set — add it to SANDBOX_ENV or as its own secret"
+            exit 1
+          fi
+          echo "Wrote $(wc -l < .env.production) variable(s): $(cut -d= -f1 .env.production | tr '\n' ' ')"
+
+      # DB_SSL_CA_FILE in the env file is the server's absolute path. The build
+      # runs here, so point it at the repo's copy for this step only — the
+      # process environment wins over `.env.production`.
+      - name: Build
+        env:
+          NEXT_OUTPUT: standalone
+        run: |
+          if grep -q '^DB_SSL_CA_FILE=' .env.production; then
+            export DB_SSL_CA_FILE="$GITHUB_WORKSPACE/db/prod-ca-2021.crt"
+          fi
+          for attempt in 1 2 3; do
+            npm run build && exit 0
+            echo "::warning::build attempt $attempt failed; retrying"
+            sleep 20
+          done
+          exit 1
+
+      # The standalone server plus the pieces Next leaves for the deployer to
+      # copy: static chunks, public/, and the env file. db/ carries the
+      # database CA certificate, which nothing in the build traces.
+      - name: Assemble the release
+        run: |
+          set -e
+          R=.next/standalone
+          test -f "$R/server.js"
+          mkdir -p "$R/.next" "$R/tmp"
+          cp -r .next/static "$R/.next/static"
+          cp -r public "$R/public"
+          cp -r db "$R/db"
+          install -m 600 .env.production "$R/.env.production"
+          du -sh "$R"
+
+      - name: Set up SSH
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '65002' }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "$SSH_PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          cat > ~/.ssh/config <<EOF
+          Host hostinger
+            HostName $SSH_HOST
+            Port $SSH_PORT
+            User $SSH_USER
+            IdentityFile ~/.ssh/deploy_key
+            IdentitiesOnly yes
+            ServerAliveInterval 30
+          EOF
+          ssh hostinger 'echo "connected as $(whoami)"'
+
+      # Hostinger serves `$APP_DIR/current/nodejs/server.js` through Passenger,
+      # where `current` is a symlink into `versions/`. Each deploy uploads a
+      # new version beside the live one and only then swings the symlink, so a
+      # visitor never meets a half-uploaded site and the previous version is
+      # still on disk to roll back to.
+      - name: Upload to Hostinger
+        id: upload
+        env:
+          APP_DIR: ${{ vars.APP_DIR }}
+        run: |
+          set -e
+          release="gh-$(date -u +%Y%m%d%H%M%S)-${GITHUB_SHA::7}"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+          ssh hostinger "test -L '$APP_DIR/current' && mkdir -p '$APP_DIR/versions/$release'"
+          rsync -az --link-dest="$APP_DIR/current/nodejs/" \
+            .next/standalone/ "hostinger:$APP_DIR/versions/$release/nodejs/"
+
+      - name: Switch the site to the new release
+        id: switch
+        env:
+          APP_DIR: ${{ vars.APP_DIR }}
+          RELEASE: ${{ steps.upload.outputs.release }}
+        run: |
+          previous=$(ssh hostinger "readlink '$APP_DIR/current'")
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+          echo "live before: $previous"
+          ssh hostinger bash -s -- "$APP_DIR" "$RELEASE" <<'REMOTE'
+          set -e
+          cd "$1"
+          release="$2"
+          # The per-version .htaccess Hostinger keeps beside each build.
+          [ -d "versions/$release/public_html" ] || cp -a current/public_html "versions/$release/" 2>/dev/null || true
+          ln -sfn "versions/$release" current.next
+          mv -T current.next current
+          touch current/nodejs/tmp/restart.txt
+          echo "live now: $(readlink current)"
+          # Keep the three newest GitHub releases; Hostinger's own versions are never touched.
+          ls -1dt versions/gh-* 2>/dev/null | tail -n +4 | while read -r old; do
+            [ "$old" = "versions/$release" ] || rm -rf "$old"
+          done
+          REMOTE
+
+      - name: Check the site responds
+        env:
+          SITE_URL: ${{ vars.SITE_URL }}
+          APP_DIR: ${{ vars.APP_DIR }}
+          PREVIOUS: ${{ steps.switch.outputs.previous }}
+        run: |
+          url="${SITE_URL:-https://firebrick-cassowary-579804.hostingersite.com}"
+          for attempt in $(seq 1 20); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$url/" || true)
+            echo "attempt $attempt: HTTP $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 15
+          done
+          echo "::error::$url did not return 200 — rolling back to $PREVIOUS"
+          ssh hostinger "cd '$APP_DIR' && ln -sfn '$PREVIOUS' current.next && mv -T current.next current && touch current/nodejs/tmp/restart.txt"
+          exit 1
+
+      - name: Remove credentials from the runner
+        if: always()
+        run: rm -rf .env.production .next/standalone/.env.production ~/.ssh/deploy_key
