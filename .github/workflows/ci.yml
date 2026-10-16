@@ -299,6 +299,23 @@ jobs:
           ssh hostinger "test -L '$APP_DIR/current' && mkdir -p '$APP_DIR/versions/$release'"
           rsync -az --link-dest="$APP_DIR/current/nodejs/" \
             .next/standalone/ "hostinger:$APP_DIR/versions/$release/nodejs/"
+          # Hostinger's CDN keeps prerendered HTML for up to a year (Next sends
+          # s-maxage=31536000), so after a deploy visitors can still get HTML from
+          # an older build. Without that build's chunks the browser 404s on them
+          # and the page dies with "Application error: a client-side exception".
+          # Chunk names are content-hashed, so carrying every earlier release's
+          # static files forward (never overwriting) is safe; pruned releases'
+          # chunks survive because each release already holds its predecessors'.
+          ssh hostinger bash -s -- "$APP_DIR" "$release" <<'REMOTE'
+          set -e
+          cd "$1"
+          dest="versions/$2/nodejs/.next/static"
+          for src in versions/*/nodejs/.next/static; do
+            [ -d "$src" ] && [ "$src" != "$dest" ] || continue
+            cp -rn "$src"/. "$dest"/
+          done
+          echo "static files in release: $(find "$dest" -type f | wc -l)"
+          REMOTE
 
       - name: Switch the site to the new release
         id: switch
