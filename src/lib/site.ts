@@ -52,6 +52,7 @@ export const UTILITY_LINKS: NavChild[] = [
 ];
 
 export const SECONDARY_NAV: NavChild[] = [
+  { label: 'All products', href: '/products' },
   { label: 'Offers', href: '/offers' },
   { label: 'Load calculator', href: '/tools/load-calculator' },
   { label: 'Support', href: '/support' },

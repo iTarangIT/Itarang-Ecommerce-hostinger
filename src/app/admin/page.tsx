@@ -10,7 +10,6 @@ import {
   RefreshCw,
   UserRound,
 } from 'lucide-react';
-import { logoutAction } from '@/lib/auth/actions';
 import {
   pushInventoryToHostingerAction,
   resolveCatalogueAlertAction,
@@ -31,6 +30,7 @@ import { Button } from '@/components/ui/button';
 import { StateBlock } from '@/components/ui/states';
 import { Skeleton } from '@/components/ui/skeleton';
 import { StatusPill } from '@/components/admin/status-pill';
+import { AdminProfileMenu } from '@/components/admin/admin-profile-menu';
 
 export const dynamic = 'force-dynamic';
 
@@ -98,9 +98,6 @@ export default async function AdminOrdersPage({
           </p>
         </div>
         <div className="flex items-center gap-3">
-          {admin ? (
-            <span className="hidden text-sm text-muted-foreground sm:inline">{admin.email}</span>
-          ) : null}
           <Link
             href="/admin/products"
             className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
@@ -129,11 +126,7 @@ export default async function AdminOrdersPage({
             <BarChart3 className="h-4 w-4" />
             Analytics
           </Link>
-          <form action={logoutAction}>
-            <Button type="submit" variant="outline" size="sm">
-              Sign out
-            </Button>
-          </form>
+          <AdminProfileMenu name={admin?.fullName ?? null} />
         </div>
       </div>
 

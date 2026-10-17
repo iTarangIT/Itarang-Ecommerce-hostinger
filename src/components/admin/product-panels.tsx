@@ -40,6 +40,74 @@ import { Checkbox, Field, Input, Select, Textarea } from '@/components/ui/field'
  * user-facing documentation.
  */
 
+/*
+ * Placeholder examples for the multi-line fields.
+ *
+ * Each one is written in the exact line format its parser reads, so an empty
+ * box shows both what kind of content belongs there and how to lay it out. A
+ * placeholder is never submitted — an untouched field still saves as empty.
+ */
+const HIGHLIGHTS_EXAMPLE = [
+  'e.g.',
+  'LiFePO4 cells rated for 2000+ charge cycles',
+  'Built-in BMS protects against over-charge, over-discharge and short circuit',
+  'Lightweight — about one third the weight of a lead-acid pack',
+  'Made in India by Trontek',
+].join('\n');
+
+const DESCRIPTION_EXAMPLE = [
+  'e.g. The Trontek TK-LiFe-5145 is a 51 V 45 Ah lithium iron phosphate battery built for',
+  'electric two-wheelers.',
+  '',
+  'A blank line starts a new paragraph.',
+].join('\n');
+
+const BOX_EXAMPLE = ['e.g.', '1 × Battery pack', '1 × Charger', '1 × User manual'].join('\n');
+
+const CARE_EXAMPLE = [
+  'e.g.',
+  'Charge fully before first use',
+  'Keep away from water and direct heat',
+  'Do not open the battery casing',
+].join('\n');
+
+const SPECS_EXAMPLE = [
+  '## Electrical characteristics',
+  'Nominal voltage | 51 V',
+  'Nominal capacity | 45 Ah',
+  '',
+  '## Operating conditions',
+  'Max. charge voltage | 57.6 V',
+  'Charging temperature | 0 °C to 45 °C',
+].join('\n');
+
+const APPLICATIONS_EXAMPLE = [
+  'Electric scooters | Daily commuting on 51 V two-wheelers',
+  'Delivery fleets | Long shifts with fast turnaround charging',
+].join('\n');
+
+const CHARGING_EXAMPLE = ['Charge voltage | 57.6 V', 'Charge current | 10 A'].join('\n');
+
+const DISCHARGE_EXAMPLE = ['Max. continuous current | 45 A', 'Cut-off voltage | 42 V'].join('\n');
+
+const RUNTIME_EXAMPLE = ['Fan + 2 lights | 150 W | 6 hours', 'Fridge + TV | 400 W | 2 hours'].join(
+  '\n',
+);
+
+const COMPATIBILITY_EXAMPLE = [
+  'e.g.',
+  'Works with 48 V and 51 V e-scooter controllers',
+  'Use only the charger supplied with the battery',
+].join('\n');
+
+const FAQ_EXAMPLE = [
+  'Q: How long does a full charge take?',
+  'A: About 4 to 5 hours with the supplied charger.',
+  '',
+  'Q: Is the battery waterproof?',
+  'A: It is splash-resistant, but must not be submerged.',
+].join('\n');
+
 function PanelHeading({ title, description }: { title: string; description: string }) {
   return (
     <div className="mb-5">
@@ -82,7 +150,7 @@ export function InformationPanel({ product }: { product: ProductRecord }) {
 
       <div className="grid gap-5">
         <Field label="Title" htmlFor="title" required>
-          <Input id="title" name="title" defaultValue={product.title} required />
+          <Input id="title" name="title" placeholder="e.g. Trontek TK-LiFe-5145 Lithium Battery" defaultValue={product.title} required />
         </Field>
 
         <Field
@@ -90,15 +158,15 @@ export function InformationPanel({ product }: { product: ProductRecord }) {
           htmlFor="subtitle"
           hint="One line under the title, and the description used in search results."
         >
-          <Input id="subtitle" name="subtitle" defaultValue={product.subtitle} />
+          <Input id="subtitle" name="subtitle" placeholder="e.g. 51 V 45 Ah LiFePO4 battery for electric two-wheelers" defaultValue={product.subtitle} />
         </Field>
 
         <div className="grid gap-5 sm:grid-cols-2">
           <Field label="Brand" htmlFor="brand">
-            <Input id="brand" name="brand" defaultValue={product.brand ?? ''} />
+            <Input id="brand" name="brand" placeholder="e.g. Trontek" defaultValue={product.brand ?? ''} />
           </Field>
           <Field label="Model number" htmlFor="modelName">
-            <Input id="modelName" name="modelName" defaultValue={product.modelName ?? ''} />
+            <Input id="modelName" name="modelName" placeholder="e.g. TK-LiFe-5145" defaultValue={product.modelName ?? ''} />
           </Field>
         </div>
 
@@ -108,21 +176,22 @@ export function InformationPanel({ product }: { product: ProductRecord }) {
             htmlFor="genericName"
             hint="The Legal Metrology generic name, e.g. Lithium Iron Phosphate EV battery pack."
           >
-            <Input id="genericName" name="genericName" defaultValue={product.genericName ?? ''} />
+            <Input id="genericName" name="genericName" placeholder="e.g. Lithium Iron Phosphate EV battery pack" defaultValue={product.genericName ?? ''} />
           </Field>
           <Field label="Product type" htmlFor="productType">
-            <Input id="productType" name="productType" defaultValue={product.productType ?? ''} />
+            <Input id="productType" name="productType" placeholder="e.g. EV traction battery" defaultValue={product.productType ?? ''} />
           </Field>
         </div>
 
         <div className="grid gap-5 sm:grid-cols-2">
           <Field label="Net quantity" htmlFor="netQuantity" hint="e.g. 1 Count.">
-            <Input id="netQuantity" name="netQuantity" defaultValue={product.netQuantity ?? ''} />
+            <Input id="netQuantity" name="netQuantity" placeholder="e.g. 1 Count" defaultValue={product.netQuantity ?? ''} />
           </Field>
           <Field label="Country of origin" htmlFor="countryOfOrigin">
             <Input
               id="countryOfOrigin"
               name="countryOfOrigin"
+              placeholder="e.g. India"
               defaultValue={product.countryOfOrigin ?? ''}
             />
           </Field>
@@ -219,12 +288,12 @@ export function PricingPanel({ product }: { product: ProductRecord }) {
 
       <div className="grid gap-5 sm:grid-cols-2">
         <Field label="HSN code" htmlFor="hsnCode">
-          <Input id="hsnCode" name="hsnCode" defaultValue={product.hsnCode ?? ''} />
+          <Input id="hsnCode" name="hsnCode" placeholder="e.g. 85076000" defaultValue={product.hsnCode ?? ''} />
         </Field>
         <Field label="GST rate (%)" htmlFor="taxRatePercent" hint="e.g. 18 for eighteen per cent.">
           <Input
             id="taxRatePercent"
-            name="taxRatePercent"
+            name="taxRatePercent" placeholder="e.g. 18"
             inputMode="decimal"
             defaultValue={product.taxRate === null ? '' : String(product.taxRate * 100)}
           />
@@ -254,7 +323,7 @@ export function PricingPanel({ product }: { product: ProductRecord }) {
               <Field label="SKU" htmlFor={`sku-${index}`} required>
                 <Input
                   id={`sku-${index}`}
-                  name={`sku-${index}`}
+                  name={`sku-${index}`} placeholder="e.g. TK-LiFe-5145-01"
                   defaultValue={variant.sku}
                   autoComplete="off"
                 />
@@ -266,7 +335,7 @@ export function PricingPanel({ product }: { product: ProductRecord }) {
               >
                 <Input
                   id={`variantKey-${index}`}
-                  name={`variantKey-${index}`}
+                  name={`variantKey-${index}`} placeholder="default"
                   defaultValue={variant.variantKey}
                   autoComplete="off"
                 />
@@ -277,7 +346,7 @@ export function PricingPanel({ product }: { product: ProductRecord }) {
               <Field label="MRP (₹)" htmlFor={`mrp-${index}`}>
                 <Input
                   id={`mrp-${index}`}
-                  name={`mrp-${index}`}
+                  name={`mrp-${index}`} placeholder="e.g. 35000"
                   inputMode="decimal"
                   defaultValue={rupees(variant.mrp)}
                 />
@@ -285,7 +354,7 @@ export function PricingPanel({ product }: { product: ProductRecord }) {
               <Field label="Selling price (₹)" htmlFor={`selling-${index}`}>
                 <Input
                   id={`selling-${index}`}
-                  name={`selling-${index}`}
+                  name={`selling-${index}`} placeholder="e.g. 32000"
                   inputMode="decimal"
                   defaultValue={rupees(variant.selling)}
                 />
@@ -297,7 +366,7 @@ export function PricingPanel({ product }: { product: ProductRecord }) {
               >
                 <Input
                   id={`stock-${index}`}
-                  name={`stock-${index}`}
+                  name={`stock-${index}`} placeholder="e.g. 25"
                   inputMode="numeric"
                   defaultValue={variant.stock === null ? '' : String(variant.stock)}
                 />
@@ -329,7 +398,7 @@ export function PricingPanel({ product }: { product: ProductRecord }) {
               >
                 <Input
                   id={`variantTitle-${index}`}
-                  name={`variantTitle-${index}`}
+                  name={`variantTitle-${index}`} placeholder="e.g. 51 V 45 Ah"
                   defaultValue={variant.title}
                 />
               </Field>
@@ -362,7 +431,7 @@ export function ContentPanel({ product }: { product: ProductRecord }) {
         >
           <Textarea
             id="highlights"
-            name="highlights"
+            name="highlights" placeholder={HIGHLIGHTS_EXAMPLE}
             rows={8}
             defaultValue={formatLines(product.highlights)}
           />
@@ -375,7 +444,7 @@ export function ContentPanel({ product }: { product: ProductRecord }) {
         >
           <Textarea
             id="description"
-            name="description"
+            name="description" placeholder={DESCRIPTION_EXAMPLE}
             rows={12}
             defaultValue={formatParagraphs(product.description)}
           />
@@ -384,7 +453,7 @@ export function ContentPanel({ product }: { product: ProductRecord }) {
         <Field label="What is in the box" htmlFor="boxContents" hint="One item per line.">
           <Textarea
             id="boxContents"
-            name="boxContents"
+            name="boxContents" placeholder={BOX_EXAMPLE}
             rows={5}
             defaultValue={formatLines(product.boxContents)}
           />
@@ -397,7 +466,7 @@ export function ContentPanel({ product }: { product: ProductRecord }) {
         >
           <Textarea
             id="careInstructions"
-            name="careInstructions"
+            name="careInstructions" placeholder={CARE_EXAMPLE}
             rows={6}
             defaultValue={formatLines(product.careInstructions ?? [])}
           />
@@ -427,7 +496,7 @@ export function SpecsPanel({ product }: { product: ProductRecord }) {
       >
         <Textarea
           id="specs"
-          name="specs"
+          name="specs" placeholder={SPECS_EXAMPLE}
           rows={26}
           spellCheck={false}
           className="font-mono text-xs"
@@ -499,7 +568,7 @@ export function SectionsPanel({ product }: { product: ProductRecord }) {
         >
           <Textarea
             id="applications"
-            name="applications"
+            name="applications" placeholder={APPLICATIONS_EXAMPLE}
             rows={6}
             className="font-mono text-xs"
             defaultValue={formatTitledItems(applications?.items ?? [])}
@@ -512,7 +581,7 @@ export function SectionsPanel({ product }: { product: ProductRecord }) {
             <Field label="Summary" htmlFor="chargingSummary">
               <Textarea
                 id="chargingSummary"
-                name="chargingSummary"
+                name="chargingSummary" placeholder="e.g. Charge with the supplied 58.4 V charger; a full charge takes about 4–5 hours."
                 rows={3}
                 defaultValue={charging?.summary ?? ''}
               />
@@ -520,7 +589,7 @@ export function SectionsPanel({ product }: { product: ProductRecord }) {
             <Field label="Figures" htmlFor="chargingPoints" hint="One per line, as: Label | Value.">
               <Textarea
                 id="chargingPoints"
-                name="chargingPoints"
+                name="chargingPoints" placeholder={CHARGING_EXAMPLE}
                 rows={6}
                 className="font-mono text-xs"
                 defaultValue={formatPairs(charging?.points ?? [])}
@@ -535,7 +604,7 @@ export function SectionsPanel({ product }: { product: ProductRecord }) {
             <Field label="Summary" htmlFor="dischargeSummary">
               <Textarea
                 id="dischargeSummary"
-                name="dischargeSummary"
+                name="dischargeSummary" placeholder="e.g. Delivers steady power down to the cut-off voltage, protected by the built-in BMS."
                 rows={3}
                 defaultValue={discharge?.summary ?? ''}
               />
@@ -547,7 +616,7 @@ export function SectionsPanel({ product }: { product: ProductRecord }) {
             >
               <Textarea
                 id="dischargePoints"
-                name="dischargePoints"
+                name="dischargePoints" placeholder={DISCHARGE_EXAMPLE}
                 rows={6}
                 className="font-mono text-xs"
                 defaultValue={formatPairs(discharge?.points ?? [])}
@@ -566,7 +635,7 @@ export function SectionsPanel({ product }: { product: ProductRecord }) {
             >
               <Textarea
                 id="runtimeSummary"
-                name="runtimeSummary"
+                name="runtimeSummary" placeholder="e.g. Run time depends on the connected load; typical figures are below."
                 rows={3}
                 defaultValue={runtime?.summary ?? ''}
               />
@@ -578,7 +647,7 @@ export function SectionsPanel({ product }: { product: ProductRecord }) {
             >
               <Textarea
                 id="runtimeScenarios"
-                name="runtimeScenarios"
+                name="runtimeScenarios" placeholder={RUNTIME_EXAMPLE}
                 rows={6}
                 className="font-mono text-xs"
                 defaultValue={formatScenarios(runtime?.scenarios ?? [])}
@@ -590,7 +659,7 @@ export function SectionsPanel({ product }: { product: ProductRecord }) {
         <Field label="What it works with" htmlFor="compatibility" hint="One point per line.">
           <Textarea
             id="compatibility"
-            name="compatibility"
+            name="compatibility" placeholder={COMPATIBILITY_EXAMPLE}
             rows={6}
             defaultValue={formatLines(compatibility?.items ?? [])}
           />
@@ -600,6 +669,7 @@ export function SectionsPanel({ product }: { product: ProductRecord }) {
           <Textarea
             id="care"
             name="care"
+            placeholder={CARE_EXAMPLE}
             rows={6}
             defaultValue={formatLines(care?.items ?? [])}
           />
@@ -629,19 +699,20 @@ export function FacetsPanel({ product }: { product: ProductRecord }) {
 
       <div className="grid gap-5 sm:grid-cols-2">
         <Field label="Battery capacity (Ah)" htmlFor="batteryAh">
-          <Input id="batteryAh" name="batteryAh" inputMode="decimal" defaultValue={value('batteryAh')} />
+          <Input id="batteryAh" name="batteryAh" placeholder="e.g. 45" inputMode="decimal" defaultValue={value('batteryAh')} />
         </Field>
         <Field
           label="Nominal voltage (V)"
           htmlFor="voltage"
           hint="The first thing an EV buyer filters on. Leave blank on a home inverter battery."
         >
-          <Input id="voltage" name="voltage" inputMode="decimal" defaultValue={value('voltage')} />
+          <Input id="voltage" name="voltage" placeholder="e.g. 51.2" inputMode="decimal" defaultValue={value('voltage')} />
         </Field>
         <Field label="Inverter capacity (VA)" htmlFor="capacityVa">
           <Input
             id="capacityVa"
             name="capacityVa"
+            placeholder="e.g. 1100"
             inputMode="decimal"
             defaultValue={value('capacityVa')}
           />
@@ -650,12 +721,13 @@ export function FacetsPanel({ product }: { product: ProductRecord }) {
           <Input
             id="backupHours"
             name="backupHours"
+            placeholder="e.g. 4"
             inputMode="decimal"
             defaultValue={value('backupHours')}
           />
         </Field>
         <Field label="Technology" htmlFor="technology" hint="e.g. LiFePO4.">
-          <Input id="technology" name="technology" defaultValue={product.facets.technology ?? ''} />
+          <Input id="technology" name="technology" placeholder="e.g. LiFePO4" defaultValue={product.facets.technology ?? ''} />
         </Field>
         <Field
           label="Sort rank"
@@ -665,6 +737,7 @@ export function FacetsPanel({ product }: { product: ProductRecord }) {
           <Input
             id="popularityRank"
             name="popularityRank"
+            placeholder="e.g. 10"
             inputMode="numeric"
             defaultValue={product.popularityRank === null ? '' : String(product.popularityRank)}
           />
@@ -677,7 +750,13 @@ export function FacetsPanel({ product }: { product: ProductRecord }) {
           htmlFor="badges"
           hint="One per line. Allowed: bestseller, new, sale, combo-saver, premium. Anything else is ignored."
         >
-          <Textarea id="badges" name="badges" rows={4} defaultValue={formatLines(product.badges)} />
+          <Textarea
+            id="badges"
+            name="badges"
+            placeholder={'bestseller\nnew'}
+            rows={4}
+            defaultValue={formatLines(product.badges)}
+          />
         </Field>
       </div>
 
@@ -706,6 +785,7 @@ export function WarrantyPanel({ product }: { product: ProductRecord }) {
           <Input
             id="warrantyText"
             name="warrantyText"
+            placeholder="e.g. 3 years or 1200 cycles, whichever is earlier"
             defaultValue={product.warrantyText ?? ''}
           />
         </Field>
@@ -719,6 +799,7 @@ export function WarrantyPanel({ product }: { product: ProductRecord }) {
             <Input
               id="warrantyMonths"
               name="warrantyMonths"
+              placeholder="e.g. 36"
               inputMode="numeric"
               defaultValue={product.warrantyMonths === null ? '' : String(product.warrantyMonths)}
             />
@@ -727,6 +808,7 @@ export function WarrantyPanel({ product }: { product: ProductRecord }) {
             <Input
               id="warrantyCycles"
               name="warrantyCycles"
+              placeholder="e.g. 1200"
               inputMode="numeric"
               defaultValue={product.warrantyCycles === null ? '' : String(product.warrantyCycles)}
             />
@@ -741,6 +823,7 @@ export function WarrantyPanel({ product }: { product: ProductRecord }) {
           <Input
             id="returnWindowDays"
             name="returnWindowDays"
+            placeholder="e.g. 7"
             inputMode="numeric"
             defaultValue={
               product.returnWindowDays === null ? '' : String(product.returnWindowDays)
@@ -850,7 +933,7 @@ export function FaqPanel({ product }: { product: ProductRecord }) {
       >
         <Textarea
           id="faqs"
-          name="faqs"
+          name="faqs" placeholder={FAQ_EXAMPLE}
           rows={24}
           className="font-mono text-xs"
           defaultValue={formatFaqs(product.faqs)}
@@ -888,7 +971,7 @@ export function SeoPanel({ product }: { product: ProductRecord }) {
           htmlFor="seoTitle"
           hint="Left blank, the product title is used."
         >
-          <Input id="seoTitle" name="seoTitle" defaultValue={product.seoTitle ?? ''} />
+          <Input id="seoTitle" name="seoTitle" placeholder="e.g. Trontek 51 V 45 Ah Lithium EV Battery | iTarang" defaultValue={product.seoTitle ?? ''} />
         </Field>
 
         <Field
@@ -899,6 +982,7 @@ export function SeoPanel({ product }: { product: ProductRecord }) {
           <Textarea
             id="seoDescription"
             name="seoDescription"
+            placeholder="e.g. Buy the Trontek TK-LiFe-5145 51 V 45 Ah LiFePO4 battery for e-scooters. 3-year warranty, made in India."
             rows={3}
             defaultValue={product.seoDescription ?? ''}
           />

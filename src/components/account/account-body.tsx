@@ -68,6 +68,8 @@ export interface AccountUser {
   fullName: string | null;
   phone: string | null;
   verified: boolean;
+  /** Staff accounts get a way into the console from here. */
+  isAdmin: boolean;
 }
 
 /** One row of order history, already reduced to what the list renders. */
@@ -328,6 +330,17 @@ function Overview({
             reach it directly, and `admin/layout.tsx` still redirects a
             bootstrapped admin to `/change-password?forced=1`.
           */}
+          {user.isAdmin ? (
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/30 bg-primary/5 p-3">
+              <p className="text-sm text-foreground">
+                This is a staff account. Orders, products and customers are managed in the
+                admin console.
+              </p>
+              <ButtonLink href="/admin" variant="primary" size="sm">
+                Open admin console
+              </ButtonLink>
+            </div>
+          ) : null}
           <div className="mt-5 flex flex-wrap gap-2">
             <ButtonLink href="/track" variant="primary">
               Track an order

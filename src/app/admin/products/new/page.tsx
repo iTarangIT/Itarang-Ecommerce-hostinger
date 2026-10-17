@@ -21,9 +21,9 @@ export const metadata: Metadata = {
  * and its own save. A create form carrying all of it would be forty fields
  * before the first one could be checked, and would fail as a whole.
  *
- * What is here is the set that cannot be changed casually afterwards or that
- * nothing else works without: the internal key, the URL, the title, and where
- * the product is filed.
+ * What is here is the set that nothing else works without: the title and where
+ * the product is filed. The internal key and the URL are derived from the title
+ * by `createProductAction`, so they cannot be mistyped.
  */
 export default async function NewProductPage({
   searchParams,
@@ -64,25 +64,18 @@ export default async function NewProductPage({
 
       <form action={createProductAction} className="mt-6 grid gap-5">
         <Field
-          label="Internal key"
-          htmlFor="productKey"
+          label="Product name"
+          htmlFor="title"
           required
-          hint="Permanent id for this product, e.g. trontek-tk-life-5145. Lower case, hyphens, no spaces. It is not shown to customers and does not change."
+          hint="As customers should see it, e.g. Trontek TK-LiFe-5145 Lithium Battery. The product page address is created from this automatically."
         >
-          <Input id="productKey" name="productKey" required autoComplete="off" />
-        </Field>
-
-        <Field
-          label="URL slug"
-          htmlFor="slug"
-          required
-          hint="The product page address: /products/your-slug. Changeable later, but an old link stops working when it changes."
-        >
-          <Input id="slug" name="slug" required autoComplete="off" />
-        </Field>
-
-        <Field label="Title" htmlFor="title" required>
-          <Input id="title" name="title" required autoComplete="off" />
+          <Input
+            id="title"
+            name="title"
+            required
+            autoComplete="off"
+            placeholder="e.g. Trontek TK-LiFe-5145 Lithium Battery"
+          />
         </Field>
 
         <Field
@@ -90,15 +83,25 @@ export default async function NewProductPage({
           htmlFor="subtitle"
           hint="One line under the title, and the description used in search results."
         >
-          <Input id="subtitle" name="subtitle" autoComplete="off" />
+          <Input
+            id="subtitle"
+            name="subtitle"
+            autoComplete="off"
+            placeholder="e.g. 51.2V 45Ah LiFePO4 battery for electric two-wheelers"
+          />
         </Field>
 
         <div className="grid gap-5 sm:grid-cols-2">
           <Field label="Brand" htmlFor="brand">
-            <Input id="brand" name="brand" autoComplete="off" />
+            <Input id="brand" name="brand" autoComplete="off" placeholder="e.g. Trontek" />
           </Field>
           <Field label="Model number" htmlFor="modelName">
-            <Input id="modelName" name="modelName" autoComplete="off" />
+            <Input
+              id="modelName"
+              name="modelName"
+              autoComplete="off"
+              placeholder="e.g. TK-LiFe-5145"
+            />
           </Field>
         </div>
 

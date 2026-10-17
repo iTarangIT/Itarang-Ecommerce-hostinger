@@ -51,8 +51,15 @@ export function BulkPricingForm() {
         <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">
           Download it again after an upload and it comes back with your new prices in it.
         </p>
+        {/* `download` keeps this out of the client router. As a soft
+            navigation, the router records the route handler's URL as the
+            current page even though the browser only saved a file, and the
+            upload's Server Action then POSTs to /template — a GET-only route —
+            gets a 405, and leaves the button on "Checking…" for good. */}
         <ButtonLink
           href="/admin/products/bulk-pricing/template"
+          download
+          prefetch={false}
           variant="outline"
           size="sm"
           className="mt-3"

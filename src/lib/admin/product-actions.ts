@@ -9,6 +9,7 @@ import { CATALOG_TAG } from '@/lib/commerce/db/db-provider';
 import type { BadgeKind, ProductFacetValues, ProductSection } from '@/lib/commerce/types';
 import { productRepository } from '@/lib/products/postgres-repository';
 import { dispatchStockAlertsInBackground } from '@/lib/stock/alerts';
+import { slugify } from '@/lib/utils';
 import {
   ALLOWED_MEDIA_TYPES,
   MAX_MEDIA_BYTES,
@@ -204,10 +205,14 @@ const optionalFloat = z
 
 /* ------------------------------------------------------------------ create */
 
+/**
+ * The create form does not ask for a key or a slug: both are derived from the
+ * title (plus the model number when the title does not already carry it), so an
+ * administrator cannot mistype a product's address. A taken address gets a
+ * numeric suffix. The slug can still be changed later under "SEO & URL".
+ */
 const createSchema = z.object({
-  productKey: productKeySchema,
-  slug: slugSchema,
-  title: text(200).min(1),
+  title: text(200).min(1, 'Enter a title.'),
   subtitle: text(300).optional().default(''),
   brand: optionalText(120),
   modelName: optionalText(120),
@@ -227,18 +232,38 @@ export async function createProductAction(formData: FormData): Promise<void> {
     );
   }
 
-  const result = await productRepository().createProduct(parsed.data, actor);
-  if (!result.ok) {
-    const message =
-      result.code === 'duplicate'
-        ? `That ${result.field.replace('_', ' ')} is already taken: ${result.value}`
-        : 'Could not create the product.';
-    redirect('/admin/products/new?error=' + encodeURIComponent(message));
+  const base = baseSlugFor(parsed.data.title, parsed.data.modelName);
+
+  for (let attempt = 1; attempt <= MAX_SLUG_ATTEMPTS; attempt++) {
+    const suffix = attempt === 1 ? '' : `-${attempt}`;
+    const slug = base.slice(0, 120 - suffix.length).replace(/-+$/, '') + suffix;
+
+    const result = await productRepository().createProduct(
+      { ...parsed.data, productKey: slug, slug },
+      actor,
+    );
+    if (result.ok) {
+      publishCatalogueChange();
+      revalidatePath('/admin/products');
+      backTo(slug, 'information', { saved: '1' });
+    }
+    // Only a clash on the generated address is worth another try.
+    if (result.code !== 'duplicate') break;
   }
 
-  publishCatalogueChange();
-  revalidatePath('/admin/products');
-  backTo(parsed.data.productKey, 'information', { saved: '1' });
+  redirect(
+    '/admin/products/new?error=' +
+      encodeURIComponent('Could not create the product. A product with this title may already exist.'),
+  );
+}
+
+const MAX_SLUG_ATTEMPTS = 20;
+
+function baseSlugFor(title: string, modelName: string | null): string {
+  let base = slugify(title);
+  const model = modelName ? slugify(modelName) : '';
+  if (model && !base.includes(model)) base = base ? `${base}-${model}` : model;
+  return base || 'product';
 }
 
 /* ------------------------------------------------------------- information */
