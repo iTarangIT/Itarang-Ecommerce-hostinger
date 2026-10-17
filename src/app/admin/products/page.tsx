@@ -145,11 +145,18 @@ export default async function AdminProductsPage({
             </thead>
             <tbody>
               {items.map((product) => (
-                <tr key={product.id} className="border-t border-border hover:bg-surface/60">
+                // The whole row opens the editor. The title link's ::after is
+                // stretched over the row (`relative` on the <tr>), so it stays a
+                // real link — middle-click and ctrl-click open a new tab — with no
+                // client-side click handler.
+                <tr
+                  key={product.id}
+                  className="relative cursor-pointer border-t border-border hover:bg-surface/60"
+                >
                   <td className="px-4 py-3">
                     <Link
                       href={`/admin/products/${product.productKey}`}
-                      className="font-medium text-primary underline-offset-4 hover:underline"
+                      className="font-medium text-primary underline-offset-4 after:absolute after:inset-0 after:content-[''] hover:underline"
                     >
                       {product.title}
                     </Link>
@@ -170,7 +177,10 @@ export default async function AdminProductsPage({
                         "untracked" is what would send someone hunting for a
                         sold-out product that was never counted. */}
                     {product.primaryStock === null ? (
-                      <span className="text-muted-foreground" title="Stock is not tracked">
+                      <span
+                        className="relative z-10 text-muted-foreground"
+                        title="Stock is not tracked"
+                      >
                         —
                       </span>
                     ) : product.primaryStock === 0 ? (
@@ -182,7 +192,7 @@ export default async function AdminProductsPage({
                     )}
                     {product.variantCount > 1 ? (
                       <span
-                        className="ml-1 text-xs text-muted-foreground"
+                        className="relative z-10 ml-1 text-xs text-muted-foreground"
                         title={`Primary of ${product.variantCount} variants`}
                       >
                         ·{product.variantCount}
