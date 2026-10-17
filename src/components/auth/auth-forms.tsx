@@ -13,6 +13,7 @@ import {
 import { MIN_PASSWORD_LENGTH } from '@/lib/auth/password-policy';
 import { Button } from '@/components/ui/button';
 import { Field, Input } from '@/components/ui/field';
+import { PasswordInput } from '@/components/ui/password-input';
 
 /**
  * The four credential forms.
@@ -55,10 +56,9 @@ export function SignInForm({ next }: { next?: string }) {
       </Field>
 
       <Field label="Password" htmlFor="password" required>
-        <Input
+        <PasswordInput
           id="password"
           name="password"
-          type="password"
           autoComplete="current-password"
           required
         />
@@ -101,10 +101,9 @@ export function RegisterForm({ next }: { next?: string }) {
         required
         hint={`At least ${MIN_PASSWORD_LENGTH} characters.`}
       >
-        <Input
+        <PasswordInput
           id="password"
           name="password"
-          type="password"
           autoComplete="new-password"
           minLength={MIN_PASSWORD_LENGTH}
           required
@@ -151,10 +150,9 @@ export function ChangePasswordForm() {
   return (
     <form action={action} className="space-y-4">
       <Field label="Current password" htmlFor="currentPassword" required>
-        <Input
+        <PasswordInput
           id="currentPassword"
           name="currentPassword"
-          type="password"
           autoComplete="current-password"
           autoFocus
           required
@@ -167,10 +165,9 @@ export function ChangePasswordForm() {
         required
         hint={`At least ${MIN_PASSWORD_LENGTH} characters.`}
       >
-        <Input
+        <PasswordInput
           id="password"
           name="password"
-          type="password"
           autoComplete="new-password"
           minLength={MIN_PASSWORD_LENGTH}
           required
@@ -178,10 +175,9 @@ export function ChangePasswordForm() {
       </Field>
 
       <Field label="Confirm new password" htmlFor="confirmPassword" required>
-        <Input
+        <PasswordInput
           id="confirmPassword"
           name="confirmPassword"
-          type="password"
           autoComplete="new-password"
           required
         />
@@ -214,10 +210,9 @@ export function ResetPasswordForm({ token }: { token: string }) {
         required
         hint={`At least ${MIN_PASSWORD_LENGTH} characters.`}
       >
-        <Input
+        <PasswordInput
           id="password"
           name="password"
-          type="password"
           autoComplete="new-password"
           minLength={MIN_PASSWORD_LENGTH}
           autoFocus
@@ -226,10 +221,9 @@ export function ResetPasswordForm({ token }: { token: string }) {
       </Field>
 
       <Field label="Confirm new password" htmlFor="confirmPassword" required>
-        <Input
+        <PasswordInput
           id="confirmPassword"
           name="confirmPassword"
-          type="password"
           autoComplete="new-password"
           required
         />

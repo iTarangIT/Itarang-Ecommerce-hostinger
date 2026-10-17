@@ -19,15 +19,18 @@ export default async function AccountPage() {
   // session lookup. The order history genuinely does depend on the session and
   // still follows it.
   const [session, suggestions] = await Promise.all([currentUser(), bestSellers(6)]);
-  // The serialisable slice, and only that. `sessionId`, `role` and
-  // `mustChangePassword` stay on the server: none of them changes what this
-  // page renders, and a client prop is a value anybody can read.
+  // The serialisable slice, and only that. `sessionId`, the raw `role` and
+  // `mustChangePassword` stay on the server: a client prop is a value anybody
+  // can read. `isAdmin` is the exception — it only shows the console link, it
+  // is only ever sent to the account holder themselves, and `/admin` checks
+  // the role again on the server regardless.
   const user = session
     ? {
         email: session.email,
         fullName: session.fullName,
         phone: session.phone,
         verified: session.emailVerifiedAt !== null,
+        isAdmin: session.role === 'admin',
       }
     : null;
 
