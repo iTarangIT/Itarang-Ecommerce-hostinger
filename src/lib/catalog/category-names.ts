@@ -30,13 +30,15 @@ import type { CategorySlug } from '@/lib/commerce/types';
  */
 export const CATEGORY_NAMES: Partial<Record<CategorySlug, string>> = {
   batteries: 'Batteries',
+  chargers: 'Chargers',
 };
 
 export const SUBCATEGORY_NAMES: Record<string, string> = {
-  lithium: 'Lithium Batteries',
-  'home-inverter': 'Home & Inverter Batteries',
-  'ev-2-wheeler': '2-Wheeler EV Batteries',
   'ev-3-wheeler': '3-Wheeler & E-Rickshaw Batteries',
+  'ev-2-wheeler': '2-Wheeler EV Batteries',
+  'home-inverter': 'Home Inverter Batteries',
+  ess: 'ESS — Energy Storage Systems',
+  'ev-chargers': 'EV Battery Chargers',
 };
 
 export function categoryName(slug: string): string {

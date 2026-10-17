@@ -60,6 +60,8 @@ export interface OrderAmounts {
   productSavings: Paise;
   couponCode?: string;
   couponDiscount: Paise;
+  /** The UPI discount. Zero on orders placed before it existed. */
+  paymentDiscount: Paise;
   shipping: Paise;
   codFee: Paise;
   total: Paise;

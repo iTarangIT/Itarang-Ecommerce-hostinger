@@ -2,67 +2,30 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { AlertTriangle } from 'lucide-react';
 import { SupportShell } from '@/components/support/support-shell';
-import { SupportForm, type FormFieldSpec } from '@/components/support/support-form';
+import { SupportForm } from '@/components/support/support-form';
 
 export const metadata: Metadata = {
   title: 'Register a complaint',
   description:
-    'Log a fault with your iTarang inverter, battery or UPS and have a technician assigned from the service network covering your pincode.',
+    'Report a fault with your Trontek battery or charger bought from iTarang and get a reference number straight away.',
   alternates: { canonical: '/support/complaint' },
 };
-
-const FIELDS: FormFieldSpec[] = [
-  { name: 'name', label: 'Your name', type: 'text', required: true },
-  { name: 'phone', label: 'Mobile number', type: 'tel', required: true },
-  { name: 'email', label: 'Email address', type: 'email' },
-  { name: 'pincode', label: 'Pincode', type: 'pincode', required: true },
-  { name: 'model', label: 'Model name', type: 'text', required: true, placeholder: 'e.g. TallTube 150' },
-  { name: 'serial', label: 'Serial number', type: 'text', required: true },
-  {
-    name: 'issue',
-    label: 'What is the problem',
-    type: 'select',
-    required: true,
-    options: [
-      'Backup time has dropped',
-      'Not charging',
-      'No output on battery',
-      'Unit is beeping or showing a fault',
-      'Physical damage or leakage',
-      'Installation issue',
-      'Something else',
-    ],
-  },
-  {
-    name: 'startedOn',
-    label: 'When did it start',
-    type: 'date',
-  },
-  {
-    name: 'description',
-    label: 'Describe what is happening',
-    type: 'textarea',
-    required: true,
-    placeholder:
-      'What you observe, when it happens, and anything that changed recently — new appliances, a power surge, a recent service visit.',
-  },
-];
 
 export default function ComplaintPage() {
   return (
     <SupportShell
       title="Register a complaint"
-      intro="Tell us what is wrong and we will assign a technician from the service network covering your pincode. The more specific the description, the more likely the first visit fixes it."
+      intro="Tell us what is wrong and you get a reference number straight away. Our team calls you within one working day. The more specific the description, the faster it is fixed."
       current="/support/complaint"
     >
       <div className="rounded-xl border border-warning/40 bg-warning-soft p-4">
         <p className="flex items-start gap-2 text-sm font-semibold text-foreground">
           <AlertTriangle className="mt-0.5 h-4.5 w-4.5 shrink-0 text-warning" />
-          If you can smell burning, see smoke, or a battery is leaking
+          If a battery is swelling, smoking, unusually hot or smells of burning
         </p>
         <p className="mt-1.5 text-sm text-muted-foreground">
-          Switch the system off at the mains, disconnect the battery if it is safe to do so, keep
-          the area ventilated, and call us rather than using this form.
+          Stop charging, disconnect it if it is safe to do so, move people away, and call us rather
+          than using this form.
         </p>
       </div>
 
@@ -70,10 +33,10 @@ export default function ComplaintPage() {
         <h2 className="heading-3">Complaint details</h2>
         <div className="mt-6">
           <SupportForm
-            fields={FIELDS}
+            kind="complaint"
             submitLabel="Register complaint"
-            successTitle="Complaint details prepared"
-            successBody="Once the service desk has your details, you receive a reference number you can quote on any follow-up call."
+            successTitle="Complaint registered"
+            successBody="Quote this reference whenever you contact us. If you gave an email address, a copy is on its way."
           />
         </div>
       </div>
@@ -81,20 +44,17 @@ export default function ComplaintPage() {
       <section className="mt-8 rounded-xl border border-border bg-surface p-5 sm:p-6">
         <h2 className="heading-3">Before you log a fault</h2>
         <div className="rich-text mt-3">
+          <h3>The battery is not charging</h3>
           <p>
-            Two things account for most reported faults, and both are quick to check yourself.
+            Check that the charger is the one made for this pack’s voltage, that both connectors
+            are fully seated, and that the charger’s indicator light comes on. A battery protects
+            itself by switching off when it is very deeply discharged; leave it on the correct
+            charger for an hour before concluding it is faulty.
           </p>
-          <h3>Backup time has dropped</h3>
+          <h3>Range or backup time has dropped</h3>
           <p>
-            On a flooded lead acid battery, check the electrolyte level first — the float indicators
-            on each cell show when a cell needs distilled water. Capacity also falls naturally as a
-            battery ages, faster if it is regularly discharged deeply.
-          </p>
-          <h3>The inverter switches to battery too often</h3>
-          <p>
-            This is usually the grid, not the inverter. If your supply frequently dips below the
-            input window, the unit is doing exactly what it should. Our engineers can confirm from
-            the fault log during a visit.
+            Range falls with heavier loads, hills, low tyre pressure and cold weather, and capacity
+            reduces slowly with age. A sudden large drop is worth reporting.
           </p>
           <p>
             Still not right?{' '}

@@ -67,13 +67,14 @@ export const FOOTER_COLUMNS: NavGroup[] = [
       // gone from the taxonomy — a footer link is still a link, and these four
       // led to empty category pages. The subcategory links below are what the
       // business actually sells.
-      { label: 'Batteries', href: categoryPath('batteries') },
-      { label: 'Lithium batteries', href: subcategoryPath('batteries', 'lithium') },
-      { label: '2-wheeler EV batteries', href: subcategoryPath('batteries', 'ev-2-wheeler') },
       {
         label: '3-wheeler & e-rickshaw batteries',
         href: subcategoryPath('batteries', 'ev-3-wheeler'),
       },
+      { label: '2-wheeler EV batteries', href: subcategoryPath('batteries', 'ev-2-wheeler') },
+      { label: 'Home inverter batteries', href: subcategoryPath('batteries', 'home-inverter') },
+      { label: 'ESS', href: subcategoryPath('batteries', 'ess') },
+      { label: 'Chargers', href: categoryPath('chargers') },
       { label: 'Offers', href: '/offers' },
       { label: 'Compare products', href: '/compare' },
     ],
@@ -101,10 +102,12 @@ export const FOOTER_COLUMNS: NavGroup[] = [
 ];
 
 export const POLICY_LINKS: NavChild[] = [
+  { label: 'Refund & returns', href: '/policies/refund' },
+  { label: 'Payment failure', href: '/policies/payment-failure' },
   { label: 'Warranty terms', href: '/support/faq#warranty' },
-  { label: 'Returns & replacement', href: '/support/faq#returns' },
   { label: 'Delivery information', href: '/support/faq#delivery' },
   { label: 'Offer terms', href: '/offers#terms' },
+  { label: 'Grievance officer', href: '/support/grievance' },
 ];
 
 export interface TrustItem {

@@ -62,6 +62,7 @@ interface OrderRow {
   product_savings: number;
   coupon_code: string | null;
   coupon_discount: number;
+  payment_discount: number;
   shipping: number;
   cod_fee: number;
   total: number;
@@ -131,6 +132,7 @@ function toOrder(row: OrderRow, items: OrderItem[]): Order {
       productSavings: row.product_savings,
       couponCode: row.coupon_code ?? undefined,
       couponDiscount: row.coupon_discount,
+      paymentDiscount: row.payment_discount,
       shipping: row.shipping,
       codFee: row.cod_fee,
       total: row.total,
@@ -153,7 +155,7 @@ function toOrder(row: OrderRow, items: OrderItem[]): Order {
 const ORDER_COLUMNS = `
   id, order_number, user_id, status, payment_status,
   customer_name, customer_phone, customer_email, shipping_address,
-  subtotal, product_savings, coupon_code, coupon_discount, shipping, cod_fee,
+  subtotal, product_savings, coupon_code, coupon_discount, payment_discount, shipping, cod_fee,
   total, gst_amount, gst_rate, place_of_supply, buyer_gstin, seller_gstin,
   payment_method, is_test, idempotency_key, gateway_order_id,
   created_at, updated_at`;
@@ -479,9 +481,9 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
                customer_name, customer_phone, customer_email, shipping_address,
                subtotal, product_savings, coupon_code, coupon_discount, shipping, cod_fee,
                total, gst_amount, gst_rate, place_of_supply, buyer_gstin, seller_gstin,
-               payment_method, is_test, idempotency_key, gateway_order_id
+               payment_method, is_test, idempotency_key, gateway_order_id, payment_discount
              ) VALUES (
-               $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24
+               $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25
              ) RETURNING ${ORDER_COLUMNS}`,
             [
               orderNumber,
@@ -508,6 +510,7 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
               order.isTest,
               order.idempotencyKey ?? null,
               order.gatewayOrderId ?? null,
+              order.amounts.paymentDiscount,
             ],
           );
           inserted = result.rows[0];
@@ -1085,6 +1088,19 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
       const [hydrated] = await this.hydrateWithin(client, updated.rows);
       return hydrated;
     });
+  }
+
+  /**
+   * Record something that happened to an order without changing its status —
+   * a customer told about a delay, say. Stored as an event from a status to
+   * the same status, so the order history shows it in sequence with the rest.
+   */
+  async addOrderNote(orderId: number, actor: string, note: string): Promise<void> {
+    await query(
+      `INSERT INTO order_events (order_id, from_status, to_status, actor, note)
+       SELECT id, status, status, $2, $3 FROM orders WHERE id = $1`,
+      [orderId, actor, note],
+    );
   }
 
   async listEvents(orderId: number): Promise<OrderEvent[]> {

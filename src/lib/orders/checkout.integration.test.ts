@@ -70,6 +70,7 @@ function draftOrder(overrides: Partial<NewOrder> = {}): NewOrder {
       subtotal: 100000,
       productSavings: 0,
       couponDiscount: 0,
+      paymentDiscount: 0,
       shipping: 39900,
       codFee: 0,
       total: 139900,

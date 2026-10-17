@@ -20,18 +20,21 @@ import { resetEnvCache } from '@/lib/env';
  * `toDomainProduct` the storefront uses, so nothing here restates a price or a
  * capacity that could drift from the catalogue.
  *
- * Two collaborators are mocked and only two: which provider is active, and what
- * it returns. Everything else — pricing, totals, coupons, serviceability, the
- * COD rules — is the real code path.
+ * Three collaborators are mocked: which provider is active, what it returns,
+ * and the coverage lookup (a database read). Everything else — pricing, totals,
+ * coupons, the COD rules — is the real code path.
  */
 
-const { allProducts, activeProviderName } = vi.hoisted(() => ({
+const { allProducts, activeProviderName, lookupPincode } = vi.hoisted(() => ({
   allProducts: vi.fn<() => Promise<Product[]>>(),
   activeProviderName: vi.fn<() => string>(),
+  lookupPincode: vi.fn(),
 }));
 
 vi.mock('@/lib/catalog/collections', () => ({ allProducts }));
 vi.mock('@/lib/commerce', () => ({ activeProviderName }));
+// Coverage is a database read; each test sets the answer it needs.
+vi.mock('@/lib/support/serviceability-server', () => ({ lookupPincode }));
 
 const { buildQuote } = await import('./quote');
 
@@ -125,6 +128,17 @@ beforeEach(() => {
   process.env.COD_MAX_ORDER_PAISE = '2000000';
   process.env.PAYMENT_PROVIDER = 'mock';
   resetEnvCache();
+  // Default coverage answer: listed and deliverable. The coverage tests below
+  // override it.
+  lookupPincode.mockResolvedValue({
+    serviceable: true,
+    confirmed: true,
+    pincode: '122018',
+    deliveryDays: 2,
+    codAvailable: true,
+    installationDays: 3,
+    message: 'Delivery in 2–3 working days.',
+  });
 
   activeProviderName.mockReturnValue('db');
   allProducts.mockResolvedValue(PUBLISHED);
@@ -385,81 +399,84 @@ describe('cash on delivery is closed', () => {
   });
 });
 
-/* --------------------------------------------- 12 · serviceability advises */
+/* --------------------------------------- 12 · serviceability from coverage */
 
 /**
- * A development fixture must not refuse a real customer.
+ * Delivery coverage comes from `serviceable_pincodes`, through
+ * `lookupPincode` — mocked here so the three answers can be set directly.
  *
- * `lib/support/serviceability.ts` answers from the digit sum of the pincode
- * (`serviceable = checksum % 11 !== 0`), which has no relationship to where we
- * deliver — so roughly one valid Indian pincode in eleven was being refused at
- * checkout. `not_serviceable` has been removed from the blocking set in
- * `quote.ts`: the issue is still raised, so the customer can still be told we
- * cannot confirm delivery, but it no longer stops the order.
- *
- * The pincodes below are real cities chosen because the fixture rejects them,
- * and the digit sum is asserted here rather than trusted, so the day the
- * fixture's rule changes these tests say so instead of quietly passing.
+ * Only a pincode the coverage list has explicitly switched off refuses an
+ * order. An unlisted pincode is "unconfirmed": told, never refused. This used
+ * to be decided by the digit sum of the pincode, which refused about one valid
+ * pincode in eleven and so could not be allowed to block anything.
  */
-describe('the serviceability fixture advises but does not refuse', () => {
-  /** Lucknow. 2+2+6+0+0+1 = 11. */
-  const UNSERVICEABLE_PINCODE = '226001';
-  /** Srinagar. 1+9+0+0+0+1 = 11. */
-  const ALSO_UNSERVICEABLE = '190001';
+describe('serviceability: only a confirmed no-delivery pincode refuses', () => {
+  const PINCODE = '226001';
 
-  const digitSum = (pincode: string) =>
-    pincode.split('').reduce((sum, digit) => sum + Number(digit), 0);
+  function coverage(serviceable: boolean, confirmed: boolean) {
+    lookupPincode.mockResolvedValue({
+      serviceable,
+      confirmed,
+      pincode: PINCODE,
+      deliveryDays: 3,
+      codAvailable: false,
+      installationDays: 4,
+      message: serviceable ? 'Delivery in 3–4 working days.' : 'We do not deliver to this pincode yet.',
+    });
+  }
 
-  it.each([UNSERVICEABLE_PINCODE, ALSO_UNSERVICEABLE])(
-    '%s is genuinely rejected by the fixture, so these cases test what they claim to',
-    (pincode) => {
-      expect(digitSum(pincode) % 11).toBe(0);
-    },
-  );
-
-  it('still places a real order to a pincode the fixture calls unserviceable', async () => {
+  it('places an order to an unlisted pincode, without an issue', async () => {
+    coverage(true, false);
     const quote = await buildQuote({
       lines: [{ variantId: SELLABLE_VARIANT_ID, quantity: 1 }],
-      pincode: UNSERVICEABLE_PINCODE,
+      pincode: PINCODE,
     });
+    expect(quote.placeable).toBe(true);
+    expect(codes(quote)).not.toContain('not_serviceable');
+    expect(quote.serviceability?.confirmed).toBe(false);
+  });
 
+  it('places an order to a listed, active pincode', async () => {
+    coverage(true, true);
+    const quote = await buildQuote({
+      lines: [{ variantId: SELLABLE_VARIANT_ID, quantity: 1 }],
+      pincode: PINCODE,
+    });
     expect(quote.placeable).toBe(true);
   });
 
-  it('still raises the issue, so the customer can be told', async () => {
+  it('refuses a pincode the coverage list has switched off, and says why', async () => {
+    coverage(false, true);
     const quote = await buildQuote({
       lines: [{ variantId: SELLABLE_VARIANT_ID, quantity: 1 }],
-      pincode: UNSERVICEABLE_PINCODE,
+      pincode: PINCODE,
     });
-
-    // Advisory, not blocking: present in `issues`, absent from the decision.
+    expect(quote.placeable).toBe(false);
     expect(codes(quote)).toContain('not_serviceable');
   });
 
-  it('prices the order identically whichever pincode it goes to', async () => {
-    const [serviceable, unserviceable] = await Promise.all([
-      buildQuote(line(SELLABLE_VARIANT_ID)),
-      buildQuote({
-        lines: [{ variantId: SELLABLE_VARIANT_ID, quantity: 1 }],
-        pincode: UNSERVICEABLE_PINCODE,
-      }),
-    ]);
-
-    expect(unserviceable.totals.total).toBe(serviceable.totals.total);
+  it('prices the order identically whatever the coverage answer', async () => {
+    coverage(true, true);
+    const listed = await buildQuote(line(SELLABLE_VARIANT_ID));
+    coverage(true, false);
+    const unlisted = await buildQuote({
+      lines: [{ variantId: SELLABLE_VARIANT_ID, quantity: 1 }],
+      pincode: PINCODE,
+    });
+    expect(unlisted.totals.total).toBe(listed.totals.total);
   });
 
   it('leaves a malformed pincode raising its own issue', async () => {
-    // Address *data* validation is a separate concern and is unchanged.
+    lookupPincode.mockResolvedValue({ error: 'Enter a valid 6-digit pincode.' });
     const quote = await buildQuote({
       lines: [{ variantId: SELLABLE_VARIANT_ID, quantity: 1 }],
       pincode: '12',
     });
-
     expect(codes(quote)).toContain('not_serviceable');
   });
 
-  it('still refuses an out-of-stock line at an unserviceable pincode', async () => {
-    // The gates that matter are untouched: only the fictional one was removed.
+  it('still refuses an out-of-stock line', async () => {
+    coverage(true, true);
     const outOfStock = toDomainProduct({
       ...asRecord(seedFor(POWERCUBE_1_4)),
       variants: asRecord(seedFor(POWERCUBE_1_4)).variants.map((v) => ({ ...v, stock: 0 })),
@@ -468,22 +485,10 @@ describe('the serviceability fixture advises but does not refuse', () => {
 
     const quote = await buildQuote({
       lines: [{ variantId: outOfStock.variants[0]!.id, quantity: 1 }],
-      pincode: UNSERVICEABLE_PINCODE,
+      pincode: PINCODE,
     });
 
     expect(quote.placeable).toBe(false);
     expect(codes(quote)).toContain('out_of_stock');
-  });
-
-  it('still refuses a product that is not ours at an unserviceable pincode', async () => {
-    allProducts.mockResolvedValue([DEMO_PRODUCT]);
-
-    const quote = await buildQuote({
-      lines: [{ variantId: DEMO_PRODUCT.variants[0]!.id, quantity: 1 }],
-      pincode: UNSERVICEABLE_PINCODE,
-    });
-
-    expect(quote.placeable).toBe(false);
-    expect(codes(quote)).toContain('not_purchasable');
   });
 });

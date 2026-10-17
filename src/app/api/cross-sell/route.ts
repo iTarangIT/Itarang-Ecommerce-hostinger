@@ -1,61 +1,31 @@
 import { NextResponse } from 'next/server';
 import { allProducts } from '@/lib/catalog/collections';
+import { linkedProductsForAll } from '@/lib/catalog/linked-products';
 import { toProductSummary } from '@/lib/commerce/summary';
 import { productAvailability } from '@/lib/catalog/pricing';
-import type { CategorySlug } from '@/lib/commerce/types';
 
 /**
- * Cross-sell recommendations for the cart drawer.
+ * Recommendations for the cart drawer: linked products only.
  *
- * Simple complementary-category logic: a cart with an inverter should be
- * offered batteries, and vice versa. Replace with real "bought together" data
- * once order history exists.
- */
-const COMPLEMENTS: Record<CategorySlug, CategorySlug[]> = {
-  inverters: ['batteries'],
-  batteries: ['batteries'],
-  ups: ['batteries'],
-  combos: ['batteries'],
-};
-
-/**
- * What to offer when the cart tells us nothing useful.
+ * It used to offer "more batteries" for any cart, which the business called out
+ * as unrelated recommendations. Now it answers one question — what does
+ * something in this cart need — through `linkedProductsForAll`, which today
+ * means a matching charger for an EV battery. A cart with nothing linked gets an
+ * empty list and the drawer shows no rail at all.
  *
- * This used to be `combos`, which is no longer a category anyone can browse —
- * so an empty or unrecognised cart asked for a family with no products and got
- * an empty rail. Batteries is the only live family, which also makes every
- * entry in `COMPLEMENTS` above point at it: kept as a map rather than collapsed
- * to a constant because the complementary-category idea comes straight back the
- * day inverters are stocked, and the shape is the documentation for it.
+ * `ids` are the product ids in the cart. Public and cacheable: the response
+ * depends on the query string alone.
  */
-const FALLBACK_CATEGORY: CategorySlug = 'batteries';
-
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
-  const categories = (params.get('categories') ?? '').split(',').filter(Boolean) as CategorySlug[];
-  const exclude = new Set((params.get('exclude') ?? '').split(',').filter(Boolean));
-
-  const wanted = new Set<CategorySlug>();
-  for (const category of categories) {
-    for (const complement of COMPLEMENTS[category] ?? []) wanted.add(complement);
-  }
-  if (wanted.size === 0) wanted.add(FALLBACK_CATEGORY);
+  const ids = new Set((params.get('ids') ?? '').split(',').filter(Boolean).slice(0, 50));
 
   const catalogue = await allProducts();
+  const inCart = catalogue.filter((product) => ids.has(product.id));
+  const purchasable = catalogue.filter((product) => productAvailability(product) !== 'out-of-stock');
 
-  // `productAvailability` rather than `variants.some(v => v.stock > 0)`: the
-  // raw comparison reads a count this route has no business reading, and it
-  // also answers the wrong question for an untracked variant, where `stock`
-  // is the sentinel 99 from `to-domain.ts` and not a quantity anybody stated.
-  const products = catalogue
-    .filter(
-      (p) =>
-        wanted.has(p.category) &&
-        !exclude.has(p.id) &&
-        productAvailability(p) !== 'out-of-stock',
-    )
-    .sort((a, b) => a.popularityRank - b.popularityRank)
-    .slice(0, 4)
+  const products = linkedProductsForAll(inCart, purchasable, 4)
+    .filter((product) => !ids.has(product.id))
     .map(toProductSummary);
 
   return NextResponse.json({ products });

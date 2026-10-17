@@ -14,6 +14,12 @@ export interface CartItem {
   /** Stock ceiling for the quantity stepper. */
   maxQuantity: number;
   category: CategorySlug;
+  /**
+   * Optional only because carts saved in localStorage before it existed do not
+   * have it. `buildQuote` always sets it from the catalogue, so the server never
+   * prices a line without one.
+   */
+  subcategory?: string;
   installationIncluded: boolean;
 }
 

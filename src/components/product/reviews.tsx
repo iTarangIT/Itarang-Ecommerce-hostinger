@@ -7,7 +7,6 @@ import { Rating } from '@/components/ui/rating';
 import { Button } from '@/components/ui/button';
 import { StateBlock } from '@/components/ui/states';
 import { formatDate } from '@/lib/utils';
-import { useUI } from '@/lib/store/ui-provider';
 import { cn } from '@/lib/utils';
 
 type SortId = 'recent' | 'helpful' | 'high' | 'low';
@@ -30,10 +29,13 @@ export function Reviews({
   reviews,
   productTitle,
   layout = 'wide',
+  writeSlot,
 }: {
   summary: RatingSummary | null;
   reviews: Review[];
   productTitle: string;
+  /** The "write a review" control, supplied by the page. */
+  writeSlot?: React.ReactNode;
   /**
    * `'column'` stacks the distribution above the list.
    *
@@ -44,7 +46,6 @@ export function Reviews({
    */
   layout?: 'wide' | 'column';
 }) {
-  const { toast } = useUI();
   const [sort, setSort] = React.useState<SortId>('helpful');
   const [starFilter, setStarFilter] = React.useState<number | null>(null);
   const [photosOnly, setPhotosOnly] = React.useState(false);
@@ -72,11 +73,14 @@ export function Reviews({
 
   if (!summary || reviews.length === 0) {
     return (
-      <StateBlock
-        icon={<MessageSquarePlus className="h-6 w-6" />}
-        title="No reviews yet"
-        description={`${productTitle} has not been reviewed yet. Reviews are only published from verified orders, so this fills up as the first systems are installed.`}
-      />
+      <div className="space-y-4">
+        <StateBlock
+          icon={<MessageSquarePlus className="h-6 w-6" />}
+          title="No reviews yet"
+          description={`${productTitle} has not been reviewed yet. Only customers who bought it can review it, so be the first.`}
+        />
+        {writeSlot ? <div className="mx-auto max-w-md">{writeSlot}</div> : null}
+      </div>
     );
   }
 
@@ -133,21 +137,7 @@ export function Reviews({
             })}
           </ul>
 
-          <Button
-            variant="outline"
-            fullWidth
-            className="mt-5"
-            onClick={() =>
-              toast({
-                title: 'Reviews open after delivery',
-                description:
-                  'Only verified buyers can review, so the form unlocks once your order is delivered.',
-                tone: 'info',
-              })
-            }
-          >
-            Write a review
-          </Button>
+          {writeSlot ? <div className="mt-5">{writeSlot}</div> : null}
           <p className="mt-2 text-center text-xs text-muted-foreground">
             Verified buyers only — we do not accept unattached reviews.
           </p>

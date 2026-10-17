@@ -18,6 +18,7 @@ export interface ProductSummary {
   image: string;
   hoverImage?: string;
   category: CategorySlug;
+  subcategory: string;
   categoryLabel: string;
   badges: BadgeKind[];
   price: Paise;
@@ -92,6 +93,7 @@ export interface ProductSummary {
 const CATEGORY_LABELS: Record<CategorySlug, string> = {
   inverters: 'Inverter',
   batteries: 'Battery',
+  chargers: 'Charger',
   ups: 'UPS',
   combos: 'Combo',
 };
@@ -195,6 +197,7 @@ export function toProductSummary(product: Product): ProductSummary {
     image: product.images[0] ?? '',
     hoverImage: product.images[1],
     category: product.category,
+    subcategory: product.subcategory,
     categoryLabel: CATEGORY_LABELS[product.category],
     badges: availability === 'out-of-stock' ? ['sold-out'] : product.badges,
     price: price.selling,

@@ -39,10 +39,7 @@ export default async function HomePage() {
       buildNavigation(),
       catalog().listOffers(),
       bestSellers(8),
-      // Was `byCategory('combos', 8)`. Combos are not a category any more, so
-      // this rail was going to render empty and link to a 404. Lithium home
-      // storage is the nearest thing the business actually sells.
-      bySubcategory('lithium', 8),
+      bySubcategory('home-inverter', 8),
       newArrivals(6),
       featuredReviews(6),
       productTitleMap(),
@@ -79,8 +76,8 @@ export default async function HomePage() {
           title="Lithium storage for the hours the grid is out"
           description="LiFePO4 packs with an integrated battery management system, sized against your actual load rather than a round number — the load calculator does the arithmetic."
           action={{
-            label: 'All lithium batteries',
-            href: subcategoryPath('batteries', 'lithium'),
+            label: 'All home inverter batteries',
+            href: subcategoryPath('batteries', 'home-inverter'),
           }}
         />
       </div>

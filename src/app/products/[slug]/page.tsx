@@ -13,7 +13,7 @@ import { ProductSections } from '@/components/product/product-sections';
 import { CATEGORY_BY_SLUG } from '@/lib/commerce/mock/categories';
 import { allProducts, productsByIds } from '@/lib/catalog/collections';
 import { toProductSummary, type ProductSummary } from '@/lib/commerce/summary';
-import type { Review } from '@/lib/commerce/types';
+import type { Product, Review } from '@/lib/commerce/types';
 import { displayPrice, formatPrice, productAvailability } from '@/lib/catalog/pricing';
 import { SITE } from '@/lib/site';
 import { BreadcrumbJsonLd, Breadcrumbs } from '@/components/ui/breadcrumbs';
@@ -32,7 +32,10 @@ import { SellerDetail } from '@/components/product/seller-info';
 import { ManufacturerDetail } from '@/components/product/manufacturer-info';
 import { BulkOrderBanner } from '@/components/product/bulk-order-banner';
 import { Reviews } from '@/components/product/reviews';
+import { ReviewForm } from '@/components/product/review-form';
+import { DeliveryCheck } from '@/components/product/delivery-check';
 import { FrequentlyBought } from '@/components/product/frequently-bought';
+import { linkedProducts } from '@/lib/catalog/linked-products';
 import { RecentlyViewed } from '@/components/product/recently-viewed';
 import { ProductRail } from '@/components/merch/product-rail';
 import { categoryPath, productPath, subcategoryPath } from '@/lib/routes';
@@ -59,6 +62,18 @@ export async function generateStaticParams() {
 /** The demo fixture, or the real catalogue. Never both. */
 async function loadProduct(slug: string) {
   return isDemoSlug(slug) ? DEMO_PRODUCT : await catalog().getProduct(slug);
+}
+
+/**
+ * What to sell alongside this product: linked products only (see
+ * `linked-products.ts`), in stock, as card summaries. Today that is matching
+ * chargers for an EV battery, and nothing for anything else.
+ */
+async function linkedCompanions(product: Product): Promise<ProductSummary[]> {
+  const catalogue = await allProducts();
+  return linkedProducts(product, catalogue)
+    .filter((candidate) => productAvailability(candidate) !== 'out-of-stock')
+    .map(toProductSummary);
 }
 
 /**
@@ -118,7 +133,7 @@ export default async function ProductPage({ params }: PageProps) {
     ? DEMO_RELATIONS
     : await Promise.all([
         provider.getReviews(product.id),
-        productsByIds(product.frequentlyBoughtWith),
+        linkedCompanions(product),
         productsByIds(product.relatedProductIds),
       ]);
 
@@ -287,6 +302,8 @@ export default async function ProductPage({ params }: PageProps) {
             {/* Price, selectors, buy controls, delivery and the service row. */}
             <BuyBox product={product} />
 
+            {isDemo ? null : <DeliveryCheck />}
+
             {/* The selling points, as the bullet list a retail page opens its
                 description with. The prose sits in the panel below. */}
             {product.highlights.length > 0 ? (
@@ -361,6 +378,11 @@ export default async function ProductPage({ params }: PageProps) {
                   reviews={reviews}
                   productTitle={product.title}
                   layout="column"
+                  writeSlot={
+                    isDemo ? undefined : (
+                      <ReviewForm productKey={product.id} productPath={productPath(product.slug)} />
+                    )
+                  }
                 />
               </div>
             </CollapsibleCard>
@@ -544,7 +566,12 @@ export default async function ProductPage({ params }: PageProps) {
         {/* Frequently bought together */}
         {companions.length > 0 ? (
           <section className="mt-10 lg:mt-14">
-            <FrequentlyBought anchor={summary} companions={companions} />
+            <FrequentlyBought
+              anchor={summary}
+              companions={companions}
+              title="Charger for this battery"
+              description="Matched to this pack’s charge voltage. A charger built for another voltage — or for lead-acid — will damage a lithium battery."
+            />
           </section>
         ) : null}
 

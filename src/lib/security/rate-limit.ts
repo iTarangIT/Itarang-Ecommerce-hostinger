@@ -110,6 +110,17 @@ export const LIMITS = {
   stockNotify: { limit: 10, windowSeconds: 60 * 60 },
   /** The same per IP, so one machine cannot enrol many addresses. */
   stockNotifyByIp: { limit: 40, windowSeconds: 60 * 60 },
+  /**
+   * Complaints, warranty registrations and installation bookings, per phone
+   * number. A customer with a genuine problem files one or two; the bucket
+   * exists to stop the forms being used to flood the service inbox.
+   */
+  supportRequest: { limit: 5, windowSeconds: 60 * 60 },
+  supportRequestByIp: { limit: 20, windowSeconds: 60 * 60 },
+  /** Writing a product review, per account. */
+  review: { limit: 10, windowSeconds: 60 * 60 },
+  /** The product-page delivery check and dealer search, per IP. */
+  pincodeLookup: { limit: 120, windowSeconds: 10 * 60 },
 } as const satisfies Record<string, RateLimit>;
 
 /**

@@ -122,7 +122,7 @@ export default async function NewProductPage({
             required
             hint="Must belong to the category chosen on the left."
           >
-            <Select id="subcategory" name="subcategory" defaultValue="lithium" required>
+            <Select id="subcategory" name="subcategory" defaultValue="ev-3-wheeler" required>
               {subcategories.map((sub) => (
                 <option key={sub.value} value={sub.value}>
                   {sub.label}

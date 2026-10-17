@@ -375,6 +375,7 @@ const CATEGORY_HINTS: Array<{ category: CategorySlug; subcategory: string; match
 const DEFAULT_ART: Record<CategorySlug, ProductArtKind> = {
   inverters: 'inverter',
   batteries: 'battery',
+  chargers: 'inverter',
   ups: 'ups',
   combos: 'combo',
 };

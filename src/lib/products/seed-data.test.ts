@@ -18,8 +18,12 @@ import type { ProductRecord } from './types';
 const ROOT = resolve(__dirname, '../../..');
 
 describe('the seed data is internally consistent', () => {
-  it('has all eight products', () => {
-    expect(TRONTEK_PRODUCTS).toHaveLength(8);
+  it('has the eight original products and the 33 catalogue drafts', () => {
+    // 8 transcribed and published first, then the rest of Trontek's 42 sheets
+    // as unpriced drafts (`trontek-catalog-products.ts`). The 42nd sheet is a
+    // second listing of TK LiEV-51105 and is deliberately not a product.
+    expect(TRONTEK_PRODUCTS).toHaveLength(41);
+    expect(TRONTEK_PRODUCTS.filter((p) => p.status === 'draft').length).toBeGreaterThanOrEqual(33);
     expect(MANUFACTURERS).toHaveLength(1);
     expect(SELLERS).toHaveLength(1);
   });
@@ -53,12 +57,12 @@ describe('the seed data is internally consistent', () => {
     }
   });
 
-  it('references four images per product, and all thirty-two are distinct', () => {
+  it('references four images per product, and every one is distinct', () => {
     const files = TRONTEK_PRODUCTS.flatMap((product) =>
       product.media.map((media) => media.file),
     );
-    expect(files).toHaveLength(32);
-    expect(new Set(files).size).toBe(32);
+    expect(files).toHaveLength(TRONTEK_PRODUCTS.length * 4);
+    expect(new Set(files).size).toBe(files.length);
 
     for (const product of TRONTEK_PRODUCTS) {
       expect(product.media, `${product.productKey}`).toHaveLength(4);

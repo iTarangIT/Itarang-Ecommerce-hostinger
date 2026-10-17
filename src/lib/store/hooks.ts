@@ -28,6 +28,7 @@ export function toCartItem(
     quantity,
     maxQuantity: customerMaxQuantity(variant.stock),
     category: product.category,
+    subcategory: product.subcategory,
     installationIncluded: product.installationIncluded,
   };
 }
@@ -48,6 +49,7 @@ export function summaryToCartItem(summary: ProductSummary, quantity = 1): CartIt
     // where that decision has always actually been made.
     maxQuantity: CUSTOMER_QUANTITY_CEILING,
     category: summary.category,
+    subcategory: summary.subcategory,
     installationIncluded: summary.installationIncluded,
   };
 }

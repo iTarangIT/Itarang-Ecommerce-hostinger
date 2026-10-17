@@ -87,7 +87,7 @@ describe('the catalogue is not empty', () => {
     // Guards every assertion below: if the seed ever stopped containing these,
     // the "finds something" tests would pass vacuously against an empty set.
     const subcategories = new Set(CATALOGUE.map((p) => p.subcategory));
-    expect(subcategories).toContain('lithium');
+    expect(subcategories).toContain('home-inverter');
     expect(subcategories).toContain('ev-2-wheeler');
     expect(subcategories).toContain('ev-3-wheeler');
   });
@@ -180,7 +180,7 @@ describe('search has not simply become broader', () => {
   });
 
   it('does not match a 2-wheeler query against a home battery', () => {
-    expect(subcategoriesFound('2W')).not.toContain('lithium');
+    expect(subcategoriesFound('2W')).not.toContain('home-inverter');
   });
 });
 

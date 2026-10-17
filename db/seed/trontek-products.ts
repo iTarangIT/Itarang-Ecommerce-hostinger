@@ -1,4 +1,5 @@
 import type { ProductSeed } from '../../src/lib/products/seed-types.ts';
+import { TRONTEK_CATALOG_PRODUCTS } from './trontek-catalog-products.ts';
 import { TRONTEK_EV_PRODUCTS } from './trontek-ev-products.ts';
 import { TRONTEK_HOME_PRODUCTS } from './trontek-home-products.ts';
 
@@ -17,4 +18,7 @@ export { MANUFACTURERS, SELLERS } from './trontek-shared.ts';
 export const TRONTEK_PRODUCTS: ProductSeed[] = [
   ...TRONTEK_HOME_PRODUCTS,
   ...TRONTEK_EV_PRODUCTS,
+  // The 33 drafts transcribed later from the full catalogue set: e-rickshaw
+  // packs, ESS, BESS and chargers. All unpriced, so none can be published yet.
+  ...TRONTEK_CATALOG_PRODUCTS,
 ];

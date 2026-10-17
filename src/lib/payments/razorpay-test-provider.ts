@@ -138,6 +138,8 @@ export class RazorpayTestProvider implements PaymentProvider {
         amount: created.amount,
         currency: 'INR',
         name: 'iTarang Products',
+        // The order carries the UPI discount, so the window offers UPI alone.
+        ...(order.amounts.paymentDiscount > 0 ? { upi_only: 1 } : {}),
       },
     };
   }

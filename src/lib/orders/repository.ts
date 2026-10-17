@@ -108,6 +108,9 @@ export interface OrderRepository {
     note?: string,
   ): Promise<Order | null>;
 
+  /** Record an event in the history without changing the status. */
+  addOrderNote(orderId: number, actor: string, note: string): Promise<void>;
+
   listEvents(orderId: number): Promise<OrderEvent[]>;
 
   /**

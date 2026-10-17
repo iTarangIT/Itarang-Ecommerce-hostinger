@@ -3,7 +3,7 @@ import { catalog } from '@/lib/commerce';
 import { CATEGORIES } from '@/lib/commerce/mock/categories';
 import { displayPrice } from '@/lib/catalog/pricing';
 import { allProducts } from '@/lib/catalog/collections';
-import type { ProductArtKind } from '@/lib/commerce/types';
+import type { CategoryIconKind } from '@/lib/commerce/types';
 import { categoryPath, productPath, subcategoryPath } from '@/lib/routes';
 
 /**
@@ -38,7 +38,7 @@ export interface NavCategory {
   shortName: string;
   tagline: string;
   href: string;
-  icon: ProductArtKind;
+  icon: CategoryIconKind;
   highlights: string[];
   subcategories: NavSubcategory[];
   featured: NavFeatured | null;

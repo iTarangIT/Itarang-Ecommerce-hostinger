@@ -1,4 +1,5 @@
 import type { CategorySlug, Paise } from '@/lib/commerce/types';
+import { subcategoryName } from '@/lib/catalog/category-names';
 import type { AppliedCoupon, CartItem } from '@/lib/store/types';
 
 /**
@@ -12,23 +13,25 @@ import type { AppliedCoupon, CartItem } from '@/lib/store/types';
 /**
  * The master switch, kept as one constant so there is one thing to flip.
  *
- * **Off.** The discount rules below have never been confirmed by the business —
- * the amounts, the categories and the minimum cart values are all placeholders
- * — and a coupon is the one part of the checkout a customer can hold us to. So
- * the feature stays built and stays wired, and nothing accepts a code until
- * somebody signs off on what the codes are worth.
+ * **On**, with the two codes the business specified (Website changes, Oct
+ * 2026): WELCOME1000 on home inverter batteries and WELCOME2000 on 3-wheeler
+ * batteries. Everything else that used to be here was a placeholder and is gone.
  *
- * Modelled on `PURCHASE_ENABLED` in `lib/commerce/purchase.ts`, deliberately:
- * one boolean, annotated `boolean` rather than left as a literal so the
- * compiler does not narrow either branch to unreachable code and the enabled
- * path stays type-checked while it is switched off.
- *
- * Flipping this to `true` restores the feature everywhere at once. The single
- * choke point is `validateCoupon` below — every surface that can apply a
- * discount, the cart field and the server quote alike, goes through it, so
- * there is no path that can honour a code while this is false.
+ * Annotated `boolean` rather than left as a literal so the compiler does not
+ * narrow either branch to unreachable code. The single choke point is
+ * `validateCoupon` below — the cart field and the server quote both go through
+ * it, so flipping this off again stops every code everywhere at once.
  */
-export const COUPONS_ENABLED: boolean = false;
+export const COUPONS_ENABLED: boolean = true;
+
+/**
+ * Extra discount for paying by UPI, in paise.
+ *
+ * Not a coupon: it needs no code and stacks with one. Applied by `buildQuote`
+ * only when the shopper picks UPI, and the payment window then opens on UPI
+ * alone, so the discount cannot be claimed and paid by card.
+ */
+export const UPI_DISCOUNT: Paise = 20000;
 
 /** What a shopper is told where the coupon field would be. */
 export const COUPONS_DISABLED_NOTE = 'Coupon codes are not active at the moment.';
@@ -41,6 +44,8 @@ export interface CouponRule {
   maxDiscount?: Paise;
   minCart?: Paise;
   categories?: CategorySlug[];
+  /** Narrower than `categories`: the code applies only to these subcategories. */
+  subcategories?: string[];
   description: string;
   /**
    * One redemption per customer, ever.
@@ -55,39 +60,23 @@ export interface CouponRule {
 
 export const COUPONS: CouponRule[] = [
   {
-    code: 'COMBO1500',
-    label: '₹1,500 off combos',
+    code: 'WELCOME1000',
+    label: '₹1,000 off home inverter batteries',
     kind: 'flat',
-    value: 150000,
-    minCart: 2000000,
-    categories: ['combos'],
-    description: 'Applies to inverter + battery combos on orders above ₹20,000.',
+    value: 100000,
+    subcategories: ['home-inverter'],
+    oncePerCustomer: true,
+    description: '₹1,000 off when your cart includes a home inverter battery. One use per customer.',
   },
   {
-    code: 'LIFE2000',
-    label: '₹2,000 off lithium batteries',
+    code: 'WELCOME2000',
+    label: '₹2,000 off 3-wheeler batteries',
     kind: 'flat',
     value: 200000,
-    categories: ['batteries'],
-    description: 'Applies when your cart includes an iTarang LiFe series battery.',
-  },
-  {
-    code: 'FIRST5',
-    label: '5% off your first order',
-    kind: 'percent',
-    value: 5,
-    maxDiscount: 200000,
-    // The code says "first order" and nothing used to enforce it, so it was
-    // reusable without limit on every order a customer ever placed.
+    subcategories: ['ev-3-wheeler'],
     oncePerCustomer: true,
-    description: '5% off the cart, capped at ₹2,000. One use per customer.',
-  },
-  {
-    code: 'FREESHIP',
-    label: 'Free delivery',
-    kind: 'free-shipping',
-    value: 0,
-    description: 'Waives the standard delivery charge on any order.',
+    description:
+      '₹2,000 off when your cart includes a 3-wheeler or e-rickshaw battery. One use per customer.',
   },
 ];
 
@@ -121,15 +110,17 @@ export function validateCoupon(code: string, items: CartItem[]): CouponResult {
 
   if (items.length === 0) return { ok: false, reason: 'Add something to your cart first.' };
 
-  const qualifying = rule.categories
-    ? items.filter((i) => rule.categories!.includes(i.category))
-    : items;
+  const qualifying = items.filter(
+    (i) =>
+      (!rule.categories || rule.categories.includes(i.category)) &&
+      (!rule.subcategories || (i.subcategory !== undefined && rule.subcategories.includes(i.subcategory))),
+  );
 
   if (qualifying.length === 0) {
-    return {
-      ok: false,
-      reason: `${normalised} applies only to ${rule.categories?.join(', ')}.`,
-    };
+    const scope = rule.subcategories
+      ? rule.subcategories.map((slug) => subcategoryName(slug).toLowerCase()).join(' or ')
+      : (rule.categories?.join(', ') ?? 'eligible products');
+    return { ok: false, reason: `${normalised} applies only to ${scope}.` };
   }
 
   const qualifyingSubtotal = qualifying.reduce((sum, i) => sum + i.price.selling * i.quantity, 0);

@@ -38,8 +38,6 @@ export const SEARCH_FACET_IDS: FacetId[] = [
   'subcategory',
   'batteryAh',
   'voltage',
-  'price',
-  'capacityVa',
   'technology',
   'warrantyMonths',
   'rating',
@@ -75,6 +73,8 @@ const QUERY_ALIASES: ReadonlyMap<string, string> = new Map([
   ['ev3', '3 wheeler'],
   ['lfp', 'lifepo4'],
   ['lithiumion', 'lithium'],
+  ['ess', 'energy storage'],
+  ['chargers', 'charger'],
 ]);
 
 /**

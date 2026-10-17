@@ -1,14 +1,25 @@
 /**
- * Pincode serviceability.
+ * Pincode serviceability — the shape of an answer, and the pure parts.
  *
- * DEVELOPMENT LOGIC — this is a deterministic stand-in so the delivery-check UI
- * can be built and tested. It must be replaced with a real serviceability
- * dataset or courier API (Delhivery / Shiprocket) before launch. Nothing here
- * reflects actual iTarang coverage.
+ * Client-safe. The lookup itself is `serviceability-server.ts`, which reads
+ * `serviceable_pincodes`. This replaced a development stand-in that decided
+ * coverage from the digit sum of the pincode.
+ *
+ * Three answers, and they are not two:
+ *
+ *  - **confirmed, serviceable** — the pincode is listed and active.
+ *  - **confirmed, not serviceable** — listed and switched off: we have decided
+ *    we do not deliver there. The only answer that refuses an order.
+ *  - **unconfirmed** — not listed. Most of India is reachable by courier, so
+ *    this is a "usually N days, confirmed after you order", not a refusal.
  */
 export interface ServiceabilityResult {
   serviceable: boolean;
+  /** True when the answer comes from our coverage list, not the default. */
+  confirmed: boolean;
   pincode: string;
+  city?: string;
+  state?: string;
   /** Working days until delivery. */
   deliveryDays: number;
   codAvailable: boolean;
@@ -16,38 +27,35 @@ export interface ServiceabilityResult {
   message: string;
 }
 
-export function checkPincode(raw: string): ServiceabilityResult | { error: string } {
-  const pincode = raw.trim();
-  if (!/^\d{6}$/.test(pincode)) {
-    return { error: 'Enter a valid 6-digit pincode.' };
+/** Working days quoted for a pincode that is not on the coverage list. */
+export const DEFAULT_DELIVERY_DAYS = 7;
+
+export const PINCODE_ERROR = 'Enter a valid 6-digit pincode.';
+
+export function isPincode(raw: string): boolean {
+  return /^[1-9]\d{5}$/.test(raw.trim());
+}
+
+/**
+ * The date `workingDays` working days from `from`, skipping Sundays. Public
+ * holidays are not modelled, which is why the page says "by" a date, not "on".
+ */
+export function deliveryDateAfter(workingDays: number, from = new Date()): Date {
+  const date = new Date(from);
+  let remaining = workingDays;
+  while (remaining > 0) {
+    date.setDate(date.getDate() + 1);
+    if (date.getDay() !== 0) remaining -= 1;
   }
+  return date;
+}
 
-  const digits = pincode.split('').map(Number);
-  const checksum = digits.reduce((sum, d) => sum + d, 0);
-
-  // Deliberately simple and deterministic — same pincode, same answer.
-  const serviceable = checksum % 11 !== 0;
-  if (!serviceable) {
-    return {
-      serviceable: false,
-      pincode,
-      deliveryDays: 0,
-      codAvailable: false,
-      installationDays: 0,
-      message:
-        'We do not deliver to this pincode yet. Our team can tell you the nearest serviceable area.',
-    };
+export function serviceabilityMessage(result: Omit<ServiceabilityResult, 'message'>): string {
+  if (!result.serviceable) {
+    return 'We do not deliver to this pincode yet. Call us and we will tell you the nearest serviceable area.';
   }
-
-  const deliveryDays = 2 + (checksum % 4);
-  const codAvailable = checksum % 3 !== 0;
-
-  return {
-    serviceable: true,
-    pincode,
-    deliveryDays,
-    codAvailable,
-    installationDays: deliveryDays + 1,
-    message: `Delivery in ${deliveryDays}–${deliveryDays + 1} working days.`,
-  };
+  const place = result.city ? ` to ${result.city}` : '';
+  return result.confirmed
+    ? `Delivery${place} in ${result.deliveryDays}–${result.deliveryDays + 1} working days.`
+    : `Delivery usually takes ${result.deliveryDays - 2}–${result.deliveryDays} working days. We confirm the date after you order.`;
 }

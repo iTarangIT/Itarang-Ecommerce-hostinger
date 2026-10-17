@@ -11,42 +11,38 @@ import { CouponCard } from '@/components/merch/coupon-card';
 export const metadata: Metadata = {
   title: 'Offers',
   description:
-    'Bank, UPI and EMI savings, coupon codes and delivery offers on iTarang inverters, batteries, UPS systems and combos.',
+    'WELCOME1000 and WELCOME2000 coupon codes, ₹200 off on UPI payments and free delivery on iTarang lithium batteries.',
   alternates: { canonical: '/offers' },
 };
 
 /**
  * Terms, minus the ones for a feature that is switched off.
  *
- * The coupon clause is dropped while `COUPONS_ENABLED` is false rather than
- * left in place: a terms list that explains how coupons stack, on a page that
- * offers none, reads as an offer we are quietly withholding.
+ * The coupon clauses are dropped while `COUPONS_ENABLED` is false: a terms list
+ * that explains how coupons stack, on a page that offers none, reads as an
+ * offer we are quietly withholding. There are no bank-card offers and no
+ * no-cost EMI; the business offers neither online, so neither is described.
  */
 const TERMS = [
   {
     id: 'upi',
     title: 'UPI discount',
-    body: 'The UPI discount is applied to the order total at checkout when a UPI payment method is selected. It cannot be combined with a bank card instant discount on the same transaction.',
+    body: '₹200 off the order total when you choose UPI at checkout. The payment window then opens on UPI only. It applies once per order, can be combined with a coupon code, and is not available on cash on delivery.',
+  },
+  {
+    id: 'coupons',
+    title: 'Coupon codes',
+    body: 'WELCOME1000 takes ₹1,000 off when your cart includes a home inverter battery. WELCOME2000 takes ₹2,000 off when your cart includes a 3-wheeler or e-rickshaw battery. One coupon per order, and each code can be used once per customer.',
   },
   {
     id: 'emi',
-    title: 'No-cost EMI',
-    body: 'No-cost EMI means the instalment total equals the product price — the interest component is discounted upfront. Availability, tenure and any processing fee depend on your card issuer and are shown before you confirm the order.',
-  },
-  {
-    id: 'bank',
-    title: 'Bank card instant discount',
-    body: 'Instant discounts apply to eligible cards on qualifying transactions above the stated minimum, subject to a per-card monthly cap. Eligibility is determined by the issuing bank at the time of payment.',
+    title: 'EMI',
+    body: 'Card EMI is offered by the payment gateway (Razorpay) at the payment step, on your card issuer’s terms. Interest and any processing fee are set by the issuer and shown before you confirm. This is not no-cost EMI.',
   },
   {
     id: 'delivery',
     title: 'Delivery',
     body: 'Standard delivery is free on orders above ₹4,999 after discounts. Below that a flat delivery charge applies and is shown in the cart before payment. Batteries ship crated at no extra charge.',
-  },
-  {
-    id: 'coupons',
-    title: 'Coupon codes',
-    body: 'One coupon per order. Coupons apply only to the product categories stated on the code, and do not stack with bank card instant discounts. Codes may be withdrawn at any time.',
   },
 ].filter((term) => COUPONS_ENABLED || term.id !== 'coupons');
 
@@ -79,7 +75,7 @@ export default async function OffersPage() {
             title="Codes you can use right now"
             description="Enter the code in your cart before checkout. One coupon per order."
           />
-          <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <ul className="grid gap-3 sm:grid-cols-2">
             {COUPONS.map((coupon) => (
               <li key={coupon.code}>
                 <CouponCard coupon={coupon} />
@@ -120,10 +116,6 @@ export default async function OffersPage() {
               </div>
             ))}
           </dl>
-          <p className="mt-6 max-w-3xl text-xs text-muted-foreground">
-            Offer values shown on this page are development placeholders and must be confirmed
-            against signed commercial terms before publication.
-          </p>
         </div>
       </section>
     </>

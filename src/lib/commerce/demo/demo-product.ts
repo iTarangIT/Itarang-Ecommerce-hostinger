@@ -207,7 +207,7 @@ export const DEMO_PRODUCT: Product = {
   title: 'iTarang LiFePower LiFePO4 Battery — 12V',
   subtitle: 'LiFePO4 lithium battery for home inverter and backup systems',
   category: 'batteries',
-  subcategory: 'lithium',
+  subcategory: 'home-inverter',
   art: 'battery',
   images: artSet('battery', 1),
   sections: DEMO_SECTIONS,

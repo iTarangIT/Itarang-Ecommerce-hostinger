@@ -3,29 +3,24 @@ import type { Category } from '../types';
 /**
  * iTarang category architecture.
  *
- * **One family, four subcategories** — and it used to be four families and
- * fourteen. Inverters, UPS Systems and Inverter + Battery Combos were all
- * advertised in the mega menu, and the database holds no product in any of
- * them: every panel opened on a zero count and a page with nothing to buy.
- * Digital UPS, Tall Tubular, Short Tubular and Flat Plate & SMF were the same
- * problem one level down. A navigation section for a product line the business
- * does not sell is not a placeholder, it is a promise we break on click.
+ * Two families, matching what the business sells and nothing else: batteries
+ * (2-wheeler, 3-wheeler, home inverter and ESS) and the chargers that go with
+ * them. Inverters, UPS systems and combos were removed earlier because the
+ * database holds no product in any of them, and a navigation section for a
+ * product line the business does not sell is a promise broken on click.
  *
- * So the taxonomy now states what iTarang actually sells: lithium batteries,
- * for homes and for vehicles.
+ * The order of the battery subcategories is the business's own: 3W, 2W, home
+ * inverter, ESS. `lithium` used to be a subcategory too, but every product here
+ * is lithium, so it described nothing; migration 0020 refiles its products
+ * under `home-inverter`.
  *
- * **No product was deleted or reclassified to make this true.** All eight
- * catalogue products are already `batteries`, and the removed slugs were empty.
  * `CategorySlug` deliberately keeps its wider union — the development fixture
- * in `mock/products.ts` still carries inverters, UPS and combos, and rewriting
- * that fixture to match a navigation change would be the tail wagging the dog.
+ * in `mock/products.ts` still carries inverters, UPS and combos.
  * `mock-provider.ts` filters it to the categories defined here instead.
  *
- * `home-inverter` is defined but currently holds nothing. It exists so genuine
- * inverter and home-backup stock has a place to land without another taxonomy
- * change, and the nav hides a subcategory with no products — which is the very
- * failure that made UPS and Combos worth removing. Do not invent products to
- * fill it.
+ * A subcategory with no published product is hidden by the navigation, so ESS
+ * and Chargers appear on their own once their first product is published. Do
+ * not invent products to fill them.
  *
  * Every subcategory is a real URL with its own heading, description and SEO
  * copy — no query-string categories.
@@ -44,40 +39,30 @@ export const CATEGORIES: Category[] = [
       'Home and vehicle packs are not interchangeable, and the listing says which is which. A home battery states the inverter input voltage and charging profile it expects; a traction pack states the drivetrain voltage, the charge voltage and the discharge cut-off its controller must accept. Match those figures before capacity, never after.',
     ],
     icon: 'battery',
-    // Ampere-hours and voltage lead, ahead of price. They are the two numbers
-    // that decide whether a battery fits at all — a pack at the right price and
-    // the wrong voltage is not a cheaper option, it is not an option — so they
-    // are the first refinements a shopper should reach, not the last.
+    // Ampere-hours and voltage are the only numeric filters. They decide
+    // whether a battery fits at all — a pack at the right price and the wrong
+    // voltage is not a cheaper option, it is not an option. There is no price
+    // filter by the business's decision; sorting by price still works.
     facetIds: [
       'subcategory',
       'batteryAh',
       'voltage',
-      'price',
       'technology',
       'warrantyMonths',
       'rating',
       'availability',
     ],
-    highlights: ['LiFePO4 home & EV packs', '30Ah to 105Ah', 'Shipped in protective crates'],
+    highlights: ['LiFePO4 EV, home & ESS packs', 'Built-in BMS on every pack', 'Shipped in protective crates'],
     subcategories: [
       {
-        slug: 'lithium',
-        name: 'Lithium Batteries',
+        slug: 'ev-3-wheeler',
+        name: '3-Wheeler & E-Rickshaw Batteries',
         description:
-          'Maintenance-free, deep-cyclable LiFePO4 storage — roughly a third the weight of an equivalent lead acid bank.',
+          'High-capacity LiFePO4 packs for e-rickshaws and e-loaders, sized in kWh for a day of duty.',
         seoCopy: [
-          'Lithium iron phosphate is the most stable of the common lithium chemistries and the right choice for home backup. It tolerates deep discharge without the capacity loss that shortens lead acid life, charges considerably faster, and needs no water topping up or ventilated battery trolley.',
-          'Each iTarang lithium pack carries an integrated battery management system that handles cell balancing, temperature cut-off and over-discharge protection. Check the listing for the inverter battery input voltage and charging profile the pack expects.',
-        ],
-      },
-      {
-        slug: 'home-inverter',
-        name: 'Home & Inverter Batteries',
-        description:
-          'Batteries sized for household backup, matched to a lithium-ready inverter’s battery input and charging profile.',
-        seoCopy: [
-          'A home backup battery is chosen from the load it has to carry and how long it has to carry it. Running watts multiplied by hours gives the energy required; energy divided by the pack voltage gives the ampere-hours. The load calculator does that arithmetic and checks the answer against what is actually in stock.',
-          'The inverter side matters as much as the battery. A lithium pack needs an inverter that accepts its battery input voltage and can deliver its charging profile — a charger built for lead acid will not charge a LiFePO4 pack correctly, and may damage it.',
+          'An e-rickshaw is a working vehicle, so the number that matters is energy — kilowatt-hours — rather than ampere-hours alone. Energy divided by the vehicle’s consumption per kilometre is the honest estimate of a day’s range, and consumption varies with passenger load, terrain and motor rating far more than with the battery.',
+          'Lithium iron phosphate replaces a lead-acid bank at roughly a third of the weight and several times the cycle life, with no water topping, no acid and no terminal corrosion. Against daily deep cycling that difference compounds quickly.',
+          'A traction pack must match the controller and the charger. Confirm the system voltage, the charge voltage and the connector before ordering, and use only a charger approved for the pack.',
         ],
       },
       {
@@ -92,14 +77,49 @@ export const CATEGORIES: Category[] = [
         ],
       },
       {
-        slug: 'ev-3-wheeler',
-        name: '3-Wheeler & E-Rickshaw Batteries',
+        slug: 'home-inverter',
+        name: 'Home Inverter Batteries',
         description:
-          'High-capacity LiFePO4 packs for e-rickshaws and e-loaders, sized in kWh for a day of duty.',
+          'Maintenance-free LiFePO4 batteries for household backup, matched to a lithium-ready inverter’s battery input and charging profile.',
         seoCopy: [
-          'An e-rickshaw is a working vehicle, so the number that matters is energy — kilowatt-hours — rather than ampere-hours alone. Energy divided by the vehicle’s consumption per kilometre is the honest estimate of a day’s range, and consumption varies with passenger load, terrain and motor rating far more than with the battery.',
-          'Lithium iron phosphate replaces a lead-acid bank at roughly a third of the weight and several times the cycle life, with no water topping, no acid and no terminal corrosion. Against daily deep cycling that difference compounds quickly.',
-          'A traction pack must match the controller and the charger. Confirm the system voltage, the charge voltage and the connector before ordering, and use only a charger approved for the pack.',
+          'A home backup battery is chosen from the load it has to carry and how long it has to carry it. Running watts multiplied by hours gives the energy required; energy divided by the pack voltage gives the ampere-hours. The load calculator does that arithmetic and checks the answer against what is actually in stock.',
+          'The inverter side matters as much as the battery. A lithium pack needs an inverter that accepts its battery input voltage and can deliver its charging profile — a charger built for lead acid will not charge a LiFePO4 pack correctly, and may damage it.',
+        ],
+      },
+      {
+        slug: 'ess',
+        name: 'ESS — Energy Storage Systems',
+        description:
+          'Wall- and rack-mounted LiFePO4 storage from 5 kWh upwards, for homes, shops and solar systems.',
+        seoCopy: [
+          'An energy storage system is sized in kilowatt-hours: how much energy it can hold, not how many ampere-hours its cells are rated for. Multiply the load in kilowatts by the hours it has to run, then allow headroom so the pack is not cycled to empty every day.',
+          'Every ESS pack here is lithium iron phosphate with an integrated battery management system, and states the inverter communication and charge profile it expects. Check those against the inverter or hybrid solar inverter before choosing a capacity.',
+        ],
+      },
+    ],
+  },
+  {
+    slug: 'chargers',
+    name: 'Chargers',
+    shortName: 'Chargers',
+    tagline: 'The right charger for every Trontek pack',
+    description:
+      'Lithium battery chargers for electric two- and three-wheelers, matched to the pack by output voltage and current.',
+    seoCopy: [
+      'A lithium pack must be charged by a charger built for its chemistry and its voltage. The output voltage has to match the pack’s charge voltage, and the current decides how long a full charge takes: a 12 A charger refills a 105 Ah pack in roughly nine hours, a 20 A charger in a little over five.',
+      'Each charger listed here states its output voltage class and current. Choose the voltage that matches the battery first, then the current that suits the time the vehicle has off the road.',
+    ],
+    icon: 'charger',
+    facetIds: ['subcategory', 'voltage', 'availability'],
+    highlights: ['Matched to Trontek packs', '500 W to 3 kW', 'Lithium charge profiles'],
+    subcategories: [
+      {
+        slug: 'ev-chargers',
+        name: 'EV Battery Chargers',
+        description:
+          'Chargers for 2-wheeler and 3-wheeler lithium packs, by output voltage and current.',
+        seoCopy: [
+          'Match the charger’s output voltage to the battery before anything else. A charger for a 51 V pack will not charge a 61 V pack, and a lead-acid charger must never be used on a lithium battery.',
         ],
       },
     ],

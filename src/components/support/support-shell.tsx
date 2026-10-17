@@ -1,18 +1,19 @@
 import Link from 'next/link';
-import { Headphones, Mail, Phone } from 'lucide-react';
+import { FileText, Headphones, Mail, Phone, RotateCcw, Scale, ShieldCheck } from 'lucide-react';
 import { SITE } from '@/lib/site';
+import { WARRANTY_CONTACTS, telHref } from '@/lib/support/contacts';
 import { Breadcrumbs } from '@/components/ui/breadcrumbs';
 
 /**
- * Owner Centre sidebar links.
- *
- * Reduced to complaint registration only. Warranty registration, installation
- * booking, technician lookup and the FAQ entry have been withdrawn from the
- * after-sales navigation — those routes and pages are untouched and still work
- * when visited directly.
+ * Owner Centre sidebar links: the after-sales actions, then the policies a
+ * customer reads when something has gone wrong.
  */
 const OWNER_LINKS = [
   { href: '/support/complaint', label: 'Register a complaint', icon: Headphones },
+  { href: '/support/warranty-registration', label: 'Register your warranty', icon: ShieldCheck },
+  { href: '/support/grievance', label: 'Grievance officer', icon: Scale },
+  { href: '/policies/refund', label: 'Refund & return policy', icon: RotateCcw },
+  { href: '/policies/payment-failure', label: 'Payment failure policy', icon: FileText },
 ];
 
 /**
@@ -80,6 +81,41 @@ export function SupportShell({
                 })}
               </ul>
             </nav>
+
+            {/* Two numbers, as the business asked: the manufacturer's and ours.
+                A line with no details yet is filtered out in `contacts.ts`. */}
+            <div className="rounded-lg border border-border bg-card p-5">
+              <h2 className="font-display text-sm font-semibold text-card-foreground">
+                Warranty helpline
+              </h2>
+              <ul className="mt-3 space-y-3 text-sm">
+                {WARRANTY_CONTACTS.map((line) => (
+                  <li key={line.label}>
+                    <span className="block text-xs font-medium text-muted-foreground">
+                      {line.label}
+                    </span>
+                    {line.phone ? (
+                      <a
+                        href={telHref(line.phone) ?? undefined}
+                        className="flex items-center gap-2 font-semibold text-foreground hover:text-accent-600"
+                      >
+                        <Phone className="h-4 w-4 shrink-0 text-accent-600" />
+                        {line.phone}
+                      </a>
+                    ) : null}
+                    {line.email ? (
+                      <a
+                        href={`mailto:${line.email}`}
+                        className="mt-0.5 flex items-center gap-2 text-foreground hover:text-accent-600"
+                      >
+                        <Mail className="h-4 w-4 shrink-0 text-accent-600" />
+                        {line.email}
+                      </a>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
 
             <div className="rounded-lg border border-border bg-card p-5">
               <h2 className="font-display text-sm font-semibold text-card-foreground">

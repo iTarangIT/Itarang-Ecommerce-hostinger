@@ -24,6 +24,10 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { path: '/support/complaint', priority: 0.5 },
     { path: '/support/dealers', priority: 0.5 },
     { path: '/track', priority: 0.5 },
+    { path: '/products', priority: 0.8 },
+    { path: '/support/grievance', priority: 0.3 },
+    { path: '/policies/refund', priority: 0.3 },
+    { path: '/policies/payment-failure', priority: 0.3 },
   ];
 
   const categoryRoutes: Route[] = categories.flatMap((category) => [

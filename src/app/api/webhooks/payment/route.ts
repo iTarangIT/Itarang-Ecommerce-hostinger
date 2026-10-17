@@ -106,6 +106,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, mismatch: true, orderNumber: order.orderNumber });
     }
 
+    // The UPI discount was granted on the promise of a UPI payment, and the
+    // payment window is opened on UPI alone. A different method here means that
+    // restriction was bypassed. The money is real, so the payment is still
+    // applied; the order is flagged in the log for someone to look at.
+    if (
+      order.amounts.paymentDiscount > 0 &&
+      result.status === 'paid' &&
+      result.method !== undefined &&
+      result.method !== 'upi'
+    ) {
+      console.warn(
+        `[webhook] ${order.orderNumber} received the UPI discount but was paid by ` +
+          `${result.method}; review before dispatch.`,
+      );
+    }
+
     if (result.gatewayPaymentId) {
       await repository.recordPayment(
         {

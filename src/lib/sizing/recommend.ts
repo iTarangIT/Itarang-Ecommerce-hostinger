@@ -38,13 +38,15 @@ export type HomeSystemVoltage = 12 | 24 | 48;
  * battery was answered with a 51 V e-scooter pack.
  */
 export const HOME_BACKUP_SUBCATEGORIES: ReadonlySet<string> = new Set([
-  'lithium',
-  // Defined in the taxonomy for home and inverter stock, and empty today. It is
-  // listed here rather than added when the first product arrives, because the
-  // failure mode of forgetting runs the wrong way: a genuine home battery would
-  // be silently unrecommendable, and the calculator would report "nothing we
-  // stock matches" while the matching product sat in the catalogue.
   'home-inverter',
+  // Wall and rack storage from 5 kWh up — the answer for a load no single
+  // inverter battery covers. Listed before its first product is published,
+  // because forgetting runs the wrong way: a genuine home battery would be
+  // silently unrecommendable while it sat in the catalogue.
+  'ess',
+  // Retired subcategory, kept only until migration 0020 refiles its products
+  // under `home-inverter` on every database.
+  'lithium',
 ]);
 
 /**

@@ -33,6 +33,8 @@ interface RazorpayOptions {
   prefill?: { name?: string; email?: string; contact?: string };
   notes?: Record<string, string>;
   theme?: { color?: string };
+  /** Display configuration — used to show UPI alone. */
+  config?: Record<string, unknown>;
   handler: (response: RazorpayResponse) => void;
   modal?: { ondismiss?: () => void };
 }
@@ -116,6 +118,22 @@ export function RazorpayPanel({
         description: `Order ${orderNumber}`,
         prefill,
         notes: { orderNumber },
+        // An order with the UPI discount may only be paid by UPI. Razorpay's
+        // display config hides every other block; the webhook flags any order
+        // that is paid some other way regardless.
+        ...(params.upi_only
+          ? {
+              config: {
+                display: {
+                  blocks: {
+                    upi: { name: 'Pay by UPI', instruments: [{ method: 'upi' }] },
+                  },
+                  sequence: ['block.upi'],
+                  preferences: { show_default_blocks: false },
+                },
+              },
+            }
+          : {}),
         handler: async (response) => {
           try {
             const verify = await fetch('/api/checkout/verify', {

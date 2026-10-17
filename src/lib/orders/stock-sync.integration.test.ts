@@ -93,6 +93,7 @@ function draftOrder(variantId: string, quantity: number): NewOrder {
       subtotal: 100000,
       productSavings: 0,
       couponDiscount: 0,
+      paymentDiscount: 0,
       shipping: 0,
       codFee: 0,
       total: 100000,

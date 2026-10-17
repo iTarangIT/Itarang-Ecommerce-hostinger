@@ -167,6 +167,9 @@ export default async function OrderPage({
                 −{formatPrice(order.amounts.couponDiscount)}
               </Row>
             ) : null}
+            {order.amounts.paymentDiscount > 0 ? (
+              <Row label="UPI discount">−{formatPrice(order.amounts.paymentDiscount)}</Row>
+            ) : null}
             <Row label="Delivery">
               {order.amounts.shipping === 0 ? 'Free' : formatPrice(order.amounts.shipping)}
             </Row>

@@ -1,122 +1,77 @@
-'use client';
-
-import * as React from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { ArrowRight, Check } from 'lucide-react';
+import { ArrowRight, Calculator, Check, ShieldCheck } from 'lucide-react';
 import { ButtonLink } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
-import { categoryPath, subcategoryPath } from '@/lib/routes';
-
-interface Slide {
-  eyebrow: string;
-  title: string;
-  body: string;
-  points: string[];
-  image: string;
-  primary: { label: string; href: string };
-  secondary: { label: string; href: string };
-}
+import { subcategoryPath } from '@/lib/routes';
 
 /**
- * Three slides, one per product line the business actually sells.
+ * The home hero, as the business specified it: one 3-wheeler battery and one
+ * inverter battery side by side, with "Shop now" and "Calculate your home
+ * backup need" as the two actions.
  *
- * Two of the three used to advertise combos and solar-ready inverters, and the
- * third linked "Lithium vs tubular" — none of which exists in the catalogue or,
- * since the taxonomy was reduced, has a page to land on. A hero that opens the
- * site on a 404 is worse than a hero with fewer slides, so the copy now matches
- * the catalogue: home lithium storage, two-wheeler packs, three-wheeler packs.
+ * It used to be a three-slide carousel. A carousel shows one product line at a
+ * time and asks a visitor to wait for the one they came for; two cards show
+ * both lines at once, and each card is itself a way in.
  *
- * Every claim below is one the product documents support (see
- * `docs/p1-b-2-catalogue-audit.md`); nothing here states a warranty, a range or
- * a compatibility the source sheets do not.
+ * The photos are the Trontek listing images, cropped to the product. Every
+ * figure on a card is printed on that same listing image — capacity, voltage
+ * and the warranty wording — so the hero states nothing the documents do not.
  */
-const SLIDES: Slide[] = [
-  {
-    eyebrow: 'Home backup',
-    title: 'Keep the house running through the cut',
-    body: 'LiFePO4 home storage that pairs with a lithium-ready inverter — no water topping, no ventilated trolley, and sized against the appliances you actually run.',
-    points: ['No maintenance', 'Deep cycling without the penalty', 'Sized against your real load'],
-    image: '/art/battery-2-front.svg',
-    primary: { label: 'Shop lithium batteries', href: subcategoryPath('batteries', 'lithium') },
-    secondary: { label: 'Size my system', href: '/tools/load-calculator' },
-  },
-  {
-    eyebrow: '2-wheeler EV',
-    title: 'Traction packs matched to your drivetrain',
-    body: 'LiFePO4 packs for electric scooters and motorcycles, listed with the nominal voltage, charge voltage and discharge cut-off your controller has to accept.',
-    points: ['48V, 60V and 72V systems', 'BMS on every pack', 'Connector stated on the listing'],
-    image: '/art/battery-1-angle.svg',
-    primary: {
-      label: 'Shop 2-wheeler batteries',
-      href: subcategoryPath('batteries', 'ev-2-wheeler'),
-    },
-    secondary: { label: 'All batteries', href: categoryPath('batteries') },
-  },
+const PRODUCTS = [
   {
     eyebrow: '3-wheeler & e-rickshaw',
-    title: 'Energy enough for a full day of duty',
-    body: 'High-capacity packs for e-rickshaws and e-loaders, quoted in kilowatt-hours because that — not ampere-hours alone — is what decides a working day.',
-    points: ['Quoted in kWh', 'A third the weight of lead acid', 'No acid, no terminal corrosion'],
-    image: '/art/battery-3-front.svg',
-    primary: {
-      label: 'Shop e-rickshaw batteries',
-      href: subcategoryPath('batteries', 'ev-3-wheeler'),
-    },
-    secondary: { label: 'All batteries', href: categoryPath('batteries') },
+    title: 'LiEV traction packs',
+    detail: '51 V · 105 Ah · 5.36 kWh',
+    note: '3 years or 1200 cycles warranty',
+    image: '/images/hero/e-rickshaw-battery.jpg',
+    width: 840,
+    height: 560,
+    href: subcategoryPath('batteries', 'ev-3-wheeler'),
   },
-];
+  {
+    eyebrow: 'Home inverter',
+    title: 'Powercube home storage',
+    detail: '12.8 V · 105 Ah · 1.34 kWh',
+    note: '5 years or 4000 cycles warranty',
+    image: '/images/hero/inverter-battery.jpg',
+    width: 600,
+    height: 810,
+    href: subcategoryPath('batteries', 'home-inverter'),
+  },
+] as const;
 
-const INTERVAL = 7000;
+const POINTS = ['LiFePO4 chemistry', 'Built-in BMS', 'Made in India by Trontek'];
 
 export function Hero() {
-  const [index, setIndex] = React.useState(0);
-  const [paused, setPaused] = React.useState(false);
-
-  React.useEffect(() => {
-    if (paused) return;
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    const timer = window.setInterval(() => setIndex((i) => (i + 1) % SLIDES.length), INTERVAL);
-    return () => window.clearInterval(timer);
-  }, [paused]);
-
-  const slide = SLIDES[index];
-
   return (
-    <section
-      aria-label="Featured"
-      className="relative overflow-hidden bg-ink-900 text-ink-50"
-      onMouseEnter={() => setPaused(true)}
-      onMouseLeave={() => setPaused(false)}
-      onFocusCapture={() => setPaused(true)}
-      onBlurCapture={() => setPaused(false)}
-    >
-      {/* Soft brand wash — kept subtle so product art stays the focus. */}
+    <section aria-label="Featured" className="relative overflow-hidden bg-ink-900 text-ink-50">
+      {/* Soft brand wash — kept subtle so the products stay the focus. */}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute -right-40 -top-32 h-[34rem] w-[34rem] rounded-full bg-primary-400/20 blur-3xl"
       />
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute -bottom-40 -left-32 h-[26rem] w-[26rem] rounded-full bg-white/5 blur-3xl"
+        className="pointer-events-none absolute -bottom-40 -left-32 h-[26rem] w-[26rem] rounded-full bg-accent/10 blur-3xl"
       />
 
-      <div className="container relative grid items-center gap-8 py-10 sm:py-14 lg:grid-cols-12 lg:gap-12 lg:py-20">
-        <div key={index} className="animate-fade-up lg:col-span-6">
+      <div className="container relative grid items-center gap-10 py-10 sm:py-14 lg:grid-cols-12 lg:gap-12 lg:py-16">
+        <div className="animate-fade-up lg:col-span-5">
           <p className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5 text-2xs font-semibold uppercase tracking-[0.14em] text-primary-300">
-            {slide.eyebrow}
+            <ShieldCheck className="h-3.5 w-3.5" />
+            Lithium batteries for vehicles and homes
           </p>
-          <h1 className="heading-1 mt-4 text-balance text-ink-50">{slide.title}</h1>
+          <h1 className="heading-1 mt-4 text-balance text-ink-50">
+            Power that keeps India moving — on the road and at home
+          </h1>
           <p className="mt-4 max-w-xl text-pretty text-sm leading-relaxed text-ink-50/75 sm:text-base">
-            {slide.body}
+            Trontek LiFePO4 batteries for e-rickshaws, electric scooters and home inverters. No
+            water topping, no acid, and a battery management system in every pack.
           </p>
 
           <ul className="mt-6 flex flex-wrap gap-x-5 gap-y-2">
-            {slide.points.map((point) => (
-              <li
-                key={point}
-                className="flex items-center gap-1.5 text-sm text-ink-50/85"
-              >
+            {POINTS.map((point) => (
+              <li key={point} className="flex items-center gap-1.5 text-sm text-ink-50/85">
                 <Check className="h-4 w-4 shrink-0 text-primary-300" />
                 {point}
               </li>
@@ -124,59 +79,55 @@ export function Hero() {
           </ul>
 
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            <ButtonLink href={slide.primary.href} variant="accent" size="lg">
-              {slide.primary.label}
+            <ButtonLink href="/products" variant="accent" size="lg">
+              Shop now
               <ArrowRight className="h-4 w-4" />
             </ButtonLink>
             <ButtonLink
-              href={slide.secondary.href}
+              href="/tools/load-calculator"
               size="lg"
               variant="outline"
               className="border-white/25 bg-transparent text-ink-50 hover:border-white/50 hover:bg-white/10"
             >
-              {slide.secondary.label}
+              <Calculator className="h-4 w-4" />
+              Calculate your home backup need
             </ButtonLink>
           </div>
         </div>
 
-        <div className="lg:col-span-6">
-          <div className="relative mx-auto aspect-[4/3] w-full max-w-lg">
-            <Image
-              key={slide.image}
-              src={slide.image}
-              alt=""
-              fill
-              priority={index === 0}
-              sizes="(max-width: 1024px) 90vw, 520px"
-              className="animate-fade-in rounded-xl object-contain"
-            />
-          </div>
-        </div>
-      </div>
-
-      <div className="container relative flex items-center justify-between gap-4 pb-6 lg:pb-8">
-        <div className="flex gap-2">
-          {SLIDES.map((s, i) => (
-            <button
-              key={s.title}
-              type="button"
-              onClick={() => setIndex(i)}
-              aria-label={`Show slide ${i + 1}: ${s.title}`}
-              aria-current={i === index}
-              className={cn(
-                'h-1.5 rounded-full transition-all duration-300',
-                i === index ? 'w-8 bg-accent' : 'w-4 bg-white/25 hover:bg-white/45',
-              )}
-            />
+        <div className="grid gap-4 sm:grid-cols-2 lg:col-span-7">
+          {PRODUCTS.map((product, index) => (
+            <Link
+              key={product.href}
+              href={product.href}
+              className="group flex flex-col overflow-hidden rounded-xl bg-white text-ink-900 shadow-lg ring-1 ring-white/10 transition-transform duration-200 hover:-translate-y-1"
+            >
+              <div className="relative aspect-[4/3] w-full">
+                <Image
+                  src={product.image}
+                  alt={`Trontek ${product.title}`}
+                  width={product.width}
+                  height={product.height}
+                  priority={index === 0}
+                  sizes="(max-width: 640px) 90vw, (max-width: 1024px) 45vw, 340px"
+                  className="h-full w-full object-contain p-4 transition-transform duration-300 group-hover:scale-[1.03]"
+                />
+              </div>
+              <div className="flex flex-1 flex-col border-t border-ink-100 p-4">
+                <p className="text-2xs font-semibold uppercase tracking-[0.12em] text-primary-600">
+                  {product.eyebrow}
+                </p>
+                <p className="mt-1 font-display text-base font-semibold">{product.title}</p>
+                <p className="tabular mt-0.5 text-sm text-ink-600">{product.detail}</p>
+                <p className="mt-2 text-xs text-ink-500">{product.note}</p>
+                <span className="mt-3 inline-flex items-center gap-1 text-sm font-semibold text-primary-600">
+                  Shop {product.eyebrow.toLowerCase()}
+                  <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+                </span>
+              </div>
+            </Link>
           ))}
         </div>
-        <Link
-          href="/search"
-          className="group hidden items-center gap-1.5 text-sm font-medium text-ink-50/70 transition-colors hover:text-primary-300 sm:inline-flex"
-        >
-          Browse the full range
-          <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-        </Link>
       </div>
     </section>
   );

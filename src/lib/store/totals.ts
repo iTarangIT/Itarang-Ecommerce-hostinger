@@ -14,6 +14,8 @@ export interface CartTotals {
   mrpTotal: Paise;
   productSavings: Paise;
   couponDiscount: Paise;
+  /** Discount for paying by a particular method — ₹200 for UPI. */
+  paymentDiscount: Paise;
   shipping: Paise;
   /** Cash-on-delivery handling fee; zero unless COD is the chosen method. */
   codFee: Paise;
@@ -28,13 +30,18 @@ export interface CartTotals {
  * The single pricing implementation.
  *
  * Runs on the client for display and on the server as the *authority* during
- * checkout, so the two can never disagree. `codFee` is only ever non-zero on
- * the server, once a payment method has been chosen.
+ * checkout, so the two can never disagree. `codFee` and `paymentDiscount` are
+ * only ever non-zero on the server, once a payment method has been chosen.
+ *
+ * The payment discount is taken after the coupon and never below zero, and it
+ * does not count towards free delivery: the threshold is about what was bought,
+ * not how it was paid for.
  */
 export function calculateTotals(
   items: CartItem[],
   coupon: AppliedCoupon | null,
   codFee: Paise = 0,
+  paymentDiscount: Paise = 0,
 ): CartTotals {
   const itemCount = items.reduce((n, i) => n + i.quantity, 0);
   const subtotal = items.reduce((sum, i) => sum + i.price.selling * i.quantity, 0);
@@ -49,7 +56,8 @@ export function calculateTotals(
       : STANDARD_SHIPPING;
 
   const appliedCodFee = itemCount === 0 ? 0 : codFee;
-  const total = afterDiscount + shipping + appliedCodFee;
+  const appliedPaymentDiscount = itemCount === 0 ? 0 : Math.min(paymentDiscount, afterDiscount);
+  const total = afterDiscount - appliedPaymentDiscount + shipping + appliedCodFee;
   const gstIncluded = Math.round(total - total / (1 + GST_RATE));
 
   return {
@@ -58,10 +66,11 @@ export function calculateTotals(
     mrpTotal,
     productSavings,
     couponDiscount,
+    paymentDiscount: appliedPaymentDiscount,
     shipping,
     codFee: appliedCodFee,
     total,
-    totalSavings: productSavings + couponDiscount,
+    totalSavings: productSavings + couponDiscount + appliedPaymentDiscount,
     gstIncluded,
     amountToFreeShipping: Math.max(0, FREE_SHIPPING_THRESHOLD - afterDiscount),
   };

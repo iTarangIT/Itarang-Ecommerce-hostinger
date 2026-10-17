@@ -7,6 +7,7 @@ import {
   Filter,
   FlaskConical,
   Package,
+  LifeBuoy,
   RefreshCw,
   UserRound,
 } from 'lucide-react';
@@ -125,6 +126,13 @@ export default async function AdminOrdersPage({
           >
             <BarChart3 className="h-4 w-4" />
             Analytics
+          </Link>
+          <Link
+            href="/admin/support"
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+          >
+            <LifeBuoy className="h-4 w-4" />
+            Service
           </Link>
           <AdminProfileMenu name={admin?.fullName ?? null} />
         </div>

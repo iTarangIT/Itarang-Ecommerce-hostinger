@@ -26,23 +26,23 @@ export function CartDrawer() {
 
   const [crossSell, setCrossSell] = React.useState<ProductSummary[]>([]);
 
-  const categories = React.useMemo(
-    () => Array.from(new Set(cart.items.map((i) => i.category))).join(','),
+  // Sorted so the same cart always asks the same (cacheable) question.
+  const ids = React.useMemo(
+    () => Array.from(new Set(cart.items.map((i) => i.productId))).sort().join(','),
     [cart.items],
   );
 
   React.useEffect(() => {
     if (!open || cart.items.length === 0) return;
     const controller = new AbortController();
-    const exclude = cart.items.map((i) => i.productId).join(',');
-    fetch(`/api/cross-sell?categories=${categories}&exclude=${exclude}`, {
+    fetch(`/api/cross-sell?ids=${encodeURIComponent(ids)}`, {
       signal: controller.signal,
     })
       .then((r) => r.json())
       .then((data: { products: ProductSummary[] }) => setCrossSell(data.products))
       .catch(() => setCrossSell([]));
     return () => controller.abort();
-  }, [open, categories, cart.items]);
+  }, [open, ids, cart.items.length]);
 
   const isEmpty = cart.items.length === 0;
 
@@ -122,10 +122,10 @@ export function CartDrawer() {
           {crossSell.length > 0 ? (
             <section className="border-t border-border bg-surface px-4 py-5 sm:px-5">
               <h3 className="font-display text-sm font-semibold text-foreground">
-                Complete your system
+                Chargers for your battery
               </h3>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                Frequently bought with what is in your cart.
+                Matched to the charge voltage of the battery in your cart.
               </p>
               <ul className="mt-3 space-y-3">
                 {crossSell.slice(0, 3).map((product) => (

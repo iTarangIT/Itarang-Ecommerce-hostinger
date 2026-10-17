@@ -89,6 +89,11 @@ export function OrderSummaryPanel({
               −{formatPrice(totals.couponDiscount)}
             </Row>
           ) : null}
+          {totals.paymentDiscount > 0 ? (
+            <Row label="UPI discount" tone="success">
+              −{formatPrice(totals.paymentDiscount)}
+            </Row>
+          ) : null}
           <Row label="Delivery" tone={totals.shipping === 0 ? 'success' : undefined}>
             {totals.shipping === 0 ? 'Free' : formatPrice(totals.shipping)}
           </Row>
