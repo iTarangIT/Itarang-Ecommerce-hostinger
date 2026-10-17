@@ -60,7 +60,7 @@ export function AnnouncementBar() {
 
   return (
     <div
-      className="relative bg-ink-900 text-ink-50"
+      className="relative bg-ink-900 text-ink-50 print:hidden"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
     >

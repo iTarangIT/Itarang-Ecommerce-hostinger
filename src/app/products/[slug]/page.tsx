@@ -36,6 +36,8 @@ import { ReviewForm } from '@/components/product/review-form';
 import { DeliveryCheck } from '@/components/product/delivery-check';
 import { FrequentlyBought } from '@/components/product/frequently-bought';
 import { linkedProducts } from '@/lib/catalog/linked-products';
+import { encodeMobility } from '@/lib/sizing/mobility';
+import { specSheetPath } from '@/lib/downloads/spec-sheets';
 import { RecentlyViewed } from '@/components/product/recently-viewed';
 import { ProductRail } from '@/components/merch/product-rail';
 import { categoryPath, productPath, subcategoryPath } from '@/lib/routes';
@@ -62,6 +64,24 @@ export async function generateStaticParams() {
 /** The demo fixture, or the real catalogue. Never both. */
 async function loadProduct(slug: string) {
   return isDemoSlug(slug) ? DEMO_PRODUCT : await catalog().getProduct(slug);
+}
+
+/**
+ * The mobility calculator, pre-set for an EV pack: vehicle type from the
+ * subcategory, system voltage from the pack's nominal voltage (a 51 V pack
+ * serves a 48 V scooter or a 51 V e-rickshaw system, 60.8 V a 60 V one).
+ */
+function evCalculatorHref(product: Product): string | null {
+  const vehicle =
+    product.subcategory === 'ev-2-wheeler' ? '2w' : product.subcategory === 'ev-3-wheeler' ? '3w' : null;
+  const volts = product.facets.voltage;
+  if (!vehicle || !volts) return null;
+  const classes: Array<[number, number]> =
+    vehicle === '2w'
+      ? [[48, 51.2], [60, 60.8], [72, 73.6]]
+      : [[51, 51.2], [60, 60.8], [64, 64]];
+  const match = classes.find(([, nominal]) => Math.abs(volts - nominal) / nominal <= 0.03);
+  return `/tools/mobility-calculator?${encodeMobility({ vehicleType: vehicle, ...(match ? { systemVoltage: match[0] } : {}) })}`;
 }
 
 /**
@@ -352,6 +372,15 @@ export default async function ProductPage({ params }: PageProps) {
         <section className="mt-10 space-y-8 lg:mt-12">
           <ProductSpecs product={product} />
 
+          {isDemo ? null : (
+            <Link
+              href={specSheetPath(product.slug)}
+              className="inline-flex items-center gap-2 text-sm font-semibold text-primary hover:underline"
+            >
+              Download the spec sheet (PDF) →
+            </Link>
+          )}
+
           {product.sizeChart ? <SizeChart chart={product.sizeChart} /> : null}
 
           {/* The reference stack. Reviews open by default; the rest are
@@ -562,6 +591,25 @@ export default async function ProductPage({ params }: PageProps) {
             the cross-sell rails: by this point the shopper has the
             specification and the open question is whether it fits their load. */}
         <ProductLoadCalculator product={product} />
+
+        {/* The EV counterpart of the load calculator: opens the mobility
+            calculator already set to this pack's vehicle type and voltage. */}
+        {evCalculatorHref(product) ? (
+          <Link
+            href={evCalculatorHref(product)!}
+            className="mt-8 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/30 bg-primary/5 p-5 hover:shadow-md"
+          >
+            <span>
+              <span className="block font-display text-lg font-semibold text-foreground">
+                Will this battery give the range you need?
+              </span>
+              <span className="block text-sm text-muted-foreground">
+                Enter your motor rating and daily distance to check, with this pack’s voltage already set.
+              </span>
+            </span>
+            <span className="text-sm font-semibold text-primary">Check range →</span>
+          </Link>
+        ) : null}
 
         {/* Frequently bought together */}
         {companions.length > 0 ? (

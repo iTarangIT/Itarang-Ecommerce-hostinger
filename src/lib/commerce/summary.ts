@@ -132,6 +132,11 @@ function specChipsOf(product: Product): string[] {
       if (ah) chips.push(`${ah} battery`);
       break;
 
+    case 'chargers':
+      // A charger's voltage facet is the pack class it is rated for.
+      if (voltage) chips.push(`For ${voltage} V packs`);
+      break;
+
     case 'combos':
       if (va) chips.push(va);
       if (ah) chips.push(ah);

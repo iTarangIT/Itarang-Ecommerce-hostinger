@@ -13,6 +13,10 @@ import { CategoryIcon } from '@/components/layout/category-icon';
 import { cn } from '@/lib/utils';
 import { categoryPath, subcategoryPath } from '@/lib/routes';
 import { buildNavigation } from '@/lib/navigation';
+import { landingContentFor } from '@/lib/catalog/landing-content';
+import { postsForCategoryPath } from '@/lib/blog';
+import { PostCard } from '@/components/blog/post-card';
+import { ChooseBand, FeatureRow, LandingFaq } from '@/components/catalog/landing-sections';
 
 /**
  * Shared category / subcategory body.
@@ -52,6 +56,8 @@ export async function CategoryView({
   const heading = subcategory ? subcategory.name : category.name;
   const intro = subcategory ? subcategory.description : category.description;
   const seoCopy = subcategory ? subcategory.seoCopy : category.seoCopy;
+  const landing = landingContentFor(category.slug, subcategory?.slug);
+  const related = postsForCategoryPath(basePath, 3);
 
   /**
    * The sibling pills, restricted to subcategories that have products — the
@@ -98,6 +104,8 @@ export async function CategoryView({
             </div>
           </div>
 
+          {landing ? <FeatureRow features={landing.features} /> : null}
+
           {/* Subcategory navigation — always shows siblings, current one highlighted. */}
           <nav aria-label="Subcategories" className="mt-6">
             <ul className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
@@ -142,6 +150,28 @@ export async function CategoryView({
           <CategoryListing query={query} basePath={basePath} />
         </Suspense>
       </div>
+
+      {landing ? (
+        <>
+          <ChooseBand tool={landing.tool} />
+          <LandingFaq faqs={landing.faqs} heading={heading} />
+        </>
+      ) : null}
+
+      {related.length > 0 ? (
+        <section aria-labelledby="related-reading" className="container section-tight">
+          <h2 id="related-reading" className="heading-3">
+            Related reading
+          </h2>
+          <ul className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {related.map((post) => (
+              <li key={post.slug}>
+                <PostCard post={post} headingLevel="h3" />
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {/* Editorial / SEO copy — genuinely useful buying guidance, not keyword filler. */}
       <section className="border-t border-border bg-surface">

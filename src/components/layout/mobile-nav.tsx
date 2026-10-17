@@ -4,6 +4,7 @@ import * as React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
+  BatteryCharging,
   ChevronDown,
   ChevronRight,
   Headphones,
@@ -13,6 +14,8 @@ import {
   Package,
   Phone,
   Sparkles,
+  Store,
+  Tag,
   User,
 } from 'lucide-react';
 import type { NavCategory } from '@/lib/navigation';
@@ -25,7 +28,10 @@ import { cn } from '@/lib/utils';
 const QUICK_LINKS = [
   { label: 'All products', href: '/products', icon: LayoutGrid },
   { label: 'Offers', href: '/offers', icon: Sparkles },
-  { label: 'Load calculator', href: '/tools/load-calculator', icon: Package },
+  { label: 'Check price', href: '/pricing', icon: Tag },
+  { label: 'Home load calculator', href: '/tools/load-calculator', icon: Package },
+  { label: 'EV battery calculator', href: '/tools/mobility-calculator', icon: BatteryCharging },
+  { label: 'Find a dealer', href: '/support/dealers', icon: Store },
   { label: 'Track order', href: '/track', icon: MapPin },
   { label: 'Support', href: '/support', icon: Headphones },
 ];

@@ -2,8 +2,6 @@ import Image from 'next/image';
 import Link from 'next/link';
 import {
   ArrowRight,
-  BadgeCheck,
-  Calculator,
   Factory,
   Headphones,
   PhoneCall,
@@ -12,7 +10,6 @@ import {
 } from 'lucide-react';
 import type { NavCategory } from '@/lib/navigation';
 import { TRUST_ITEMS } from '@/lib/site';
-import { ButtonLink } from '@/components/ui/button';
 import { SectionHeader } from '@/components/ui/section';
 import { CategoryIcon } from '@/components/layout/category-icon';
 import { cn } from '@/lib/utils';
@@ -131,59 +128,6 @@ export function CategoryTiles({ categories }: { categories: NavCategory[] }) {
 }
 
 /* ------------------------------------------------- load calculator promo */
-
-export function LoadCalculatorPromo() {
-  return (
-    <section className="container">
-      <div className="grid overflow-hidden rounded-xl border border-border bg-card lg:grid-cols-12">
-        <div className="flex flex-col justify-center p-6 sm:p-8 lg:col-span-7 lg:p-10">
-          <p className="eyebrow">Free sizing tool</p>
-          <h2 className="heading-2 mt-2 text-balance">
-            Not sure what size inverter your home needs?
-          </h2>
-          <p className="mt-3 max-w-xl text-sm leading-relaxed text-muted-foreground sm:text-base">
-            Tick the appliances you want running during a cut and how long you need them for. We
-            work out the inverter VA and battery Ah, and show you what we stock for it.
-          </p>
-          <ul className="mt-5 grid gap-2 sm:grid-cols-2">
-            {[
-              'Appliance presets with real wattages',
-              'Start-up surge shown for every appliance',
-              'Battery sized to your backup hours',
-              'One click through to what we stock',
-            ].map((point) => (
-              <li key={point} className="flex items-start gap-2 text-sm text-muted-foreground">
-                <BadgeCheck className="mt-0.5 h-4 w-4 shrink-0 text-success" />
-                {point}
-              </li>
-            ))}
-          </ul>
-          <div className="mt-7">
-            <ButtonLink href="/tools/load-calculator" variant="accent" size="lg">
-              <Calculator className="h-4 w-4" />
-              Open the load calculator
-            </ButtonLink>
-          </div>
-        </div>
-        <div className="relative min-h-[13rem] bg-ink-900 lg:col-span-5">
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute -right-16 -top-16 h-64 w-64 rounded-full bg-primary-400/25 blur-3xl"
-          />
-          <Image
-            src="/art/inverter-1-detail.svg"
-            alt=""
-            fill
-            sizes="(max-width: 1024px) 100vw, 40vw"
-            className="object-contain p-6"
-          />
-        </div>
-      </div>
-    </section>
-  );
-}
-
-/* ------------------------------------------------------------ load guide */
 
 /**
  * Each row links into the load calculator pre-filled with that appliance mix,

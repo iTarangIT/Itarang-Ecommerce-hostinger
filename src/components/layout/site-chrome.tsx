@@ -2,6 +2,8 @@
 
 import type { NavCategory } from '@/lib/navigation';
 import { AnnouncementBar } from './announcement-bar';
+import { WhatsAppButton } from './whatsapp-button';
+import { CookieNotice } from './cookie-notice';
 import { BottomNav } from './bottom-nav';
 import { CartDrawer } from '@/components/cart/cart-drawer';
 import { CompareTray } from '@/components/product/compare-tray';
@@ -31,6 +33,8 @@ export function SiteChromeBottom({ categories }: { categories: NavCategory[] }) 
       <CartDrawer />
       <CompareTray />
       <BottomNav />
+      <WhatsAppButton />
+      <CookieNotice />
       <Toaster />
     </>
   );
