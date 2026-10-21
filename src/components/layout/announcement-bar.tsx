@@ -4,7 +4,8 @@ import * as React from 'react';
 import Link from 'next/link';
 import { ArrowRight, X } from 'lucide-react';
 
-const STORAGE_KEY = 'itarang.announcement.dismissed.v1';
+// v2: the offers changed, so a bar dismissed for the old ones shows again.
+const STORAGE_KEY = 'itarang.announcement.dismissed.v2';
 
 /**
  * Only offers that exist.
@@ -16,12 +17,18 @@ const STORAGE_KEY = 'itarang.announcement.dismissed.v1';
  * holds no combos and the coupon is a development fixture, so the link landed
  * on an empty category with a code that buys nothing.
  *
- * The delivery line stays: unlike those two it is implemented, by
- * `FREE_SHIPPING_THRESHOLD` in `lib/store/totals.ts`, and the cart applies it.
- * Whether the business wants to offer it is a separate question, recorded under
- * business confirmation rather than answered here.
+ * What is here now is what the business specified and the checkout applies:
+ * the two WELCOME codes (`lib/offers/coupons.ts`), the UPI discount
+ * (`UPI_DISCOUNT`, applied by `buildQuote`) and free delivery
+ * (`FREE_SHIPPING_THRESHOLD`). No card offers and no no-cost EMI — the business
+ * has neither online.
  */
-const MESSAGES = [{ text: 'Free delivery on orders above ₹4,999', href: '/offers' }];
+const MESSAGES = [
+  { text: '₹2,000 off 3-wheeler batteries with code WELCOME2000', href: '/offers' },
+  { text: '₹1,000 off home inverter batteries with code WELCOME1000', href: '/offers' },
+  { text: 'Extra ₹200 off when you pay by UPI', href: '/offers' },
+  { text: 'Free delivery on orders above ₹4,999', href: '/offers' },
+];
 
 /**
  * Rotating announcement bar. Dismissal is remembered so it does not nag on
@@ -53,7 +60,7 @@ export function AnnouncementBar() {
 
   return (
     <div
-      className="relative bg-ink-900 text-ink-50"
+      className="relative bg-ink-900 text-ink-50 print:hidden"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
     >

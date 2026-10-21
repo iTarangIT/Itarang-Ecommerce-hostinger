@@ -58,6 +58,7 @@ export const quoteRequestSchema = z.object({
   couponCode: z.string().trim().max(40).optional(),
   pincode: z.string().trim().optional(),
   paymentMethod: paymentMethodSchema.optional(),
+  payVia: z.literal('upi').optional(),
 });
 
 export const placeOrderSchema = z.object({
@@ -67,6 +68,8 @@ export const placeOrderSchema = z.object({
   couponCode: z.string().trim().max(40).optional(),
   gstin: gstinSchema.optional().or(z.literal('')),
   paymentMethod: paymentMethodSchema,
+  /** UPI was chosen, for the UPI discount. See `QuoteRequest.payVia`. */
+  payVia: z.literal('upi').optional(),
 
   /**
    * The total the browser last displayed, in paise.

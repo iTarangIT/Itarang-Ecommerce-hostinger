@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   AlertCircle,
@@ -14,6 +15,7 @@ import {
   Lock,
   MapPin,
   ShoppingBag,
+  Smartphone,
   Truck,
   User,
   Wallet,
@@ -23,6 +25,7 @@ import type { CartItem } from '@/lib/store/types';
 import type { QuoteIssue } from '@/lib/orders/quote';
 import type { ServiceabilityResult } from '@/lib/support/serviceability';
 import { formatPrice } from '@/lib/catalog/pricing';
+import { UPI_DISCOUNT } from '@/lib/offers/coupons';
 import { GSTIN_PATTERN, PINCODE_PATTERN, STATES } from '@/lib/checkout/validation';
 import type { CustomerAddress } from '@/lib/account/addresses';
 import { addAddressAction } from '@/lib/account/address-actions';
@@ -54,7 +57,7 @@ type Step = 1 | 2 | 3;
  * chooses. `placeOrder` derives the stored payment method from the provider
  * itself, so a tampered request cannot mislabel an order.
  */
-type PaymentChoice = 'cod' | 'online';
+type PaymentChoice = 'cod' | 'upi' | 'online';
 
 interface QuoteResponse {
   items: CartItem[];
@@ -160,7 +163,8 @@ export function CheckoutFlow({
   const [saveNewAddress, setSaveNewAddress] = React.useState(false);
   const [wantsGstInvoice, setWantsGstInvoice] = React.useState(false);
   const [gstin, setGstin] = React.useState('');
-  const [payment, setPayment] = React.useState<PaymentChoice>('online');
+  // UPI first: it is the cheapest way to pay, by the UPI discount.
+  const [payment, setPayment] = React.useState<PaymentChoice>('upi');
 
   const [quote, setQuote] = React.useState<QuoteResponse | null>(null);
   const [quoteLoading, setQuoteLoading] = React.useState(false);
@@ -210,6 +214,7 @@ export function CheckoutFlow({
           couponCode: cart.coupon?.code,
           pincode: address.pincode.length === 6 ? address.pincode : undefined,
           paymentMethod: payment === 'cod' ? 'cod' : provider,
+          payVia: payment === 'upi' ? 'upi' : undefined,
         }),
       })
         .then(async (response) => {
@@ -326,6 +331,7 @@ export function CheckoutFlow({
           couponCode: cart.coupon?.code,
           gstin: wantsGstInvoice ? gstin : undefined,
           paymentMethod: payment === 'cod' ? 'cod' : provider,
+          payVia: payment === 'upi' ? 'upi' : undefined,
           // What this browser is showing. Advisory only — the server prices the
           // order from the catalogue either way, and this can only stop the
           // order, never lower it.
@@ -918,6 +924,19 @@ export function CheckoutFlow({
               <>
                 <div className="mt-5 space-y-3">
                   <PaymentOption
+                    id="upi"
+                    checked={payment === 'upi'}
+                    onSelect={() => setPayment('upi')}
+                    icon={<Smartphone className="h-5 w-5" />}
+                    title={`UPI — save ${formatPrice(UPI_DISCOUNT)}`}
+                    description={
+                      provider === 'razorpay-test'
+                        ? `Pay with any UPI app and get ${formatPrice(UPI_DISCOUNT)} off. The payment window opens on UPI only.`
+                        : `Get ${formatPrice(UPI_DISCOUNT)} off for paying by UPI. Test mode — no money moves.`
+                    }
+                    badge={provider === 'razorpay-test' ? 'Test mode' : undefined}
+                  />
+                  <PaymentOption
                     id="online"
                     checked={payment === 'online'}
                     onSelect={() => setPayment('online')}
@@ -928,11 +947,15 @@ export function CheckoutFlow({
                         <FlaskConical className="h-5 w-5" />
                       )
                     }
-                    title={provider === 'razorpay-test' ? 'Card, UPI or netbanking' : 'Test payment'}
+                    title={
+                      provider === 'razorpay-test'
+                        ? 'Card, netbanking, wallet or EMI'
+                        : 'Test payment'
+                    }
                     description={
                       provider === 'razorpay-test'
-                        ? 'Pay securely through Razorpay. Test mode — use a test card; no real money moves.'
-                        : 'Simulates a card or UPI payment. No gateway is contacted and no money moves.'
+                        ? 'Pay securely through Razorpay, including card EMI. Test mode — use a test card; no real money moves.'
+                        : 'Simulates a card payment. No gateway is contacted and no money moves.'
                     }
                     badge="Test mode"
                   />
@@ -989,6 +1012,20 @@ export function CheckoutFlow({
                       : `Pay ${quote ? formatPrice(quote.totals.total) : ''}`}
                   </Button>
                 </div>
+                <p className="mt-3 text-xs text-muted-foreground">
+                  By placing this order you agree to our{' '}
+                  <Link href="/policies/refund" className="underline underline-offset-2 hover:text-foreground">
+                    refund policy
+                  </Link>
+                  . If a payment fails after money is deducted, see the{' '}
+                  <Link
+                    href="/policies/payment-failure"
+                    className="underline underline-offset-2 hover:text-foreground"
+                  >
+                    payment failure policy
+                  </Link>
+                  .
+                </p>
               </>
             )}
           </section>

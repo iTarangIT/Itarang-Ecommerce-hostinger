@@ -134,8 +134,8 @@ function requirementFor(selection: Record<string, number>, hours: number): Sizin
 /* ------------------------------------------------------------- sanity first */
 
 describe('the catalogue under test is the real one', () => {
-  it('holds eight products, seven of them published', () => {
-    expect(TRONTEK_PRODUCTS).toHaveLength(8);
+  it('holds the original eight, seven published, plus the unpriced drafts', () => {
+    expect(TRONTEK_PRODUCTS.length).toBeGreaterThanOrEqual(8);
     expect(PUBLISHED).toHaveLength(7);
   });
 
@@ -703,12 +703,22 @@ describe('11 · every real product is checked against its intended application',
     backupHours: 4,
   };
 
-  it.each(TRONTEK_PRODUCTS.map((p) => p.productKey))(
+  // Batteries only: a charger is not a candidate for home backup at all.
+  const BATTERIES = TRONTEK_PRODUCTS.filter((p) => p.category === 'batteries');
+
+  it.each(BATTERIES.map((p) => p.productKey))(
     '%s is judged on what it documents',
     (key) => {
       const seed = seedFor(key);
       const verdict = assess(domainFor(key), homeRequirement);
-      const isHomeStorage = seed.subcategory === 'lithium';
+      const isHomeStorage = seed.subcategory === 'home-inverter';
+
+      if (seed.subcategory === 'ess') {
+        // Storage, not traction: never refused for being in the wrong
+        // subcategory. Whether one fits is a capacity and voltage question.
+        expect(verdict.rejections).not.toContain('not-a-home-backup-subcategory');
+        return;
+      }
 
       if (isHomeStorage) {
         // Both Powercubes clear every application barrier; only voltage or
@@ -718,14 +728,16 @@ describe('11 · every real product is checked against its intended application',
         expect(verdict.rejections).not.toContain('application-not-documented');
         expect(verdict.spec.documentedApplication).toMatch(/home backup power/i);
       } else {
+        // A traction pack is refused for its stated vehicle use. Its system
+        // voltage may still resolve — a 51.2 V pack is a 48 V system — which
+        // is irrelevant once the application has ruled it out.
         expect(verdict.rejections).toContain('declared-vehicle-application');
-        expect(verdict.spec.systemVoltage).toBeNull();
       }
     },
   );
 
-  it('documents an application for all eight, so none fails for lack of one', () => {
-    for (const seed of TRONTEK_PRODUCTS) {
+  it('documents an application for every battery, so none fails for lack of one', () => {
+    for (const seed of BATTERIES) {
       expect(
         assess(domainFor(seed.productKey), homeRequirement).spec.documentedApplication,
         `${seed.productKey} states no recommended use`,

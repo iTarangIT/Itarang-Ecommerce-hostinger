@@ -14,52 +14,104 @@ export interface FaqSection {
 /**
  * Support FAQ content.
  *
- * Answers describe how the products and the buying process work. Anything that
- * depends on commercial policy not yet confirmed is written conservatively and
- * points at the support team rather than stating a firm commitment.
+ * Rewritten for what the business actually sells — Trontek LiFePO4 batteries
+ * for 2- and 3-wheelers, homes and storage, and their chargers. The previous
+ * answers described inverters, tubular batteries and installation-included
+ * offers that do not exist.
+ *
+ * Two rules from the business ("Website changes", Oct 2026): no lead-acid
+ * call-outs, and standard answers on refunds and failed payments. The full
+ * policies live at `/policies/refund` and `/policies/payment-failure`; these
+ * answers summarise them.
+ *
+ * The first entry of each section is what the homepage support band previews,
+ * so each section leads with its most-asked question.
  */
 export const FAQ_SECTIONS: FaqSection[] = [
   {
     id: 'choosing',
-    title: 'Choosing a system',
-    description: 'Sizing, chemistry and which family fits your home.',
+    title: 'Choosing a battery',
+    description: 'Which battery fits your vehicle or your home.',
     entries: [
       {
-        id: 'sizing',
-        question: 'How do I know what inverter size I need?',
+        id: 'which-battery',
+        question: 'How do I choose the right battery for my vehicle?',
         answer:
-          'Add up the wattage of everything you want running during a cut, then allow headroom for start-up surge on motors and compressors. The inverter VA rating must cover that total; the battery Ah rating decides how long it lasts. Our load calculator does both calculations from a list of appliances and returns matching iTarang systems.',
+          'Match the voltage first: the pack must have the same system voltage as your vehicle’s controller — 48 V, 60 V or 72 V for most scooters, 51 V, 61 V or 64 V for e-rickshaws. Then choose capacity (Ah) for the range you need: more ampere-hours means more kilometres per charge. The mobility calculator works this out from your motor rating and daily distance.',
       },
       {
-        id: 'va-vs-ah',
-        question: 'What is the difference between VA and Ah?',
+        id: 'home-sizing',
+        question: 'Which battery do I need for home backup?',
         answer:
-          'VA is the inverter’s capacity — what you can run at once. Ah is the battery’s capacity — how long you can run it. A large inverter with a small battery runs plenty of appliances for a short time; a small inverter with a large battery runs a few appliances for a long time.',
+          'Add up the watts of what you want running during a cut and multiply by the hours you need. The battery must store that much energy, and it must match your inverter’s battery input voltage (12 V or 24 V for most homes). The load calculator does the arithmetic and recommends a battery from the range.',
       },
       {
-        id: 'lithium-vs-tubular',
-        question: 'Should I choose lithium or tubular?',
+        id: 'why-lfp',
+        question: 'Why lithium iron phosphate (LiFePO4)?',
         answer:
-          'Choose lithium if you want a maintenance-free system with a much longer replacement interval and can absorb the higher purchase price. Choose tall tubular if the up-front cost matters more and you can accommodate ventilation and periodic water topping. For daily long outages, both work; lithium simply lasts longer per rupee over time.',
+          'It is the most thermally stable lithium chemistry, lasts thousands of charge cycles, needs no maintenance and weighs far less for the same energy. Every pack carries a battery management system that balances the cells and protects against over-charge, over-discharge, short circuit and over-temperature.',
       },
       {
-        id: 'sine-wave',
-        question: 'Why does pure sine wave matter?',
+        id: 'charger',
+        question: 'Which charger should I use?',
         answer:
-          'Pure sine wave output matches the shape of grid supply. Fans and refrigerator compressors run at rated efficiency instead of humming and running hot, and switch-mode electronics — televisions, laptop adapters, routers — see supply indistinguishable from the mains. Every iTarang inverter is pure sine wave.',
+          'One rated for your pack’s charge voltage — never a charger built for another voltage or another chemistry. Each EV battery page lists the Trontek chargers that match it, and the cart suggests them when you add a battery.',
+      },
+    ],
+  },
+  {
+    id: 'returns',
+    title: 'Orders, payment & refunds',
+    description: 'Paying, offers, failed payments, cancellations and refunds.',
+    entries: [
+      {
+        id: 'payment',
+        question: 'What payment methods can I use?',
+        answer:
+          'UPI, credit and debit cards, net banking and wallets, through Razorpay. Paying by UPI takes ₹200 off the order. Card EMI is available at the payment step on your card issuer’s terms. Payment is taken online when you place the order.',
       },
       {
-        id: 'refrigerator',
-        question: 'Can an inverter run my refrigerator?',
+        id: 'payment-failed',
+        question: 'My payment failed but money was deducted. What now?',
         answer:
-          'Yes, from 1500VA upward. A compressor draws several times its running current for a fraction of a second on start-up, and the inverter must absorb that surge without tripping. Below 1500VA, plan to leave refrigeration off backup.',
+          'Do not pay again straight away. A failed payment that was debited is reversed to the same account automatically, usually within 5–7 working days and often sooner. If your order shows as paid within 30 minutes, nothing more is needed. The payment failure policy explains the full process.',
+      },
+      {
+        id: 'coupons',
+        question: 'Which coupon codes can I use?',
+        answer:
+          'WELCOME1000 for ₹1,000 off a home inverter battery, and WELCOME2000 for ₹2,000 off a 3-wheeler or e-rickshaw battery. Enter the code in your cart. One code per order, once per customer; the UPI discount applies on top.',
+      },
+      {
+        id: 'returns-policy',
+        question: 'Can I return a product or get a refund?',
+        answer:
+          'A product that arrives damaged, faulty or not as ordered is replaced or refunded — report it within 48 hours of delivery with photos. Unused products in their original sealed packaging can be returned within 7 days of delivery. Refunds go back to the original payment method within 5–7 working days of approval. The refund policy has the details.',
+      },
+      {
+        id: 'cancel',
+        question: 'Can I cancel my order?',
+        answer:
+          'Yes, free of charge until it is dispatched — call customer care with your order number. Once dispatched, refuse the delivery or follow the return process instead. A cancelled prepaid order is refunded in full to the original payment method.',
+      },
+      {
+        id: 'gst',
+        question: 'Can I get a GST invoice?',
+        answer:
+          'Yes. Enter your GSTIN at checkout and the invoice is issued against it. Every order receives a GST invoice regardless.',
+      },
+      {
+        id: 'tracking',
+        question: 'How do I track my order?',
+        answer:
+          'Use the Track order page with your order number and the phone number on the order, or open the order from your account.',
       },
     ],
   },
   {
     id: 'delivery',
     title: 'Delivery & installation',
-    description: 'How your order reaches you and who commissions it.',
+    description: 'How your order reaches you.',
     entries: [
       {
         id: 'delivery-charge',
@@ -71,88 +123,38 @@ export const FAQ_SECTIONS: FaqSection[] = [
         id: 'installation',
         question: 'Is installation included?',
         answer:
-          'Installation by a certified technician is included with inverters, batteries and combos. UPS units are plug-and-play and do not need an installation visit. Your slot is booked after the order is confirmed.',
-      },
-      {
-        id: 'installation-time',
-        question: 'How long does installation take?',
-        answer:
-          'A standard single-battery installation takes about 60–90 minutes including cable routing, commissioning and a load test. A 24V or 48V system with a battery bank takes longer and may need a site survey first.',
-      },
-      {
-        id: 'site-survey',
-        question: 'When is a site survey needed?',
-        answer:
-          'For high-capacity systems from 2200VA upward, and for any solar installation. The engineer confirms incoming supply rating, cable runs, battery placement and ventilation before installation is scheduled.',
+          'Only where the product page says so. EV packs are fitted by your vehicle dealer or mechanic; home batteries connect to a lithium-ready inverter. If you are unsure, call customer care before ordering.',
       },
     ],
   },
   {
     id: 'warranty',
     title: 'Warranty & service',
-    description: 'What is covered, for how long, and how to claim.',
+    description: 'What is covered, for how long, and who to call.',
     entries: [
       {
         id: 'warranty-length',
         question: 'How long is the warranty?',
         answer:
-          'It varies by product and is stated on every product page: inverters carry 24 or 36 months, tubular batteries 36 to 48 months, and lithium batteries 60 months. The written terms ship with the product.',
-      },
-      {
-        id: 'warranty-register',
-        question: 'Do I need to register my warranty?',
-        answer:
-          'It is not mandatory, but registering your serial number means a future claim never depends on locating the original invoice. Registration takes a minute in the Owner Centre.',
+          'It is stated on every product page, in the manufacturer’s own words — for example 3 years or 1200 cycles on the LiEV e-rickshaw packs, and 5 years or 4000 cycles on the Powercube home batteries, whichever comes first.',
       },
       {
         id: 'warranty-claim',
-        question: 'How do I raise a service request?',
+        question: 'How do I make a warranty claim?',
         answer:
-          'Register a complaint in the Owner Centre with your serial number and a description of the fault. You receive a reference number, and a technician is assigned from the service network covering your pincode.',
+          'Register a complaint with your order number and the battery’s serial number, or call a warranty number on the support page. You get a reference number and the claim is handled with Trontek.',
       },
       {
         id: 'maintenance',
-        question: 'What maintenance does a battery need?',
+        question: 'What maintenance does the battery need?',
         answer:
-          'Lithium batteries need none. Flooded lead acid batteries — tubular and flat plate — need distilled water topping up roughly every four to six months, more often in hot conditions. The float indicators on each cell show when a cell needs attention.',
-      },
-    ],
-  },
-  {
-    id: 'returns',
-    title: 'Orders & returns',
-    description: 'Payment, tracking, cancellation and replacement.',
-    entries: [
-      {
-        id: 'payment',
-        question: 'What payment methods can I use?',
-        // Matches what checkout accepts. It used to add "no-cost EMI on
-        // eligible orders" and "Cash on delivery is available on eligible
-        // orders and pincodes": `emiEnabled` is false on every product and no
-        // lender terms exist, and `COD_ENABLED` is false — the COD route
-        // answers 403 and the quote refuses a COD order. This answer is also
-        // previewed on the homepage, so it was the last place either claim
-        // still appeared.
-        answer:
-          'UPI, credit and debit cards, and net banking, through Razorpay. Payment is taken online when you place the order.',
+          'None. Keep it dry and away from direct heat, charge it with the matching charger, and do not open the casing — opening it voids the warranty.',
       },
       {
-        id: 'gst',
-        question: 'Can I get a GST invoice?',
+        id: 'grievance',
+        question: 'Who do I contact if my complaint is not resolved?',
         answer:
-          'Yes. Enter your GSTIN in the cart before placing the order and the invoice is issued against it. Every order receives a GST invoice regardless.',
-      },
-      {
-        id: 'tracking',
-        question: 'How do I track my order?',
-        answer:
-          'Use the Track order page with your order number and the phone number on the order, or open the order from your account.',
-      },
-      {
-        id: 'returns-policy',
-        question: 'Can I return a product?',
-        answer:
-          'Products that arrive damaged or faulty are replaced. Returns for change of mind are assessed case by case and depend on whether the unit has been installed — contact support before arranging anything.',
+          'iTarang’s grievance officer, Chirag Garg. Grievances are acknowledged within 48 hours and resolved within one month. Contact details are on the grievance page.',
       },
     ],
   },

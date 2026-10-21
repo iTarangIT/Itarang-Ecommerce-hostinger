@@ -13,21 +13,33 @@ import { PurchaseButton } from './purchase-button';
 import { productPath } from '@/lib/routes';
 
 /**
- * Frequently bought together.
+ * Buy-together block for linked products.
  *
- * The anchor product is always included; companions can be unticked. The total
- * updates live so the value of buying together is visible before committing.
+ * The anchor product is always included. Only the first companion — the best
+ * match — starts ticked: the companions are alternatives (several chargers that
+ * fit one pack), and pre-ticking all of them would put four chargers in a cart
+ * that needs one. The total updates live as boxes are ticked.
+ *
+ * The heading is the caller's, because it must say why these products are
+ * here. "Frequently bought together" was a claim about sales that no data
+ * stood behind.
  */
 export function FrequentlyBought({
   anchor,
   companions,
+  title = 'Buy it with',
+  description = 'Products made to work with this one.',
 }: {
   anchor: ProductSummary;
   companions: ProductSummary[];
+  title?: string;
+  description?: string;
 }) {
   const cart = useCart();
   const { toast, open } = useUI();
-  const [selected, setSelected] = React.useState<string[]>(() => companions.map((c) => c.id));
+  const [selected, setSelected] = React.useState<string[]>(() =>
+    companions.slice(0, 1).map((c) => c.id),
+  );
 
   if (companions.length === 0) return null;
 
@@ -50,11 +62,9 @@ export function FrequentlyBought({
   return (
     <section aria-labelledby="fbt-heading" className="rounded-xl border border-border bg-card p-5 sm:p-6">
       <h2 id="fbt-heading" className="heading-3">
-        Frequently bought together
+        {title}
       </h2>
-      <p className="mt-1 text-sm text-muted-foreground">
-        These are the products customers most often pair with this one.
-      </p>
+      <p className="mt-1 text-sm text-muted-foreground">{description}</p>
 
       <div className="mt-5 grid gap-6 lg:grid-cols-12">
         <ul className="flex flex-wrap items-center gap-3 lg:col-span-8">

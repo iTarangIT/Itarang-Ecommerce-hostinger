@@ -9,6 +9,12 @@
  *
  * Appliance wattages are typical figures for Indian households and are stated
  * on screen so a shopper can correct them against their own appliance ratings.
+ *
+ * PLACEHOLDER FORMULA. The business has said the sizing will follow the NBFC's
+ * Excel workbook once it is shared. When it arrives, replace `calculateSizing`
+ * (and the four constants below it) with that workbook's formula, keep the
+ * `SizingResult` shape so `/api/sizing` and `lib/sizing/recommend.ts` keep
+ * working unchanged, and re-check the tests in `calculator.test.ts` against it.
  */
 
 export const APPLIANCE_GROUPS = [
@@ -108,10 +114,16 @@ export interface CustomAppliance {
 export const MAX_CUSTOM_APPLIANCES = 8;
 
 /**
- * How much of the connected load actually runs at once.
+ * How much of the connected load actually runs at once — "average consumption".
  *
- * Livguard's "average consumption" control. **Applied to energy and never to
- * power**, which is the whole design of it:
+ * Livguard's control, with Livguard's three choices: 100%, 50% and 20%. It is
+ * the fraction of the connected load drawn on average across the backup
+ * window (a diversity / usage factor), so the energy the battery has to supply
+ * is
+ *
+ *   load energy (Wh) = running watts × backup hours × average consumption
+ *
+ * **Applied to energy and never to power**, which is the whole design of it:
  *
  *   The *inverter* has to carry whatever is switched on at the moment the grid
  *   fails. Dividing its VA rating by a diversity factor would size it for a
@@ -123,13 +135,18 @@ export const MAX_CUSTOM_APPLIANCES = 8;
  *
  * So `requiredVa`, `peakWatts` and `runningWatts` ignore it entirely and only
  * `requiredAh` and `loadEnergyWh` respond to it. Defaulting to 100% is
- * deliberate: a shopper opts in to the assumption rather than discovering later
- * that a default halved their backup.
+ * deliberate, and is the behaviour from before the control existed: a shopper
+ * opts in to the assumption rather than discovering later that a default
+ * shrank their backup.
+ *
+ * Only these exact values are accepted anywhere (calculation and URL). Older
+ * links that carried `use=0.75` — an option this control used to offer — now
+ * fall back to 100%, the conservative direction.
  */
 export const DIVERSITY_OPTIONS = [
   { value: 1, label: '100%', description: 'Everything on backup runs together' },
-  { value: 0.75, label: '75%', description: 'Most of it runs together' },
-  { value: 0.5, label: '50%', description: 'About half runs at any one time' },
+  { value: 0.5, label: '50%', description: 'About half of it runs at any one time' },
+  { value: 0.2, label: '20%', description: 'Only a few things run at once, on and off' },
 ] as const;
 
 export const DEFAULT_DIVERSITY = 1;
@@ -144,10 +161,30 @@ function isDiversity(value: number): boolean {
  * Livguard opens on property type, and it is a better first question than a
  * list of appliances: almost nobody knows their connected load, and everybody
  * knows how many bedrooms they have. These are starting points to edit, not
- * claims about any particular home, and the screen says so.
+ * claims about any particular home, and the screen says so. "Custom" is not a
+ * preset — it is the empty list — so it lives in the component, not here.
+ *
+ * What each one assumes is on backup during a cut (wattages from `APPLIANCES`):
+ *
+ *   1 BHK  2 fans, 3 LED lights, 1 tube light, TV + set-top box, Wi-Fi router,
+ *          1 phone charger                                        ≈ 370 W, 4 h
+ *   2 BHK  3 fans, 5 LED lights, 2 tube lights, TV + set-top box, router,
+ *          2 chargers, fridge                                     ≈ 710 W, 4 h
+ *   3 BHK  4 fans, 8 LED lights, 2 tube lights, 2 TVs, 1 set-top box, router,
+ *          3 chargers, laptop, fridge, kitchen exhaust fan        ≈ 1040 W, 6 h
+ *   4 BHK  5 fans, 10 LED lights, 3 tube lights, 2 TVs + 2 set-top boxes,
+ *          router, 4 chargers, 2 laptops, fridge, 2 exhaust fans ≈ 1310 W, 6 h
+ *   Villa  7 fans, 14 LED lights, 4 tube lights, 3 TVs + 2 set-top boxes,
+ *          2 routers, 5 chargers, 2 laptops, 2 fridges, 2 exhaust fans,
+ *          1 HP water pump                                       ≈ 2615 W, 8 h
+ *
+ * Deliberately left out of every preset: air conditioners, geysers, irons,
+ * induction and microwaves (most homes keep them off backup) and the mixer
+ * grinder and washing machine (short, surge-heavy loads a shopper should opt in
+ * to). They are one tap away in the list.
  */
 export interface HomePreset {
-  id: string;
+  id: '1bhk' | '2bhk' | '3bhk' | '4bhk' | 'villa';
   label: string;
   description: string;
   selection: Selection;
@@ -158,49 +195,46 @@ export const HOME_PRESETS: HomePreset[] = [
   {
     id: '1bhk',
     label: '1 BHK',
-    description: '2 fans, 5 lights, TV, router',
-    selection: { fan: 2, led: 5, tv: 1, router: 1, charger: 2 },
+    description: '2 fans, 4 lights, TV, router',
+    selection: { fan: 2, led: 3, tube: 1, tv: 1, settop: 1, router: 1, charger: 1 },
     hours: 4,
   },
   {
     id: '2bhk',
     label: '2 BHK',
-    description: '4 fans, 8 lights, TV, router, fridge',
-    selection: { fan: 4, led: 8, tv: 1, router: 1, charger: 2, fridge: 1 },
+    description: '3 fans, 7 lights, TV, router, fridge',
+    selection: { fan: 3, led: 5, tube: 2, tv: 1, settop: 1, router: 1, charger: 2, fridge: 1 },
     hours: 4,
   },
   {
     id: '3bhk',
     label: '3 BHK',
-    description: '6 fans, 12 lights, 2 TVs, fridge, mixer',
-    selection: { fan: 6, led: 12, tube: 2, tv: 2, router: 1, charger: 3, fridge: 1, mixer: 1 },
+    description: '4 fans, 10 lights, 2 TVs, fridge, laptop',
+    selection: {
+      fan: 4, led: 8, tube: 2, tv: 2, settop: 1, router: 1, charger: 3, laptop: 1, fridge: 1,
+      exhaust: 1,
+    },
     hours: 6,
   },
   {
     id: '4bhk',
     label: '4 BHK',
-    description: '8 fans, 16 lights, 2 TVs, fridge, washing machine',
+    description: '5 fans, 13 lights, 2 TVs, fridge, 2 laptops',
     selection: {
-      fan: 8, led: 16, tube: 3, tv: 2, router: 1, charger: 4, fridge: 1, mixer: 1, washing: 1,
+      fan: 5, led: 10, tube: 3, tv: 2, settop: 2, router: 1, charger: 4, laptop: 2, fridge: 1,
+      exhaust: 2,
     },
     hours: 6,
   },
   {
     id: 'villa',
     label: 'Villa',
-    description: 'Above, plus a water pump and a second fridge',
+    description: '7 fans, 18 lights, 3 TVs, 2 fridges, water pump',
     selection: {
-      fan: 10, led: 20, tube: 4, tv: 3, router: 2, charger: 4, fridge: 2, mixer: 1,
-      washing: 1, pump: 1,
+      fan: 7, led: 14, tube: 4, tv: 3, settop: 2, router: 2, charger: 5, laptop: 2, fridge: 2,
+      exhaust: 2, pump: 1,
     },
     hours: 8,
-  },
-  {
-    id: 'office',
-    label: 'Home office',
-    description: 'Desktop, laptop, router, 2 fans, 4 lights',
-    selection: { desktop: 1, laptop: 1, router: 1, fan: 2, led: 4, printer: 1 },
-    hours: 4,
   },
 ];
 
@@ -263,6 +297,21 @@ export function dcWattsFor(runningWatts: number): number {
   return Math.ceil(runningWatts / EFFICIENCY);
 }
 
+/**
+ * Size a home backup system from the appliances on backup.
+ *
+ * @param selection   appliance id → quantity, from `APPLIANCES`.
+ * @param backupHours hours of backup wanted per power cut / day.
+ * @param options.diversity "average consumption" — the fraction of the
+ *   connected load drawn on average over the window. One of
+ *   `DIVERSITY_OPTIONS` (1, 0.5 or 0.2); omitted or unrecognised means 1, which
+ *   is exactly the arithmetic from before the option existed. Scales
+ *   `loadEnergyWh` and `requiredAh` only — see `DIVERSITY_OPTIONS`.
+ * @param options.custom shopper-described appliances, added to running watts.
+ *
+ * Interim formula — to be replaced by the NBFC Excel when the business shares
+ * it (see the note at the top of this file).
+ */
 export function calculateSizing(
   selection: Selection,
   backupHours: number,

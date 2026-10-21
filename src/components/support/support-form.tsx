@@ -1,77 +1,50 @@
 'use client';
 
 import * as React from 'react';
-import { CheckCircle2, Info, Mail, Phone } from 'lucide-react';
-import { SITE } from '@/lib/site';
+import { AlertCircle, CheckCircle2, Copy, Loader2 } from 'lucide-react';
+import {
+  SUPPORT_FORMS,
+  validateForm,
+  type FormErrors,
+  type FormFieldSpec,
+  type FormValues,
+  type SupportRequestKind,
+} from '@/lib/support/request-forms';
+import { submitSupportRequestAction } from '@/lib/support/request-actions';
 import { Button } from '@/components/ui/button';
 import { Field, Input, Select, Textarea } from '@/components/ui/field';
 
-export type FieldType = 'text' | 'tel' | 'email' | 'pincode' | 'select' | 'date' | 'textarea';
-
-export interface FormFieldSpec {
-  name: string;
-  label: string;
-  type: FieldType;
-  required?: boolean;
-  hint?: string;
-  placeholder?: string;
-  options?: string[];
-  maxLength?: number;
-}
-
-type Values = Record<string, string>;
-type Errors = Record<string, string>;
-
-function validate(fields: FormFieldSpec[], values: Values): Errors {
-  const errors: Errors = {};
-
-  for (const field of fields) {
-    const value = (values[field.name] ?? '').trim();
-
-    if (field.required && !value) {
-      errors[field.name] = `${field.label} is required.`;
-      continue;
-    }
-    if (!value) continue;
-
-    if (field.type === 'tel' && !/^[6-9]\d{9}$/.test(value)) {
-      errors[field.name] = 'Enter a 10-digit Indian mobile number.';
-    }
-    if (field.type === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value)) {
-      errors[field.name] = 'Enter a valid email address.';
-    }
-    if (field.type === 'pincode' && !/^\d{6}$/.test(value)) {
-      errors[field.name] = 'Enter a valid 6-digit pincode.';
-    }
-  }
-
-  return errors;
-}
+export type { FieldType, FormFieldSpec } from '@/lib/support/request-forms';
 
 /**
  * Shared Owner Centre form.
  *
- * PHASE 1: validation, error handling and the confirmation state are all real,
- * but nothing is transmitted — there is no service desk endpoint yet. The
- * confirmation says so explicitly rather than implying a ticket was raised.
+ * The fields come from `request-forms.ts`, which the server validates against
+ * too, so this checks the same rules before sending and the server has the
+ * final say. On success the customer sees the reference the server issued —
+ * the request is stored and the service inbox has it.
  */
 export function SupportForm({
-  fields,
+  kind,
   submitLabel,
   successTitle,
   successBody,
 }: {
-  fields: FormFieldSpec[];
+  kind: SupportRequestKind;
   submitLabel: string;
   successTitle: string;
   successBody: string;
 }) {
-  const [values, setValues] = React.useState<Values>({});
-  const [errors, setErrors] = React.useState<Errors>({});
-  const [submitted, setSubmitted] = React.useState(false);
+  const fields: FormFieldSpec[] = SUPPORT_FORMS[kind];
+  const [values, setValues] = React.useState<FormValues>({});
+  const [errors, setErrors] = React.useState<FormErrors>({});
+  const [formError, setFormError] = React.useState<string | null>(null);
+  const [reference, setReference] = React.useState<string | null>(null);
+  const [pending, startTransition] = React.useTransition();
+  const [copied, setCopied] = React.useState(false);
   const summaryRef = React.useRef<HTMLDivElement>(null);
 
-  if (submitted) {
+  if (reference) {
     return (
       <div
         ref={summaryRef}
@@ -84,7 +57,30 @@ export function SupportForm({
         </p>
         <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{successBody}</p>
 
-        <dl className="mt-5 space-y-2 rounded-lg border border-border bg-card p-4 text-sm">
+        <div className="mt-5 flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card p-4">
+          <div>
+            <p className="text-xs text-muted-foreground">Your reference</p>
+            <p className="tabular font-display text-xl font-bold tracking-wide text-foreground">
+              {reference}
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-auto"
+            onClick={() => {
+              navigator.clipboard?.writeText(reference).then(
+                () => setCopied(true),
+                () => setCopied(false),
+              );
+            }}
+          >
+            <Copy className="h-4 w-4" />
+            {copied ? 'Copied' : 'Copy'}
+          </Button>
+        </div>
+
+        <dl className="mt-4 space-y-2 rounded-lg border border-border bg-card p-4 text-sm">
           {fields
             .filter((field) => (values[field.name] ?? '').trim())
             .map((field) => (
@@ -95,40 +91,13 @@ export function SupportForm({
             ))}
         </dl>
 
-        <div className="mt-5 rounded-lg border border-border bg-card p-4">
-          <p className="flex items-start gap-2 text-sm font-semibold text-foreground">
-            <Info className="mt-0.5 h-4 w-4 shrink-0 text-accent-600" />
-            Not yet sent to the service desk
-          </p>
-          <p className="mt-1.5 text-sm text-muted-foreground">
-            This is the front-end build — the request has been prepared but not transmitted.
-            Until the service desk integration lands, send these details to us directly and we
-            will raise the request for you.
-          </p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <a
-              href={`mailto:${SITE.email}`}
-              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-sm font-medium text-foreground transition-colors hover:border-accent/50"
-            >
-              <Mail className="h-4 w-4" />
-              {SITE.email}
-            </a>
-            <a
-              href={SITE.phoneHref}
-              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-sm font-medium text-foreground transition-colors hover:border-accent/50"
-            >
-              <Phone className="h-4 w-4" />
-              {SITE.phone}
-            </a>
-          </div>
-        </div>
-
         <Button
           variant="outline"
           className="mt-5"
           onClick={() => {
-            setSubmitted(false);
+            setReference(null);
             setValues({});
+            setCopied(false);
           }}
         >
           Start another request
@@ -137,20 +106,37 @@ export function SupportForm({
     );
   }
 
+  const submit = () => {
+    const found = validateForm(fields, values);
+    setErrors(found);
+    setFormError(null);
+    if (Object.keys(found).length > 0) {
+      document.getElementById(Object.keys(found)[0]!)?.focus();
+      return;
+    }
+
+    startTransition(async () => {
+      try {
+        const result = await submitSupportRequestAction(kind, values);
+        if (result.ok) {
+          setReference(result.reference);
+          window.setTimeout(() => summaryRef.current?.focus(), 40);
+        } else {
+          setErrors(result.fieldErrors ?? {});
+          setFormError(result.message);
+        }
+      } catch {
+        setFormError('We could not reach the server. Please try again.');
+      }
+    });
+  };
+
   return (
     <form
       noValidate
       onSubmit={(event) => {
         event.preventDefault();
-        const found = validate(fields, values);
-        setErrors(found);
-        if (Object.keys(found).length === 0) {
-          setSubmitted(true);
-          window.setTimeout(() => summaryRef.current?.focus(), 40);
-        } else {
-          const firstError = Object.keys(found)[0];
-          document.getElementById(firstError)?.focus();
-        }
+        submit();
       }}
       className="space-y-4"
     >
@@ -199,18 +185,31 @@ export function SupportForm({
                   value={value}
                   onChange={(e) => setValue(e.target.value)}
                   placeholder={field.placeholder}
+                  maxLength={field.maxLength}
                   aria-invalid={Boolean(errors[field.name])}
                 />
               ) : (
                 <Input
                   id={field.name}
                   name={field.name}
-                  type={field.type === 'date' ? 'date' : 'text'}
+                  type={field.type === 'date' ? 'date' : field.type === 'email' ? 'email' : 'text'}
                   inputMode={
                     field.type === 'tel' || field.type === 'pincode' ? 'numeric' : undefined
                   }
+                  autoComplete={
+                    field.name === 'name'
+                      ? 'name'
+                      : field.type === 'tel'
+                        ? 'tel-national'
+                        : field.type === 'email'
+                          ? 'email'
+                          : field.type === 'pincode'
+                            ? 'postal-code'
+                            : undefined
+                  }
                   maxLength={
-                    field.maxLength ?? (field.type === 'tel' ? 10 : field.type === 'pincode' ? 6 : undefined)
+                    field.maxLength ??
+                    (field.type === 'tel' ? 10 : field.type === 'pincode' ? 6 : 200)
                   }
                   value={value}
                   onChange={(e) =>
@@ -230,8 +229,16 @@ export function SupportForm({
         })}
       </div>
 
-      <Button type="submit" variant="accent" size="lg">
-        {submitLabel}
+      {formError ? (
+        <p className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm font-medium text-destructive">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          {formError}
+        </p>
+      ) : null}
+
+      <Button type="submit" variant="accent" size="lg" disabled={pending}>
+        {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+        {pending ? 'Sending…' : submitLabel}
       </Button>
       <p className="text-xs text-muted-foreground">
         We use these details only to handle your request.

@@ -10,7 +10,7 @@
 
 export type Paise = number;
 
-export type CategorySlug = 'inverters' | 'batteries' | 'ups' | 'combos';
+export type CategorySlug = 'inverters' | 'batteries' | 'ups' | 'combos' | 'chargers';
 
 export interface Category {
   slug: CategorySlug;
@@ -21,7 +21,7 @@ export interface Category {
   description: string;
   /** Longer SEO/editorial copy rendered at the foot of the category page. */
   seoCopy: string[];
-  icon: ProductArtKind;
+  icon: CategoryIconKind;
   subcategories: Subcategory[];
   /** Facet ids surfaced for this category, in display order. */
   facetIds: FacetId[];
@@ -37,6 +37,12 @@ export interface Subcategory {
 }
 
 export type ProductArtKind = 'inverter' | 'battery' | 'ups' | 'combo';
+
+/**
+ * A category's icon. Wider than `ProductArtKind` because a charger has an icon
+ * but no illustration set: charger products always carry their own photos.
+ */
+export type CategoryIconKind = ProductArtKind | 'charger';
 
 export type BadgeKind =
   | 'bestseller'

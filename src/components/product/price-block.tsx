@@ -1,5 +1,5 @@
 import type { Paise } from '@/lib/commerce/types';
-import { emiPerMonth, formatPrice } from '@/lib/catalog/pricing';
+import { formatPrice } from '@/lib/catalog/pricing';
 import { cn } from '@/lib/utils';
 
 /**
@@ -35,7 +35,12 @@ export function PriceBlock({
    */
   discountPlacement?: 'inline' | 'below';
   /**
-   * Print the no-cost EMI line.
+   * Print the card-EMI line.
+   *
+   * It names no monthly figure and does not say "no-cost": the business offers
+   * no no-cost EMI online, and the EMI that exists is the payment gateway's,
+   * priced by the card issuer. A per-month amount without the issuer's
+   * interest would be a number nobody actually pays.
    *
    * The caller decides, and only a product that states `emiEnabled` should say
    * yes. This used to be gated additionally on `price >= 500000` — a threshold
@@ -86,8 +91,7 @@ export function PriceBlock({
       ) : null}
       {showEmi ? (
         <p className="mt-1 text-xs text-muted-foreground">
-          Or <span className="tabular font-semibold text-foreground">{formatPrice(emiPerMonth(price, 6))}</span>
-          /month on 6-month no-cost EMI
+          Card EMI available at payment — terms set by your card issuer
         </p>
       ) : null}
     </div>

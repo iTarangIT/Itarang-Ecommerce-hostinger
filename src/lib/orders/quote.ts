@@ -2,7 +2,7 @@ import type { Paise, Product, ProductVariant } from '@/lib/commerce/types';
 import { allProducts } from '@/lib/catalog/collections';
 import { calculateTotals, type CartTotals } from '@/lib/store/totals';
 import type { AppliedCoupon, CartItem } from '@/lib/store/types';
-import { COUPONS_ENABLED, validateCoupon } from '@/lib/offers/coupons';
+import { COUPONS_ENABLED, UPI_DISCOUNT, validateCoupon } from '@/lib/offers/coupons';
 import { activeProviderName } from '@/lib/commerce';
 import {
   PURCHASABLE_PROVIDER,
@@ -10,7 +10,8 @@ import {
   customerMaxQuantity,
   purchaseBlockFor,
 } from '@/lib/commerce/purchase';
-import { checkPincode, type ServiceabilityResult } from '@/lib/support/serviceability';
+import type { ServiceabilityResult } from '@/lib/support/serviceability';
+import { lookupPincode } from '@/lib/support/serviceability-server';
 import { env } from '@/lib/env';
 import type { OrderItem, PaymentMethod } from './types';
 
@@ -55,6 +56,12 @@ export interface QuoteRequest {
   couponCode?: string;
   pincode?: string;
   paymentMethod?: PaymentMethod;
+  /**
+   * The shopper chose to pay by UPI, which earns `UPI_DISCOUNT`. Ignored for
+   * cash on delivery. Trusting the client with it is safe because the payment
+   * window for such an order is opened on UPI alone.
+   */
+  payVia?: 'upi';
 }
 
 export type QuoteIssueCode =
@@ -127,6 +134,7 @@ function toCartItem(product: Product, variant: ProductVariant, quantity: number)
     // below, computed from the real number and never sent.
     maxQuantity: customerMaxQuantity(variant.stock),
     category: product.category,
+    subcategory: product.subcategory,
     installationIncluded: product.installationIncluded,
   };
 }
@@ -268,7 +276,7 @@ export async function buildQuote(request: QuoteRequest): Promise<QuoteResult> {
 
   let serviceability: ServiceabilityResult | null = null;
   if (request.pincode) {
-    const outcome = checkPincode(request.pincode);
+    const outcome = await lookupPincode(request.pincode);
     if ('error' in outcome) {
       issues.push({ code: 'not_serviceable', message: outcome.error });
     } else {
@@ -298,7 +306,8 @@ export async function buildQuote(request: QuoteRequest): Promise<QuoteResult> {
   }
 
   const codFee = wantsCod && codAvailable ? config.COD_FEE_PAISE : 0;
-  const totals = calculateTotals(items, coupon, codFee);
+  const paymentDiscount = request.payVia === 'upi' && !wantsCod ? UPI_DISCOUNT : 0;
+  const totals = calculateTotals(items, coupon, codFee, paymentDiscount);
 
   if (wantsCod && codAvailable && totals.total > config.COD_MAX_ORDER_PAISE) {
     issues.push({
@@ -310,26 +319,12 @@ export async function buildQuote(request: QuoteRequest): Promise<QuoteResult> {
   /**
    * Which issues actually refuse the order.
    *
-   * `not_serviceable` is deliberately **absent**. It is still raised above and
-   * still returned in `issues`, so the checkout can tell a customer that we
-   * cannot confirm delivery to their pincode — it simply no longer stops them
-   * ordering.
-   *
-   * The reason is that nothing behind it is real. `checkPincode` is a
-   * development fixture that decides coverage from the digit sum of the
-   * pincode (`serviceable = checksum % 11 !== 0`), which refuses roughly one
-   * valid Indian pincode in eleven on grounds that have no relationship to
-   * where we actually deliver. A fixture that turns real customers away is
-   * worse than no coverage check at all.
-   *
-   * Put this back the moment `checkPincode` is answered by real coverage data
-   * rather than arithmetic. That is a one-line change, and it is the only
-   * change needed — the issue code, the message and the call site all remain.
-   *
-   * Note this is about *coverage*, not about *data*. A malformed pincode is
-   * still rejected: `pincodeSchema` requires six digits before a quote is ever
-   * built. What stops here is a well-formed pincode being refused as
-   * undeliverable by a fiction.
+   * `not_serviceable` refuses an order only when the coverage list says so —
+   * a pincode we have explicitly switched off. An unlisted pincode is
+   * "unconfirmed", which is reported to the shopper but does not block, and a
+   * malformed one never reaches here (`pincodeSchema` requires six digits).
+   * Before the coverage table this issue never blocked at all, because the
+   * answer came from a checksum of the digits.
    */
   const blocking = new Set<QuoteIssueCode>([
     'not_found',
@@ -338,8 +333,10 @@ export async function buildQuote(request: QuoteRequest): Promise<QuoteResult> {
     'cod_unavailable',
   ]);
 
+  const refusedPincode = serviceability !== null && serviceability.confirmed && !serviceability.serviceable;
+
   const placeable =
-    items.length > 0 && !issues.some((issue) => blocking.has(issue.code));
+    items.length > 0 && !refusedPincode && !issues.some((issue) => blocking.has(issue.code));
 
   return {
     items,

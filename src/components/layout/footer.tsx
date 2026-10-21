@@ -28,7 +28,7 @@ export function Footer() {
   const [email, setEmail] = React.useState('');
 
   return (
-    <footer className="mt-16 border-t border-border bg-ink-900 text-ink-50">
+    <footer className="mt-16 border-t print:hidden border-border bg-ink-900 text-ink-50">
       {/* Support strip */}
       <div className="border-b border-white/10">
         <div className="container grid gap-4 py-6 sm:grid-cols-3">

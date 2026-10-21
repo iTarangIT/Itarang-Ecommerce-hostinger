@@ -1,16 +1,16 @@
-import type { Metadata } from 'next';
-import { Suspense } from 'react';
-import { Calculator } from 'lucide-react';
-import { Breadcrumbs } from '@/components/ui/breadcrumbs';
-import { Skeleton } from '@/components/ui/skeleton';
-import { LoadCalculator } from '@/components/tools/load-calculator';
-import { SupportTeaser } from '@/components/support/support-teaser';
+import type { Metadata } from "next";
+import { Suspense } from "react";
+import { Calculator } from "lucide-react";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { Skeleton } from "@/components/ui/skeleton";
+import { LoadCalculator } from "@/components/tools/load-calculator";
+import { SupportTeaser } from "@/components/support/support-teaser";
 
 export const metadata: Metadata = {
-  title: 'Inverter & battery load calculator',
+  title: "Inverter & battery load calculator",
   description:
-    'Work out the inverter VA and battery Ah your home needs from the appliances you actually run, and see what we stock for it.',
-  alternates: { canonical: '/tools/load-calculator' },
+    "Pick 1 BHK to villa, adjust your appliances and backup hours, and see the battery Ah, kWh and inverter VA your home needs — with the iTarang home battery that fits.",
+  alternates: { canonical: "/tools/load-calculator" },
 };
 
 export default function LoadCalculatorPage() {
@@ -20,9 +20,9 @@ export default function LoadCalculatorPage() {
         <div className="container py-6 sm:py-8">
           <Breadcrumbs
             items={[
-              { label: 'Home', href: '/' },
-              { label: 'Tools', href: '/tools/load-calculator' },
-              { label: 'Load calculator' },
+              { label: "Home", href: "/" },
+              { label: "Tools", href: "/tools/load-calculator" },
+              { label: "Load calculator" },
             ]}
           />
           <div className="mt-4 flex items-start gap-4">
@@ -35,9 +35,12 @@ export default function LoadCalculatorPage() {
                 Size your inverter and battery properly
               </h1>
               <p className="mt-3 max-w-3xl text-pretty text-sm leading-relaxed text-muted-foreground sm:text-base">
-                Tick what you want running during a power cut and how long you need it for. We work
-                out the inverter capacity and battery size, show the arithmetic, and point you at
-                whatever we stock for it. Nothing here needs an email address.
+                Pick your home, adjust the appliances you want running during a
+                power cut, choose how many hours of backup you need and tap{" "}
+                <strong className="text-foreground">Let&rsquo;s plan</strong>.
+                We work out the battery and inverter size, show the arithmetic,
+                and point you at the LiFePO4 home battery we stock for it.
+                Nothing here needs an email address.
               </p>
               {/* Said on the page, not only enforced in the engine.
                   `lib/sizing/recommend.ts` refuses to answer a home load with a
@@ -45,7 +48,8 @@ export default function LoadCalculatorPage() {
                   arriving with an e-rickshaw battery in mind should be told
                   that before they fill in a form, not after. */}
               <p className="mt-2 max-w-3xl text-pretty text-sm leading-relaxed text-muted-foreground">
-                This calculator covers <strong className="text-foreground">home appliances</strong>{' '}
+                This calculator covers{" "}
+                <strong className="text-foreground">home appliances</strong>{" "}
                 only. It does not size electric-vehicle batteries.
               </p>
             </div>

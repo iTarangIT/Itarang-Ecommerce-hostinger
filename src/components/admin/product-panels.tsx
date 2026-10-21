@@ -303,15 +303,11 @@ export function PricingPanel({ product }: { product: ProductRecord }) {
       <label className="mt-5 flex items-start gap-2.5 text-sm">
         <Checkbox name="emiEnabled" defaultChecked={product.emiEnabled} className="mt-0.5" />
         <span>
-          Offer no-cost EMI on this product
+          Show “Card EMI available at payment” on this product
           <span className="block text-xs text-muted-foreground">
-            Ticking this prints{' '}
-            <strong className="font-medium text-foreground">
-              “Or ₹x/month on 6-month no-cost EMI”
-            </strong>{' '}
-            on the product page — a specific financing claim, not a general one. Only tick it
-            where those exact terms have been agreed with a lender. Off by default, and no
-            imported product has it on.
+            Card EMI is offered by Razorpay at the payment step, on the card issuer’s terms. Tick
+            this only once Razorpay EMI is switched on for the live account. It never says
+            “no-cost”.
           </span>
         </span>
       </label>

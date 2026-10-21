@@ -1,5 +1,6 @@
 import { cache } from 'react';
 import { unstable_cache } from 'next/cache';
+import { publishedReviews, ratingSummaries } from '@/lib/reviews/reviews';
 import type {
   CatalogProvider,
   Category,
@@ -39,10 +40,11 @@ import { toDomainProduct } from '@/lib/products/to-domain';
  *   static product page — and it works across processes, which an in-memory
  *   snapshot never could.
  *
- * - **No reviews and no offers.** There is no review capture and no signed
- *   offer terms. Both return empty rather than borrowing the development
- *   fixtures — a real product must not carry an invented rating or an
- *   unagreed discount.
+ * - **Reviews are real or absent.** Ratings and reviews come only from
+ *   published rows in `product_reviews` (`lib/reviews/reviews.ts`), written by
+ *   signed-in customers and moderated. There are no offers rows: coupon codes
+ *   and the UPI discount are applied at checkout, not listed here. Neither ever
+ *   borrows the development fixtures.
  *
  * Categories stay local, as they do for both other providers: they are
  * editorial copy with SEO passages, not backend data.
@@ -88,8 +90,17 @@ function facetIdsForCategory(category: string): FacetId[] {
  */
 const loadPublishedProducts = unstable_cache(
   async (): Promise<Product[]> => {
-    const records = await productRepository().listPublished();
-    return records.map(toDomainProduct);
+    // Ratings are read alongside the products so the snapshot carries them;
+    // `ratingSummaries` fails soft, so a review outage never empties the shop.
+    const [records, ratings] = await Promise.all([
+      productRepository().listPublished(),
+      ratingSummaries(),
+    ]);
+    return records.map((record) => {
+      const product = toDomainProduct(record);
+      const rating = ratings.get(product.id);
+      return rating ? { ...product, rating } : product;
+    });
   },
   ['db-catalogue', 'published'],
   { tags: [CATALOG_TAG] },
@@ -140,8 +151,8 @@ export class DbCatalogProvider implements CatalogProvider {
   }
 
   /** No review capture exists. An empty list, never an invented one. */
-  async getReviews(_productId: string): Promise<Review[]> {
-    return [];
+  async getReviews(productId: string): Promise<Review[]> {
+    return publishedReviews(productId);
   }
 
   async suggest(term: string): Promise<SearchSuggestion[]> {

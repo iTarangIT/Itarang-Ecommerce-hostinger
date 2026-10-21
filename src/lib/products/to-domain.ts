@@ -223,8 +223,8 @@ export function toDomainProduct(record: ProductRecord): Product {
     // stored twice.
     options: [],
     variants: record.variants.map((variant) => toVariant(variant, record.productKey)),
-    // No review system exists, so no product has a rating. `null`, never a
-    // fabricated average — the same position `hostinger-provider.ts` takes.
+    // `null` here; `db-provider.ts` attaches the rating from published reviews.
+    // Never a fabricated average.
     rating: null,
     facets: facetsOf(record),
     frequentlyBoughtWith: [],

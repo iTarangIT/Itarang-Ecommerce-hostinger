@@ -47,14 +47,17 @@ export interface NavGroup {
  */
 export const UTILITY_LINKS: NavChild[] = [
   { label: 'Track order', href: '/track' },
+  { label: 'Find a dealer', href: '/support/dealers' },
+  { label: 'Check price', href: '/pricing' },
   { label: 'Support', href: '/support' },
-  { label: 'Load calculator', href: '/tools/load-calculator' },
 ];
 
 export const SECONDARY_NAV: NavChild[] = [
   { label: 'All products', href: '/products' },
   { label: 'Offers', href: '/offers' },
+  // Short labels: this row shares the header with the category menus.
   { label: 'Load calculator', href: '/tools/load-calculator' },
+  { label: 'EV calculator', href: '/tools/mobility-calculator' },
   { label: 'Support', href: '/support' },
 ];
 
@@ -67,44 +70,50 @@ export const FOOTER_COLUMNS: NavGroup[] = [
       // gone from the taxonomy — a footer link is still a link, and these four
       // led to empty category pages. The subcategory links below are what the
       // business actually sells.
-      { label: 'Batteries', href: categoryPath('batteries') },
-      { label: 'Lithium batteries', href: subcategoryPath('batteries', 'lithium') },
-      { label: '2-wheeler EV batteries', href: subcategoryPath('batteries', 'ev-2-wheeler') },
       {
         label: '3-wheeler & e-rickshaw batteries',
         href: subcategoryPath('batteries', 'ev-3-wheeler'),
       },
+      { label: '2-wheeler EV batteries', href: subcategoryPath('batteries', 'ev-2-wheeler') },
+      { label: 'Home inverter batteries', href: subcategoryPath('batteries', 'home-inverter') },
+      { label: 'ESS', href: subcategoryPath('batteries', 'ess') },
+      { label: 'Chargers', href: categoryPath('chargers') },
+      { label: 'Check price', href: '/pricing' },
       { label: 'Offers', href: '/offers' },
       { label: 'Compare products', href: '/compare' },
     ],
   },
   {
-    // Reduced to complaint registration only. Warranty registration,
-    // installation booking, technician lookup and order tracking have been
-    // withdrawn from the after-sales navigation; their routes still exist and
-    // still work when visited directly.
     label: 'Owner centre',
     href: '/support',
-    children: [{ label: 'Register a complaint', href: '/support/complaint' }],
+    children: [
+      { label: 'Register a complaint', href: '/support/complaint' },
+      { label: 'Register your warranty', href: '/support/warranty-registration' },
+      { label: 'Find a dealer', href: '/support/dealers' },
+      { label: 'Track your order', href: '/track' },
+    ],
   },
   {
-    label: 'Help',
+    label: 'Help & tools',
     href: '/support',
     children: [
       { label: 'Support hub', href: '/support' },
       { label: 'Frequently asked questions', href: '/support/faq' },
-      { label: 'Load calculator', href: '/tools/load-calculator' },
-      { label: 'Your account', href: '/account' },
-      { label: 'Delivery & installation', href: '/support/faq#delivery' },
+      { label: 'Home load calculator', href: '/tools/load-calculator' },
+      { label: 'EV battery calculator', href: '/tools/mobility-calculator' },
+      { label: 'Brochures & spec sheets', href: '/downloads' },
+      { label: 'Blog', href: '/blog' },
     ],
   },
 ];
 
 export const POLICY_LINKS: NavChild[] = [
+  { label: 'Refund & returns', href: '/policies/refund' },
+  { label: 'Payment failure', href: '/policies/payment-failure' },
   { label: 'Warranty terms', href: '/support/faq#warranty' },
-  { label: 'Returns & replacement', href: '/support/faq#returns' },
   { label: 'Delivery information', href: '/support/faq#delivery' },
   { label: 'Offer terms', href: '/offers#terms' },
+  { label: 'Grievance officer', href: '/support/grievance' },
 ];
 
 export interface TrustItem {

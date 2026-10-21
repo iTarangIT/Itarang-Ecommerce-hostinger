@@ -35,6 +35,7 @@ export interface PlaceOrderInput {
   couponCode?: string;
   gstin?: string;
   paymentMethod: PaymentMethod;
+  payVia?: 'upi';
   idempotencyKey?: string;
   /** What the browser displayed, in paise. Advisory — see `placeOrder`. */
   expectedTotal?: number;
@@ -68,6 +69,7 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
     couponCode: input.couponCode,
     pincode: input.address.pincode,
     paymentMethod: input.paymentMethod,
+    payVia: input.payVia,
   });
 
   if (!quote.placeable) {
@@ -190,6 +192,7 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
       productSavings: quote.totals.productSavings,
       couponCode: quote.coupon?.code,
       couponDiscount: quote.totals.couponDiscount,
+      paymentDiscount: quote.totals.paymentDiscount,
       shipping: quote.totals.shipping,
       codFee: quote.totals.codFee,
       total: quote.totals.total,

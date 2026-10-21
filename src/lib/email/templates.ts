@@ -288,6 +288,100 @@ export function backInStockMessage(to: string, product: BackInStockProduct): Mai
 }
 
 /**
+ * Confirmation to a customer who filed a complaint, registered a warranty or
+ * booked an installation. It repeats the reference, because the reference is
+ * the one thing they need on the follow-up call.
+ */
+export function supportRequestReceivedMessage(
+  to: string,
+  details: { name: string; reference: string; kindLabel: string },
+): Mail {
+  const href = `${env().NEXT_PUBLIC_SITE_URL.replace(/\/$/, '')}/support`;
+  const firstName = details.name.split(/\s+/)[0] || 'there';
+  const what = details.kindLabel.toLowerCase();
+
+  return {
+    to,
+    subject: `${details.kindLabel} received — reference ${details.reference}`,
+    text: [
+      `Hi ${firstName},`,
+      '',
+      `We have received your ${what}. Your reference is ${details.reference}.`,
+      'Quote it when you call or write to us. Our team will contact you within one working day.',
+      '',
+      href,
+    ].join('\n'),
+    html: wrap(
+      `We have your ${what}`,
+      `Hi ${escapeHtml(firstName)}, your reference is <strong>${escapeHtml(details.reference)}</strong>. Quote it when you call or write to us. Our team will contact you within one working day.`,
+      { label: 'Support centre', href },
+    ),
+  };
+}
+
+/** The same request, to the service inbox, with every field the customer gave. */
+export function supportRequestAlertMessage(
+  to: string,
+  details: { reference: string; kindLabel: string; fields: Array<[string, string]> },
+): Mail {
+  const href = `${env().NEXT_PUBLIC_SITE_URL.replace(/\/$/, '')}/admin/support`;
+  const lines = details.fields.map(([label, value]) => `${label}: ${value}`);
+  const rows = details.fields
+    .map(
+      ([label, value]) =>
+        `<tr><td style="padding:4px 12px 4px 0;color:#666;vertical-align:top">${escapeHtml(label)}</td><td style="padding:4px 0">${escapeHtml(value)}</td></tr>`,
+    )
+    .join('');
+
+  return {
+    to,
+    subject: `New ${details.kindLabel.toLowerCase()}: ${details.reference}`,
+    text: [`${details.kindLabel} ${details.reference}`, '', ...lines, '', href].join('\n'),
+    html: wrap(
+      `New ${details.kindLabel.toLowerCase()} — ${details.reference}`,
+      'Open the support queue to update its status.',
+      { label: 'Open the support queue', href },
+      `<table style="font-size:14px;margin:0 0 16px;border-collapse:collapse">${rows}</table>`,
+    ),
+  };
+}
+
+/**
+ * The apology the business asked for when an order cannot be fulfilled from
+ * stock: "we are sorry we were unable to fulfil your order; we will fulfil it at
+ * the earliest". Sent by an admin from the order page, never automatically —
+ * someone has to have decided the order is delayed before the customer is told.
+ */
+export function stockDelayMessage(
+  to: string,
+  details: { name: string; orderNumber: string; items: string[]; path: string },
+): Mail {
+  const href = `${env().NEXT_PUBLIC_SITE_URL.replace(/\/$/, '')}${details.path}`;
+  const firstName = details.name.split(/\s+/)[0] || 'there';
+  const items = details.items.join(', ');
+
+  return {
+    to,
+    subject: `Your order ${details.orderNumber} is delayed — we are sorry`,
+    text: [
+      `Hi ${firstName},`,
+      '',
+      `We are sorry — we were unable to fulfil your order ${details.orderNumber} (${items}) on time, because it is out of stock.`,
+      'We will fulfil it at the earliest and tell you as soon as it is on its way.',
+      '',
+      'If you would rather not wait, reply to this email or call us and we will cancel the order and refund you in full.',
+      '',
+      href,
+    ].join('\n'),
+    html: wrap(
+      'We are sorry — your order is delayed',
+      `Hi ${escapeHtml(firstName)}, we were unable to fulfil your order <strong>${escapeHtml(details.orderNumber)}</strong> (${escapeHtml(items)}) on time, because it is out of stock. We will fulfil it at the earliest and tell you as soon as it is on its way. If you would rather not wait, reply to this email or call us and we will cancel the order and refund you in full.`,
+      { label: 'View your order', href },
+    ),
+  };
+}
+
+/**
  * The internal alert, sent to the business when a variant sells out.
  *
  * Goes to `STOCK_ALERT_EMAIL`, once per transition. It carries no customer

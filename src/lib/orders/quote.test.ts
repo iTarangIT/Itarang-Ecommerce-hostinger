@@ -1,11 +1,7 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { calculateTotals } from '@/lib/store/totals';
 import type { CartItem } from '@/lib/store/types';
-import {
-  COUPONS_DISABLED_NOTE,
-  COUPONS_ENABLED,
-  validateCoupon,
-} from '@/lib/offers/coupons';
+import { COUPONS, COUPONS_ENABLED, UPI_DISCOUNT, validateCoupon } from '@/lib/offers/coupons';
 
 /**
  * Pricing rules.
@@ -119,76 +115,104 @@ describe('totals', () => {
 });
 
 /**
- * The master switch, which is currently off.
+ * The master switch, which is on with the business's two codes.
  *
- * Asserted rather than assumed, and asserted here rather than in a file of its
- * own, because everything below reads differently depending on it: with coupons
- * disabled the only correct answer to any code is "no".
+ * Asserted rather than assumed: turning it off again is a deliberate act, and
+ * this test failing is how somebody learns they have made one.
  */
 describe('the coupon master switch', () => {
-  const cart = [item({ category: 'combos', price: { mrp: 2500000, selling: 2100000 } })];
-
-  it('is off, and refuses every code while it is', () => {
-    // Turning it on is a deliberate act, and this test failing is how somebody
-    // learns they have made one.
-    expect(COUPONS_ENABLED).toBe(false);
-    expect(validateCoupon('COMBO1500', cart)).toEqual({
-      ok: false,
-      reason: COUPONS_DISABLED_NOTE,
-    });
-  });
-
-  it('refuses before looking the code up, so a disabled build is no oracle', () => {
-    // A real code and an invented one must be indistinguishable from outside;
-    // otherwise the switch leaks which codes exist. Same answer, same sentence.
-    expect(validateCoupon('COMBO1500', cart)).toEqual(validateCoupon('NOPE', cart));
-  });
-
-  it('refuses an empty code with the same sentence, not "enter a code"', () => {
-    // Prompting for input the field will not accept would be worse than useless.
-    expect(validateCoupon('', cart).ok).toBe(false);
+  it('is on, and carries exactly the two WELCOME codes', () => {
+    expect(COUPONS_ENABLED).toBe(true);
+    expect(COUPONS.map((rule) => rule.code).sort()).toEqual(['WELCOME1000', 'WELCOME2000']);
   });
 });
 
 /**
- * The rules behind the switch, which must survive being switched off.
- *
- * Skipped rather than deleted while `COUPONS_ENABLED` is false: the business has
- * not withdrawn the feature, it has not signed off on what the codes are worth,
- * and a rule with no test is a rule that quietly rots. Flip the constant and
- * every assertion here runs again.
+ * The rules behind the codes. Each is scoped to one subcategory, so the tests
+ * use the subcategories the business named: home inverter batteries for
+ * WELCOME1000, 3-wheeler batteries for WELCOME2000.
  */
-describe.skipIf(!COUPONS_ENABLED)('coupon rules are enforced server-side', () => {
-  let cart: CartItem[];
-
-  beforeEach(() => {
-    cart = [item({ category: 'combos', price: { mrp: 2500000, selling: 2100000 } })];
+describe('coupon rules are enforced server-side', () => {
+  const homeBattery = item({
+    category: 'batteries',
+    subcategory: 'home-inverter',
+    price: { mrp: 3500000, selling: 3000000 },
+  });
+  const rickshawBattery = item({
+    category: 'batteries',
+    subcategory: 'ev-3-wheeler',
+    price: { mrp: 9000000, selling: 8500000 },
+  });
+  const scooterBattery = item({
+    category: 'batteries',
+    subcategory: 'ev-2-wheeler',
+    price: { mrp: 4500000, selling: 4100000 },
   });
 
-  it('accepts a valid category-scoped coupon', () => {
-    const result = validateCoupon('COMBO1500', cart);
+  it('WELCOME1000 takes ₹1,000 off a cart with a home inverter battery', () => {
+    const result = validateCoupon('WELCOME1000', [homeBattery]);
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.coupon.discount).toBe(150000);
+    if (result.ok) expect(result.coupon.discount).toBe(100000);
   });
 
-  it('rejects a coupon for the wrong category', () => {
-    const result = validateCoupon('COMBO1500', [item({ category: 'inverters' })]);
-    expect(result.ok).toBe(false);
+  it('WELCOME2000 takes ₹2,000 off a cart with a 3-wheeler battery', () => {
+    const result = validateCoupon('WELCOME2000', [rickshawBattery]);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.coupon.discount).toBe(200000);
   });
 
-  it('rejects a coupon below its minimum cart value', () => {
-    const result = validateCoupon('COMBO1500', [
-      item({ category: 'combos', price: { mrp: 100000, selling: 90000 } }),
-    ]);
-    expect(result.ok).toBe(false);
+  it('refuses each code on the other line, and on 2-wheeler packs', () => {
+    expect(validateCoupon('WELCOME1000', [rickshawBattery]).ok).toBe(false);
+    expect(validateCoupon('WELCOME2000', [homeBattery]).ok).toBe(false);
+    expect(validateCoupon('WELCOME1000', [scooterBattery]).ok).toBe(false);
+    expect(validateCoupon('WELCOME2000', [scooterBattery]).ok).toBe(false);
+  });
+
+  it('applies to a mixed cart that contains a qualifying product', () => {
+    expect(validateCoupon('WELCOME2000', [scooterBattery, rickshawBattery]).ok).toBe(true);
+  });
+
+  it('refuses a line whose subcategory is unknown — an old saved cart', () => {
+    const legacy = item({ category: 'batteries', subcategory: undefined });
+    expect(validateCoupon('WELCOME1000', [legacy]).ok).toBe(false);
   });
 
   it('rejects an unknown code and an empty cart', () => {
-    expect(validateCoupon('NOPE', cart).ok).toBe(false);
-    expect(validateCoupon('COMBO1500', []).ok).toBe(false);
+    expect(validateCoupon('NOPE', [homeBattery]).ok).toBe(false);
+    expect(validateCoupon('WELCOME1000', []).ok).toBe(false);
   });
 
   it('is case-insensitive and trims input', () => {
-    expect(validateCoupon('  combo1500 ', cart).ok).toBe(true);
+    expect(validateCoupon('  welcome1000 ', [homeBattery]).ok).toBe(true);
+  });
+
+  it('is one use per customer, enforced at order placement', () => {
+    for (const rule of COUPONS) expect(rule.oncePerCustomer).toBe(true);
+  });
+});
+
+describe('the UPI discount', () => {
+  it('is ₹200', () => {
+    expect(UPI_DISCOUNT).toBe(20000);
+  });
+
+  it('comes off the total after the coupon, and counts as a saving', () => {
+    const cart = [item({ price: { mrp: 3500000, selling: 3000000 } })];
+    const coupon = { code: 'WELCOME1000', label: 'x', discount: 100000 };
+    const totals = calculateTotals(cart, coupon, 0, UPI_DISCOUNT);
+    expect(totals.couponDiscount).toBe(100000);
+    expect(totals.paymentDiscount).toBe(20000);
+    expect(totals.total).toBe(3000000 - 100000 - 20000);
+    expect(totals.totalSavings).toBe(500000 + 100000 + 20000);
+  });
+
+  it('never takes the total below the delivery charge on a tiny cart', () => {
+    const totals = calculateTotals([item({ price: { mrp: 10000, selling: 10000 } })], null, 0, 20000);
+    expect(totals.paymentDiscount).toBe(10000);
+    expect(totals.total).toBe(totals.shipping);
+  });
+
+  it('is zero on an empty cart', () => {
+    expect(calculateTotals([], null, 0, UPI_DISCOUNT).paymentDiscount).toBe(0);
   });
 });

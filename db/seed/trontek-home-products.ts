@@ -25,7 +25,7 @@ export const TRONTEK_HOME_PRODUCTS: ProductSeed[] = [
     productType: null,
     netQuantity: '1 Count',
     category: 'batteries',
-    subcategory: 'lithium',
+    subcategory: 'home-inverter',
     art: 'battery',
     countryOfOrigin: 'India',
     description: [
@@ -238,7 +238,7 @@ export const TRONTEK_HOME_PRODUCTS: ProductSeed[] = [
     genericName: 'Lithium Iron Phosphate inverter / home energy storage battery',
     netQuantity: '1 Count',
     category: 'batteries',
-    subcategory: 'lithium',
+    subcategory: 'home-inverter',
     art: 'battery',
     countryOfOrigin: 'India',
     description: [

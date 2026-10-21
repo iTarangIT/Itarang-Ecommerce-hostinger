@@ -154,6 +154,11 @@ const schema = z
      * `app_settings`, which an administrator controls from the console.
      */
     STOCK_ALERT_EMAIL: z.string().email().default('anirudh@itarang.com'),
+    /**
+     * Where new complaints, warranty registrations and installation bookings
+     * are sent. Defaults to the customer-care address the site publishes.
+     */
+    SUPPORT_INBOX_EMAIL: z.string().email().default('care@itarang.com'),
   })
   .superRefine((value, ctx) => {
     if (value.COMMERCE_PROVIDER === 'hostinger' && !value.HOSTINGER_SALES_CHANNEL_ID) {
@@ -327,6 +332,7 @@ export function env(): Env {
     SELLER_GSTIN: process.env.SELLER_GSTIN,
     SELLER_STATE_CODE: process.env.SELLER_STATE_CODE,
     STOCK_ALERT_EMAIL: blank(process.env.STOCK_ALERT_EMAIL),
+    SUPPORT_INBOX_EMAIL: blank(process.env.SUPPORT_INBOX_EMAIL),
   });
 
   if (!parsed.success) {

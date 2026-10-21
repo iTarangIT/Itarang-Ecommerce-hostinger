@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ArrowLeft, FlaskConical } from 'lucide-react';
-import { updateOrderStatusAction } from '@/lib/admin/actions';
+import { notifyStockDelayAction, updateOrderStatusAction } from '@/lib/admin/actions';
 import { orders } from '@/lib/orders/postgres-repository';
 import { nextOrderStatuses } from '@/lib/orders/state-machine';
 import { normaliseOrderNumber } from '@/lib/orders/numbering';
@@ -20,10 +20,13 @@ export const metadata: Metadata = {
 
 export default async function AdminOrderDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ orderNumber: string }>;
+  searchParams: Promise<{ notice?: string }>;
 }) {
   const { orderNumber } = await params;
+  const { notice } = await searchParams;
   const repository = orders();
   const order = await repository.findByOrderNumber(normaliseOrderNumber(orderNumber));
   if (!order) notFound();
@@ -58,6 +61,11 @@ export default async function AdminOrderDetailPage({
         ) : null}
       </div>
       <p className="mt-1 text-sm text-muted-foreground">Placed {formatDate(order.createdAt)}</p>
+      {notice ? (
+        <p className="mt-4 rounded-lg border border-border bg-surface p-3 text-sm font-medium text-foreground">
+          {notice}
+        </p>
+      ) : null}
 
       <div className="mt-6 grid gap-6 lg:grid-cols-12">
         <div className="space-y-6 lg:col-span-8">
@@ -97,6 +105,9 @@ export default async function AdminOrderDetailPage({
                 <Row label={`Coupon ${order.amounts.couponCode ?? ''}`}>
                   −{formatPrice(order.amounts.couponDiscount)}
                 </Row>
+              ) : null}
+              {order.amounts.paymentDiscount > 0 ? (
+                <Row label="UPI discount">−{formatPrice(order.amounts.paymentDiscount)}</Row>
               ) : null}
               <Row label="Delivery">{formatPrice(order.amounts.shipping)}</Row>
               {order.amounts.codFee > 0 ? (
@@ -197,6 +208,23 @@ export default async function AdminOrderDetailPage({
               </form>
             )}
           </section>
+
+          {/* The apology the business asked for when stock runs out. */}
+          {order.status === 'confirmed' || order.status === 'packed' ? (
+            <section className="rounded-lg border border-border bg-card p-4">
+              <h2 className="font-display text-sm font-semibold">Out of stock?</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Emails the customer that we are sorry we could not fulfil the order on time and will
+                fulfil it at the earliest. The order status does not change.
+              </p>
+              <form action={notifyStockDelayAction} className="mt-3">
+                <input type="hidden" name="orderNumber" value={order.orderNumber} />
+                <Button type="submit" variant="outline" fullWidth disabled={!order.contact.email}>
+                  Send delay apology
+                </Button>
+              </form>
+            </section>
+          ) : null}
 
           {/* Customer */}
           <section className="rounded-lg border border-border bg-card p-4 text-sm">

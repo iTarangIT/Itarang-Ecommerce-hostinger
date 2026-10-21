@@ -43,6 +43,7 @@ function orderFixture(total: number, suffix: string): Order {
       subtotal: total,
       productSavings: 0,
       couponDiscount: 0,
+      paymentDiscount: 0,
       shipping: 0,
       codFee: 0,
       total,

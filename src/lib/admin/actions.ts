@@ -10,6 +10,8 @@ import { resolveCatalogueAlert, syncCatalogue } from '@/lib/commerce/catalogue-s
 import { drainInventoryQueue } from '@/lib/orders/inventory-push';
 import { canTransitionOrder } from '@/lib/orders/state-machine';
 import type { OrderStatus } from '@/lib/orders/types';
+import { sendMail } from '@/lib/email/mailer';
+import { stockDelayMessage } from '@/lib/email/templates';
 
 /**
  * Admin order actions.
@@ -55,6 +57,45 @@ export async function updateOrderStatusAction(formData: FormData): Promise<void>
 
   revalidatePath('/admin');
   revalidatePath(`/admin/orders/${orderNumber}`);
+}
+
+/**
+ * Tell the customer their order is delayed because it is out of stock.
+ *
+ * The business asked for this apology whenever an order cannot be fulfilled
+ * from stock. It changes nothing about the order — the status stays where it
+ * is — and is recorded in the order history so nobody sends it twice without
+ * seeing that it was sent. Only for confirmed, not-yet-shipped orders: before
+ * payment there is nothing to fulfil, and after dispatch there is no delay.
+ */
+export async function notifyStockDelayAction(formData: FormData): Promise<void> {
+  const actor = await requireAdminActor();
+  const orderNumber = String(formData.get('orderNumber') ?? '');
+  const back = `/admin/orders/${orderNumber}`;
+
+  const repository = orders();
+  const order = await repository.findByOrderNumber(orderNumber);
+  if (!order) return;
+
+  if (order.status !== 'confirmed' && order.status !== 'packed') {
+    redirect(`${back}?notice=${encodeURIComponent('Only a confirmed order that has not shipped can be delayed.')}`);
+  }
+  if (!order.contact.email) {
+    redirect(`${back}?notice=${encodeURIComponent('This order has no email address. Call the customer instead.')}`);
+  }
+
+  await sendMail(
+    stockDelayMessage(order.contact.email, {
+      name: order.contact.name,
+      orderNumber: order.orderNumber,
+      items: order.items.map((item) => item.title),
+      path: `/order/${order.orderNumber}`,
+    }),
+  );
+  await repository.addOrderNote(order.id, actor, 'Customer emailed: order delayed, out of stock.');
+
+  revalidatePath(back);
+  redirect(`${back}?notice=${encodeURIComponent('Delay email sent to the customer.')}`);
 }
 
 /**

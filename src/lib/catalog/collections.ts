@@ -1,5 +1,6 @@
 import { cache } from 'react';
 import { catalog } from '@/lib/commerce';
+import { featuredPublishedReviews } from '@/lib/reviews/reviews';
 import { REVIEWS } from '@/lib/commerce/mock/reviews';
 import { toProductSummary, type ProductSummary } from '@/lib/commerce/summary';
 import type { CategorySlug, Product, ProductQuery, Review } from '@/lib/commerce/types';
@@ -109,6 +110,7 @@ export async function productsBySlugs(slugs: string[]): Promise<ProductSummary[]
  * products, so this returns nothing instead and the section renders empty.
  */
 export async function featuredReviews(limit = 6): Promise<Review[]> {
+  if (catalog().name === 'db') return featuredPublishedReviews(limit);
   if (catalog().name !== 'mock') return [];
   return [...REVIEWS]
     .filter((r) => r.rating >= 4 && r.body.length > 90)
