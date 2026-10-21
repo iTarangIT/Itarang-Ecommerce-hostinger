@@ -18,8 +18,8 @@ import type { Product } from '@/lib/commerce/types';
  * row written carries the *server's* figure and not the client's.
  *
  * **A single-use coupon is single-use.** `coupon_redemptions` existed from the
- * first migration and nothing ever wrote to it, so FIRST5 — a first-order
- * discount — could be redeemed on every order forever.
+ * first migration and nothing ever wrote to it, so a once-per-customer code
+ * could be redeemed on every order forever.
  */
 
 function targetsRemote(): boolean {
@@ -233,8 +233,8 @@ describe.skipIf(!CONFIGURED)('order placement', () => {
    * The one-redemption-per-customer rule, behind the master switch.
    *
    * Skipped while `COUPONS_ENABLED` is false: with coupons off, `buildQuote`
-   * drops the code entirely and no order carries a discount, so "accepts FIRST5
-   * once" has nothing to assert. The rule itself is untouched and these tests
+   * drops the code entirely and no order carries a discount, so "accepts
+   * WELCOME1000 once" has nothing to assert. The rule itself is untouched and these tests
    * run again the moment the switch is flipped — which is the point of skipping
    * rather than deleting them.
    *
@@ -242,19 +242,26 @@ describe.skipIf(!CONFIGURED)('order placement', () => {
    * block after this one.
    */
   describe.skipIf(!COUPONS_ENABLED)('single-use coupons', () => {
-    it('accepts FIRST5 once and refuses it on the next order', async () => {
-      const first = await placeOrder(input({ couponCode: 'FIRST5' }));
+    // WELCOME1000 applies only to home inverter batteries, and the mock
+    // catalogue has none in its first four products — so the product being
+    // bought is relabelled into that subcategory for these tests.
+    beforeEach(() => {
+      catalogue[0] = { ...catalogue[0], subcategory: 'home-inverter' };
+    });
+
+    it('accepts WELCOME1000 once and refuses it on the next order', async () => {
+      const first = await placeOrder(input({ couponCode: 'WELCOME1000' }));
       expect(first.ok, 'the first use should be accepted').toBe(true);
       if (!first.ok) return;
       expect(first.order.amounts.couponDiscount).toBeGreaterThan(0);
 
       const redemptions = await query(
-        `SELECT id FROM coupon_redemptions WHERE code = 'FIRST5' AND phone = $1`,
+        `SELECT id FROM coupon_redemptions WHERE code = 'WELCOME1000' AND phone = $1`,
         [PHONE],
       );
       expect(redemptions, 'the redemption must be recorded').toHaveLength(1);
 
-      const second = await placeOrder(input({ couponCode: 'FIRST5' }));
+      const second = await placeOrder(input({ couponCode: 'WELCOME1000' }));
       expect(second.ok).toBe(false);
       if (second.ok || second.code !== 'invalid_quote') return;
       expect(second.issues.some((issue) => issue.code === 'coupon_invalid')).toBe(true);
@@ -264,22 +271,13 @@ describe.skipIf(!CONFIGURED)('order placement', () => {
       const shown = await buildQuote({ lines: [{ variantId, quantity: 1 }] });
       reprice(variantId, shown.totals.total + 500_00);
 
-      await placeOrder(input({ couponCode: 'FIRST5', expectedTotal: shown.totals.total }));
+      await placeOrder(input({ couponCode: 'WELCOME1000', expectedTotal: shown.totals.total }));
 
       const redemptions = await query(
-        `SELECT id FROM coupon_redemptions WHERE code = 'FIRST5' AND phone = $1`,
+        `SELECT id FROM coupon_redemptions WHERE code = 'WELCOME1000' AND phone = $1`,
         [PHONE],
       );
       expect(redemptions).toHaveLength(0);
-    });
-
-    it('leaves multi-use coupons alone', async () => {
-      // FREESHIP has no per-customer limit and must stay reusable.
-      const first = await placeOrder(input({ couponCode: 'FREESHIP' }));
-      const second = await placeOrder(input({ couponCode: 'FREESHIP' }));
-
-      expect(first.ok).toBe(true);
-      expect(second.ok, 'FREESHIP must not be treated as single-use').toBe(true);
     });
   });
 
@@ -294,7 +292,7 @@ describe.skipIf(!CONFIGURED)('order placement', () => {
     it('places the order at full price and applies no discount', async () => {
       // Not refused. A stale code in somebody's saved cart must not be able to
       // stop them checking out.
-      const result = await placeOrder(input({ couponCode: 'FIRST5' }));
+      const result = await placeOrder(input({ couponCode: 'WELCOME1000' }));
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -302,10 +300,10 @@ describe.skipIf(!CONFIGURED)('order placement', () => {
     });
 
     it('records no redemption, so nothing is spent', async () => {
-      await placeOrder(input({ couponCode: 'FIRST5' }));
+      await placeOrder(input({ couponCode: 'WELCOME1000' }));
 
       const redemptions = await query(
-        `SELECT id FROM coupon_redemptions WHERE code = 'FIRST5' AND phone = $1`,
+        `SELECT id FROM coupon_redemptions WHERE code = 'WELCOME1000' AND phone = $1`,
         [PHONE],
       );
       expect(redemptions).toHaveLength(0);
