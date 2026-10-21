@@ -58,8 +58,6 @@ function getTransport(): Transporter | null {
 }
 
 export async function sendMail(mail: Mail): Promise<void> {
-  const config = env();
-
   if (!mailerIsLive()) {
     // Subject and recipient only — the body of a verification mail contains a
     // live single-use token, which has no business in a log file.
@@ -68,18 +66,32 @@ export async function sendMail(mail: Mail): Promise<void> {
   }
 
   try {
-    await getTransport()!.sendMail({
-      from: config.EMAIL_FROM,
-      to: mail.to,
-      subject: mail.subject,
-      text: mail.text,
-      html: mail.html,
-    });
+    await deliverMail(mail);
   } catch (error) {
     // Never rethrow: the account was created, the reset was requested. Losing
     // the mail is recoverable by the user; losing the action is not.
     console.error(`[email] delivery failed to=${mail.to}: ${(error as Error).message}`);
   }
+}
+
+/**
+ * Hand a message to SMTP and throw if the server refuses it.
+ *
+ * For callers whose whole purpose is the mail — a sign-in code nobody receives
+ * is a dead end, so that path must learn about a rejected login or relay
+ * instead of being told it worked. Callers check `mailerIsLive()` first.
+ */
+export async function deliverMail(mail: Mail): Promise<void> {
+  const transporter = getTransport();
+  if (!transporter) throw new Error('SMTP is not configured.');
+
+  await transporter.sendMail({
+    from: env().EMAIL_FROM,
+    to: mail.to,
+    subject: mail.subject,
+    text: mail.text,
+    html: mail.html,
+  });
 }
 
 /** Test seam — drops the memoised transport so env changes take effect. */
