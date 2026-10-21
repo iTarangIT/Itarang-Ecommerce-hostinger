@@ -13,25 +13,20 @@ export const metadata: Metadata = {
 };
 
 /**
- * Signing up is signing in.
+ * Create an account: the sign-up door.
  *
- * There is no separate registration any more. A code is emailed to the address
- * whether or not it has an account, and the account is created when the code
- * comes back proved — so this page renders the same form as `/login` with
- * copy aimed at someone new, and the route is kept because links to it exist.
+ * The same emailed-code form as `/login`, with `intent="signup"`. The account
+ * is created when the code comes back proved. An address that already has an
+ * account is sent back to `/login` without a code — see `otp-actions.ts` for
+ * why that answer is given.
  *
- * That is also what removes account enumeration from this surface entirely.
- * The old registration form had to be careful never to admit "that address is
- * taken"; here the question has no observable answer, because both cases do
- * the same thing.
- *
- * The password registration form it used to render is gone, and
+ * The password registration form this page used to render is gone, and
  * `registerAction` refuses on the server. Customers authenticate by code.
  */
 export default async function RegisterPage({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string }>;
+  searchParams: Promise<{ next?: string; email?: string }>;
 }) {
   const params = await searchParams;
   // The shared, unit-tested rule. See `lib/auth/redirects.ts`.
@@ -49,7 +44,12 @@ export default async function RegisterPage({
         </p>
 
         <div className="mt-6 rounded-xl border border-border bg-card p-6">
-          <OtpSignInForm next={next} ctaLabel="Email me a code" />
+          <OtpSignInForm
+            next={next}
+            intent="signup"
+            defaultEmail={params.email ?? ''}
+            ctaLabel="Email me a code"
+          />
         </div>
 
         <p className="mt-6 text-center text-sm text-muted-foreground">
@@ -59,8 +59,7 @@ export default async function RegisterPage({
             className="font-medium text-foreground underline underline-offset-2"
           >
             Sign in
-          </Link>{' '}
-          — it is the same step.
+          </Link>
         </p>
       </div>
     </div>
