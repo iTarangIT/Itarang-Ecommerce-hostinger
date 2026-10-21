@@ -17,6 +17,7 @@ export default async function LoginPage({
 }: {
   searchParams: Promise<{
     next?: string;
+    email?: string;
     registered?: string;
     reset?: string;
     signedout?: string;
@@ -38,12 +39,8 @@ export default async function LoginPage({
     <div className="container flex min-h-[60vh] items-center justify-center py-12">
       <div className="w-full max-w-sm">
         <h1 className="heading-2 text-center">Sign in</h1>
-        {/* Says what an account does today. It used to promise saved addresses
-            and faster checkout; there is no address book yet, so that was a
-            claim the account could not keep. */}
         <p className="mt-2 text-center text-sm text-muted-foreground">
-          Enter your email and we will send you a code. New here? The same step
-          creates your account.
+          Enter the email you signed up with and we will send you a code.
         </p>
 
         {params.registered ? (
@@ -84,17 +81,20 @@ export default async function LoginPage({
         ) : null}
 
         <div className="mt-6 rounded-xl border border-border bg-card p-6">
-          <OtpSignInForm next={next} />
+          <OtpSignInForm next={next} intent="login" defaultEmail={params.email ?? ''} />
         </div>
 
-        {/*
-          No "create an account" link any more, and its absence is the feature.
-          Signing in and signing up are the same act: the code is sent to the
-          address whether or not it has an account, and the account is created
-          when the code comes back. Offering two doors to one room would only
-          make a visitor wonder which of them they are behind.
-        */}
         <p className="mt-6 text-center text-sm text-muted-foreground">
+          New to iTarang?{' '}
+          <Link
+            href={next ? `/register?next=${encodeURIComponent(next)}` : '/register'}
+            className="font-medium text-foreground underline underline-offset-2"
+          >
+            Create an account
+          </Link>
+        </p>
+
+        <p className="mt-2 text-center text-sm text-muted-foreground">
           iTarang staff{' '}
           <Link
             href="/staff/login"

@@ -73,6 +73,9 @@ jobs:
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/itarang_dev
       NEXT_TELEMETRY_DISABLED: '1'
+      # Not a secret: it peppers codes in this throwaway database only. Without
+      # it the sign-in integration suites (auth-boundary, otp) skip entirely.
+      AUTH_OTP_PEPPER: ci-only-pepper-for-the-throwaway-test-database
 
     steps:
       - uses: actions/checkout@v4
