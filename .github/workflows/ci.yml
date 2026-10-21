@@ -1,11 +1,21 @@
 # CI / CD for the storefront.
 #
-#   verify  — every push and every pull request into main: typecheck, lint,
-#             build and the full test suite. A broken change shows a red cross
-#             on the pull request before anyone merges it.
-#   deploy  — pushes to main only, and only after verify passes: builds the
-#             production site here with the credentials in GitHub Secrets, then
+#   verify  — every push and every pull request into main or production:
+#             typecheck, lint, build and the full test suite. A broken change
+#             shows a red cross on the pull request before anyone merges it.
+#   deploy  — pushes to main or production only, and only after verify passes:
+#             builds the site here with the credentials in GitHub Secrets, then
 #             ships it to Hostinger over SSH and restarts the app.
+#
+# Branch flow:  Rushikesh-claude → main → production
+#   main        deploys to the `sandbox` environment (the test site)
+#   production  deploys to the `production` environment (https://shop.itarang.com)
+#
+# Each GitHub environment carries its own APP_DIR, SITE_URL and DB_SSL_CA_FILE
+# variables; an environment variable overrides the repository one of the same
+# name. The app env file is SANDBOX_ENV for the sandbox and PRODUCTION_ENV for
+# production — production never falls back to the sandbox's file, database or
+# keys.
 #
 # GitHub is the single place credentials live. Hostinger's own Git
 # auto-deployment must be switched OFF in hPanel, or it will rebuild the site
@@ -26,13 +36,13 @@ on:
   push:
     branches: ['**']
   pull_request:
-    branches: [main]
+    branches: [main, production]
 
 concurrency:
   group: ci-${{ github.ref }}
-  # Never cancel main: a deploy interrupted mid-upload leaves the site half old,
-  # half new. Feature branches only need their latest push checked.
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  # Never cancel a deploying branch: a deploy interrupted mid-upload leaves the
+  # site half old, half new. Feature branches only need their latest push checked.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/production' }}
 
 jobs:
   verify:
@@ -103,11 +113,13 @@ jobs:
 
   deploy:
     needs: verify
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: >-
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/production')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment:
-      name: sandbox
+      name: ${{ github.ref == 'refs/heads/production' && 'production' || 'sandbox' }}
       url: ${{ vars.SITE_URL }}
 
     env:
@@ -134,6 +146,8 @@ jobs:
           SSH_USER: ${{ secrets.SSH_USER }}
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           APP_DIR: ${{ vars.APP_DIR }}
+          SITE_URL: ${{ vars.SITE_URL }}
+          PRODUCTION_ENV: ${{ secrets.PRODUCTION_ENV }}
         run: |
           missing=""
           for name in SSH_HOST SSH_USER SSH_PRIVATE_KEY APP_DIR; do
@@ -144,6 +158,22 @@ jobs:
             exit 1
           fi
           case "$APP_DIR" in /*) ;; *) echo "::error::APP_DIR must be an absolute path"; exit 1 ;; esac
+          # Production must point at its own site. An unset environment
+          # variable falls back to the repository one — the sandbox's — so
+          # without this check a half-configured production environment would
+          # quietly deploy over the test site.
+          if [ "$GITHUB_REF_NAME" = production ]; then
+            if [ "$SITE_URL" != https://shop.itarang.com ]; then
+              echo "::error::production SITE_URL must be https://shop.itarang.com (got '$SITE_URL')"; exit 1
+            fi
+            case "$APP_DIR" in
+              */domains/shop.itarang.com/*) ;;
+              *) echo "::error::production APP_DIR must be under domains/shop.itarang.com (got '$APP_DIR')"; exit 1 ;;
+            esac
+            if [ -z "$PRODUCTION_ENV" ]; then
+              echo "::error::PRODUCTION_ENV secret is not set on the production environment"; exit 1
+            fi
+          fi
 
       - uses: actions/checkout@v4
 
@@ -206,11 +236,13 @@ jobs:
           SELLER_GSTIN: ${{ secrets.SELLER_GSTIN || vars.SELLER_GSTIN }}
           SELLER_STATE_CODE: ${{ secrets.SELLER_STATE_CODE || vars.SELLER_STATE_CODE }}
           SANDBOX_ENV: ${{ secrets.SANDBOX_ENV }}
+          PRODUCTION_ENV: ${{ secrets.PRODUCTION_ENV }}
         run: |
           umask 077
+          if [ "$GITHUB_REF_NAME" = production ]; then ENV_FILE="$PRODUCTION_ENV"; else ENV_FILE="$SANDBOX_ENV"; fi
           # The pasted file, minus comments, blank lines, Windows line endings
           # and a leading `export `, which hPanel and editors sometimes add.
-          printf '%s\n' "$SANDBOX_ENV" | tr -d '\r' \
+          printf '%s\n' "$ENV_FILE" | tr -d '\r' \
             | sed -E 's/^[[:space:]]*export[[:space:]]+//' \
             | grep -E '^[A-Za-z_][A-Za-z0-9_]*=' > .env.production || true
           for name in $APP_ENV_NAMES; do
@@ -224,7 +256,7 @@ jobs:
             printf '%s=%s\n' "$name" "$value" >> .env.production
           done
           if ! grep -q '^DATABASE_URL=.' .env.production; then
-            echo "::error::DATABASE_URL is not set — add it to SANDBOX_ENV or as its own secret"
+            echo "::error::DATABASE_URL is not set — add it to SANDBOX_ENV / PRODUCTION_ENV or as its own secret"
             exit 1
           fi
           echo "Wrote $(wc -l < .env.production) variable(s): $(cut -d= -f1 .env.production | tr '\n' ' ')"
