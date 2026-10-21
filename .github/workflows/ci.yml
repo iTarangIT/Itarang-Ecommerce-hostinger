@@ -1,11 +1,24 @@
 # CI / CD for the storefront.
 #
-#   verify  — every push and every pull request into main: typecheck, lint,
-#             build and the full test suite. A broken change shows a red cross
-#             on the pull request before anyone merges it.
-#   deploy  — pushes to main only, and only after verify passes: builds the
-#             production site here with the credentials in GitHub Secrets, then
-#             ships it to Hostinger over SSH and restarts the app.
+#   verify  — every push and every pull request into main or production:
+#             typecheck, lint, build and the full test suite. A broken change
+#             shows a red cross on the pull request before anyone merges it.
+#   deploy  — pushes to main or production only, and only after verify passes:
+#             builds the site here with the credentials in GitHub Secrets, then
+#             ships it over SSH and restarts the app.
+#
+# Branch flow:  Rushikesh-claude → main → production
+#   main        deploys to the `sandbox` environment (the test site) on
+#               Hostinger shared hosting, served by Passenger
+#   production  deploys to the `production` environment (https://shop.itarang.com)
+#               on the VPS 187.127.128.78: a systemd service behind the VPS's
+#               Traefik. One-time server setup: scripts/vps-setup.sh
+#
+# Each GitHub environment carries its own APP_DIR, SITE_URL and DB_SSL_CA_FILE
+# variables and its own SSH_* secrets; an environment value overrides the
+# repository one of the same name. The app env file is SANDBOX_ENV for the
+# sandbox and PRODUCTION_ENV for production — production never falls back to
+# the sandbox's file, database, keys or server.
 #
 # GitHub is the single place credentials live. Hostinger's own Git
 # auto-deployment must be switched OFF in hPanel, or it will rebuild the site
@@ -26,13 +39,13 @@ on:
   push:
     branches: ['**']
   pull_request:
-    branches: [main]
+    branches: [main, production]
 
 concurrency:
   group: ci-${{ github.ref }}
-  # Never cancel main: a deploy interrupted mid-upload leaves the site half old,
-  # half new. Feature branches only need their latest push checked.
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  # Never cancel a deploying branch: a deploy interrupted mid-upload leaves the
+  # site half old, half new. Feature branches only need their latest push checked.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/production' }}
 
 jobs:
   verify:
@@ -103,11 +116,13 @@ jobs:
 
   deploy:
     needs: verify
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: >-
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/production')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment:
-      name: sandbox
+      name: ${{ github.ref == 'refs/heads/production' && 'production' || 'sandbox' }}
       url: ${{ vars.SITE_URL }}
 
     env:
@@ -134,6 +149,8 @@ jobs:
           SSH_USER: ${{ secrets.SSH_USER }}
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           APP_DIR: ${{ vars.APP_DIR }}
+          SITE_URL: ${{ vars.SITE_URL }}
+          PRODUCTION_ENV: ${{ secrets.PRODUCTION_ENV }}
         run: |
           missing=""
           for name in SSH_HOST SSH_USER SSH_PRIVATE_KEY APP_DIR; do
@@ -144,6 +161,24 @@ jobs:
             exit 1
           fi
           case "$APP_DIR" in /*) ;; *) echo "::error::APP_DIR must be an absolute path"; exit 1 ;; esac
+          # Production must point at its own server and site. An unset
+          # environment value falls back to the repository one — the
+          # sandbox's — so without this check a half-configured production
+          # environment would quietly deploy over the test site.
+          if [ "$GITHUB_REF_NAME" = production ]; then
+            if [ "$SITE_URL" != https://shop.itarang.com ]; then
+              echo "::error::production SITE_URL must be https://shop.itarang.com (got '$SITE_URL')"; exit 1
+            fi
+            if [ "$APP_DIR" != /srv/itarang-shop ]; then
+              echo "::error::production APP_DIR must be /srv/itarang-shop (got '$APP_DIR')"; exit 1
+            fi
+            if [ "$SSH_HOST" != 187.127.128.78 ]; then
+              echo "::error::production SSH_HOST must be the VPS 187.127.128.78 — set the SSH_* secrets on the production environment"; exit 1
+            fi
+            if [ -z "$PRODUCTION_ENV" ]; then
+              echo "::error::PRODUCTION_ENV secret is not set on the production environment"; exit 1
+            fi
+          fi
 
       - uses: actions/checkout@v4
 
@@ -206,11 +241,13 @@ jobs:
           SELLER_GSTIN: ${{ secrets.SELLER_GSTIN || vars.SELLER_GSTIN }}
           SELLER_STATE_CODE: ${{ secrets.SELLER_STATE_CODE || vars.SELLER_STATE_CODE }}
           SANDBOX_ENV: ${{ secrets.SANDBOX_ENV }}
+          PRODUCTION_ENV: ${{ secrets.PRODUCTION_ENV }}
         run: |
           umask 077
+          if [ "$GITHUB_REF_NAME" = production ]; then ENV_FILE="$PRODUCTION_ENV"; else ENV_FILE="$SANDBOX_ENV"; fi
           # The pasted file, minus comments, blank lines, Windows line endings
           # and a leading `export `, which hPanel and editors sometimes add.
-          printf '%s\n' "$SANDBOX_ENV" | tr -d '\r' \
+          printf '%s\n' "$ENV_FILE" | tr -d '\r' \
             | sed -E 's/^[[:space:]]*export[[:space:]]+//' \
             | grep -E '^[A-Za-z_][A-Za-z0-9_]*=' > .env.production || true
           for name in $APP_ENV_NAMES; do
@@ -224,7 +261,7 @@ jobs:
             printf '%s=%s\n' "$name" "$value" >> .env.production
           done
           if ! grep -q '^DATABASE_URL=.' .env.production; then
-            echo "::error::DATABASE_URL is not set — add it to SANDBOX_ENV or as its own secret"
+            echo "::error::DATABASE_URL is not set — add it to SANDBOX_ENV / PRODUCTION_ENV or as its own secret"
             exit 1
           fi
           echo "Wrote $(wc -l < .env.production) variable(s): $(cut -d= -f1 .env.production | tr '\n' ' ')"
@@ -290,6 +327,7 @@ jobs:
       # still on disk to roll back to.
       - name: Upload to Hostinger
         id: upload
+        if: github.ref_name != 'production'
         env:
           APP_DIR: ${{ vars.APP_DIR }}
         run: |
@@ -319,6 +357,7 @@ jobs:
 
       - name: Switch the site to the new release
         id: switch
+        if: github.ref_name != 'production'
         env:
           APP_DIR: ${{ vars.APP_DIR }}
           RELEASE: ${{ steps.upload.outputs.release }}
@@ -343,6 +382,7 @@ jobs:
           REMOTE
 
       - name: Check the site responds
+        if: github.ref_name != 'production'
         env:
           SITE_URL: ${{ vars.SITE_URL }}
           APP_DIR: ${{ vars.APP_DIR }}
@@ -357,6 +397,73 @@ jobs:
           done
           echo "::error::$url did not return 200 — rolling back to $PREVIOUS"
           ssh hostinger "cd '$APP_DIR' && ln -sfn '$PREVIOUS' current.next && mv -T current.next current && touch current/nodejs/tmp/restart.txt"
+          exit 1
+
+      # Production runs on the VPS: `$APP_DIR/current` is a symlink into
+      # `releases/`, and the systemd service `itarang-shop` (scripts/vps-setup.sh)
+      # runs `current/server.js` as the unprivileged `shop` user behind Traefik.
+      # Same shape as the sandbox — upload beside the live release, swing the
+      # symlink, restart, check, roll back on failure. No CDN sits in front, so
+      # earlier releases' static chunks are not carried forward.
+      - name: Upload to the VPS
+        id: vps-upload
+        if: github.ref_name == 'production'
+        env:
+          APP_DIR: ${{ vars.APP_DIR }}
+        run: |
+          set -e
+          release="gh-$(date -u +%Y%m%d%H%M%S)-${GITHUB_SHA::7}"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+          ssh hostinger "systemctl cat itarang-shop >/dev/null && mkdir -p '$APP_DIR/releases/$release'" \
+            || { echo "::error::the VPS is not set up — run scripts/vps-setup.sh on it first"; exit 1; }
+          link=""
+          ssh hostinger "test -d '$APP_DIR/current/'" && link="--link-dest=$APP_DIR/current/"
+          rsync -az $link .next/standalone/ "hostinger:$APP_DIR/releases/$release/"
+          ssh hostinger "chown -R shop:shop '$APP_DIR/releases/$release'"
+
+      - name: Switch the VPS to the new release
+        id: vps-switch
+        if: github.ref_name == 'production'
+        env:
+          APP_DIR: ${{ vars.APP_DIR }}
+          RELEASE: ${{ steps.vps-upload.outputs.release }}
+        run: |
+          previous=$(ssh hostinger "readlink '$APP_DIR/current' || true")
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+          echo "live before: ${previous:-nothing (first deploy)}"
+          ssh hostinger bash -s -- "$APP_DIR" "$RELEASE" <<'REMOTE'
+          set -e
+          cd "$1"
+          ln -sfn "releases/$2" current.next
+          mv -T current.next current
+          systemctl restart itarang-shop
+          echo "live now: $(readlink current)"
+          # Keep the three newest releases.
+          ls -1dt releases/gh-* 2>/dev/null | tail -n +4 | while read -r old; do
+            [ "$old" = "releases/$2" ] || rm -rf "$old"
+          done
+          REMOTE
+
+      - name: Check the VPS site responds
+        if: github.ref_name == 'production'
+        env:
+          SITE_URL: ${{ vars.SITE_URL }}
+          APP_DIR: ${{ vars.APP_DIR }}
+          PREVIOUS: ${{ steps.vps-switch.outputs.previous }}
+        run: |
+          for attempt in $(seq 1 20); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$SITE_URL/" || true)
+            echo "attempt $attempt: HTTP $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 15
+          done
+          ssh hostinger "journalctl -u itarang-shop -n 40 --no-pager" || true
+          if [ -n "$PREVIOUS" ]; then
+            echo "::error::$SITE_URL did not return 200 — rolling back to $PREVIOUS"
+            ssh hostinger "cd '$APP_DIR' && ln -sfn '$PREVIOUS' current.next && mv -T current.next current && systemctl restart itarang-shop"
+          else
+            echo "::error::$SITE_URL did not return 200 and there is no earlier release to roll back to"
+          fi
           exit 1
 
       - name: Remove credentials from the runner
