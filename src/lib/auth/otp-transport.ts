@@ -1,4 +1,4 @@
-import { mailerIsLive, sendMail } from '@/lib/email/mailer';
+import { deliverMail, mailerIsLive } from '@/lib/email/mailer';
 import { loginCodeMessage } from '@/lib/email/templates';
 import type { OtpChannel } from './otp';
 
@@ -51,11 +51,17 @@ export class EmailOtpTransport implements OtpTransport {
       );
     }
 
-    // `sendMail` logs and resolves on failure rather than throwing, so its
-    // resolution proves nothing on its own. Nodemailer's own errors are
-    // surfaced by the check above plus the transport's verify at connect time;
-    // what this guards is the silent no-op case, which is the common one.
-    await sendMail(loginCodeMessage(to, code));
+    // `deliverMail`, not `sendMail`: the latter logs and resolves on failure,
+    // which here would show "we sent a code" for a login the SMTP server
+    // refused. The reason goes to the server log only — never to the visitor.
+    try {
+      await deliverMail(loginCodeMessage(to, code));
+    } catch (error) {
+      console.error(`[otp] email delivery failed: ${(error as Error).message}`);
+      throw new OtpDeliveryError('The SMTP server did not accept the sign-in code.', {
+        cause: error,
+      });
+    }
   }
 }
 
