@@ -2,11 +2,14 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { AlertCircle, CheckCircle2, FlaskConical, Loader2, Package, Search } from 'lucide-react';
+import { AlertCircle, ChevronDown, FlaskConical, Loader2, MapPin, Package, Search } from 'lucide-react';
 import { formatPrice } from '@/lib/catalog/pricing';
+import { trackView } from '@/lib/orders/tracking';
+import type { OrderStatus } from '@/lib/orders/types';
 import { formatDate } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Field, Input } from '@/components/ui/field';
+import { OrderProgress } from '@/components/account/order-progress';
 
 /**
  * Guest order tracking.
@@ -15,11 +18,16 @@ import { Field, Input } from '@/components/ui/field';
  * number alone would expose a stranger's address. A wrong phone and a
  * non-existent order return the same message, so this cannot be used to work
  * out which order numbers exist.
+ *
+ * A signed-in customer opening /track?order=<their order> sees it straight
+ * away: the API matches their own orders on the session, no phone needed. The
+ * order number (never the phone) is kept in the address bar so a refresh or a
+ * shared link lands on the same order.
  */
 
 interface TrackedOrder {
   orderNumber: string;
-  status: string;
+  status: OrderStatus;
   paymentStatus: string;
   paymentMethod: string;
   isTest: boolean;
@@ -36,16 +44,62 @@ interface TrackedTimeline {
   at: string;
 }
 
-export function TrackForm() {
-  const [order, setOrder] = React.useState('');
+type Result = { order: TrackedOrder; timeline: TrackedTimeline[] };
+
+export function TrackForm({
+  initialOrder = '',
+  signedIn = false,
+}: {
+  initialOrder?: string;
+  signedIn?: boolean;
+}) {
+  const [order, setOrder] = React.useState(initialOrder.toUpperCase());
   const [phone, setPhone] = React.useState('');
   const [errors, setErrors] = React.useState<{ order?: string; phone?: string }>({});
   const [loading, setLoading] = React.useState(false);
-  const [notFound, setNotFound] = React.useState(false);
-  const [result, setResult] = React.useState<{
-    order: TrackedOrder;
-    timeline: TrackedTimeline[];
-  } | null>(null);
+  const [problem, setProblem] = React.useState<string | null>(null);
+  const [result, setResult] = React.useState<Result | null>(null);
+  const resultRef = React.useRef<HTMLDivElement>(null);
+
+  const lookup = React.useCallback(async (orderNumber: string, phoneNumber: string) => {
+    setLoading(true);
+    setProblem(null);
+    setResult(null);
+    try {
+      const query = phoneNumber ? `?phone=${encodeURIComponent(phoneNumber)}` : '';
+      const response = await fetch(`/api/orders/${encodeURIComponent(orderNumber)}${query}`);
+      if (response.status === 429) {
+        setProblem('Too many tries. Please wait a few minutes and try again.');
+        return false;
+      }
+      if (!response.ok) {
+        setProblem('No order matches that order number and mobile number. Check both and try again.');
+        return false;
+      }
+      setResult(await response.json());
+      const url = new URL(window.location.href);
+      url.searchParams.set('order', orderNumber);
+      window.history.replaceState(null, '', url);
+      requestAnimationFrame(() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+      return true;
+    } catch {
+      setProblem('Could not reach the server. Check your connection and try again.');
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Signed in and arrived with ?order=: open it without asking for anything.
+  // If it is not theirs the API answers "not found" and the form is there.
+  const opened = React.useRef(false);
+  React.useEffect(() => {
+    if (opened.current || !signedIn || !initialOrder) return;
+    opened.current = true;
+    void lookup(initialOrder.toUpperCase(), '').then((ok) => {
+      if (!ok) setProblem(null);
+    });
+  }, [signedIn, initialOrder, lookup]);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -56,27 +110,21 @@ export function TrackForm() {
     setErrors(next);
     if (Object.keys(next).length > 0) return;
 
-    setLoading(true);
-    setNotFound(false);
-    setResult(null);
-
-    try {
-      const response = await fetch(
-        `/api/orders/${encodeURIComponent(order.trim())}?phone=${encodeURIComponent(phone)}`,
-      );
-
-      if (!response.ok) {
-        setNotFound(true);
-        return;
-      }
-
-      setResult(await response.json());
-    } catch {
-      setNotFound(true);
-    } finally {
-      setLoading(false);
-    }
+    await lookup(order.trim(), phone);
   };
+
+  const reset = () => {
+    setResult(null);
+    setProblem(null);
+    setPhone('');
+    const url = new URL(window.location.href);
+    url.searchParams.delete('order');
+    window.history.replaceState(null, '', url);
+  };
+
+  if (result) {
+    return <OrderResult ref={resultRef} result={result} onReset={reset} />;
+  }
 
   return (
     <div className="rounded-xl border border-border bg-card p-5 sm:p-6">
@@ -102,6 +150,7 @@ export function TrackForm() {
             }}
             placeholder="ITG-…"
             className="tabular uppercase"
+            autoComplete="off"
             aria-invalid={Boolean(errors.order)}
           />
         </Field>
@@ -110,6 +159,7 @@ export function TrackForm() {
           <Input
             id="phone"
             inputMode="numeric"
+            autoComplete="tel-national"
             maxLength={10}
             value={phone}
             onChange={(e) => {
@@ -122,94 +172,138 @@ export function TrackForm() {
           />
         </Field>
 
-        <Button type="submit" variant="accent" size="lg" disabled={loading}>
+        <Button type="submit" variant="accent" size="lg" disabled={loading} className="w-full sm:w-auto">
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-          Track order
+          {loading ? 'Finding your order…' : 'Track order'}
         </Button>
       </form>
 
-      {notFound ? (
+      {problem ? (
         <p
           role="status"
           className="mt-6 flex items-start gap-2 rounded-lg border border-border bg-surface p-4 text-sm"
         >
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
           <span>
-            No order matches that order number and mobile number. Check both and try again, or{' '}
+            {problem}{' '}
             <Link href="/support" className="font-medium text-primary underline-offset-4 hover:underline">
-              contact support
+              Contact support
             </Link>
-            .
           </span>
         </p>
-      ) : null}
-
-      {result ? (
-        <div role="status" className="mt-6 rounded-lg border border-border bg-surface p-5">
-          {result.order.isTest ? (
-            <p className="mb-3 inline-flex items-center gap-1.5 rounded-full bg-warning-soft px-2.5 py-1 text-xs font-semibold text-warning">
-              <FlaskConical className="h-3.5 w-3.5" />
-              Test order
-            </p>
-          ) : null}
-
-          <p className="flex items-center gap-2 font-display text-base font-bold text-foreground">
-            <Package className="h-5 w-5 text-accent-600" />
-            <span className="tabular">{result.order.orderNumber}</span>
-          </p>
-
-          <dl className="mt-4 grid gap-3 sm:grid-cols-3">
-            <div>
-              <dt className="text-xs uppercase tracking-wide text-muted-foreground">Status</dt>
-              <dd className="mt-0.5 text-sm font-semibold capitalize text-foreground">
-                {result.order.status.replace(/_/g, ' ')}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs uppercase tracking-wide text-muted-foreground">Payment</dt>
-              <dd className="mt-0.5 text-sm font-semibold capitalize text-foreground">
-                {result.order.paymentStatus}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs uppercase tracking-wide text-muted-foreground">Total</dt>
-              <dd className="tabular mt-0.5 text-sm font-semibold text-foreground">
-                {formatPrice(result.order.total)}
-              </dd>
-            </div>
-          </dl>
-
-          <ul className="mt-4 space-y-1.5 border-t border-border pt-4 text-sm text-muted-foreground">
-            {result.order.items.map((item, index) => (
-              <li key={index} className="flex justify-between gap-3">
-                <span>
-                  {item.title}
-                  {item.variantTitle ? ` — ${item.variantTitle}` : ''}
-                  <span className="tabular"> × {item.quantity}</span>
-                </span>
-                <span className="tabular shrink-0">{formatPrice(item.lineTotal)}</span>
-              </li>
-            ))}
-          </ul>
-
-          {result.timeline.length > 0 ? (
-            <ol className="mt-4 space-y-2 border-t border-border pt-4">
-              {result.timeline.map((entry, index) => (
-                <li key={index} className="flex items-start gap-2 text-xs text-muted-foreground">
-                  <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" />
-                  <span>
-                    <span className="font-medium capitalize text-foreground">
-                      {entry.status.replace(/_/g, ' ')}
-                    </span>
-                    {entry.note ? ` — ${entry.note}` : ''}
-                    <span className="block">{formatDate(entry.at)}</span>
-                  </span>
-                </li>
-              ))}
-            </ol>
-          ) : null}
-        </div>
       ) : null}
     </div>
   );
 }
+
+const OrderResult = React.forwardRef<
+  HTMLDivElement,
+  { result: Result; onReset: () => void }
+>(function OrderResult({ result, onReset }, ref) {
+  const { order, timeline } = result;
+  const view = trackView(order.status, order.placedAt, timeline);
+  const itemCount = order.items.reduce((sum, item) => sum + item.quantity, 0);
+
+  return (
+    <div ref={ref} role="status" className="scroll-mt-24 rounded-xl border border-border bg-card p-5 sm:p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">Order</p>
+          <p className="flex items-center gap-2 font-display text-lg font-bold text-foreground">
+            <Package className="h-5 w-5 text-accent-600" />
+            <span className="tabular">{order.orderNumber}</span>
+          </p>
+          <p className="mt-0.5 text-sm text-muted-foreground">Placed {formatDate(order.placedAt)}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {order.isTest ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-warning-soft px-2.5 py-1 text-xs font-semibold text-warning">
+              <FlaskConical className="h-3.5 w-3.5" />
+              Test order
+            </span>
+          ) : null}
+          <Button type="button" variant="outline" size="sm" onClick={onReset}>
+            <Search className="h-4 w-4" />
+            Track another
+          </Button>
+        </div>
+      </div>
+
+      <div className="mt-5">
+        <OrderProgress view={view} />
+      </div>
+
+      <dl className="mt-6 grid gap-4 border-t border-border pt-5 sm:grid-cols-3">
+        <div>
+          <dt className="text-xs uppercase tracking-wide text-muted-foreground">Delivering to</dt>
+          <dd className="mt-0.5 flex items-start gap-1.5 text-sm font-semibold text-foreground">
+            <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+            <span>
+              {order.shippingAddress.city}, {order.shippingAddress.state}{' '}
+              <span className="tabular">{order.shippingAddress.pincode}</span>
+            </span>
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs uppercase tracking-wide text-muted-foreground">Payment</dt>
+          <dd className="mt-0.5 text-sm font-semibold capitalize text-foreground">
+            {order.paymentMethod === 'cod' ? 'Cash on delivery' : order.paymentStatus}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs uppercase tracking-wide text-muted-foreground">Total</dt>
+          <dd className="tabular mt-0.5 text-sm font-semibold text-foreground">
+            {formatPrice(order.total)}
+          </dd>
+        </div>
+      </dl>
+
+      <details className="group mt-5 rounded-lg border border-border bg-surface">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-sm font-semibold text-foreground">
+          {itemCount} {itemCount === 1 ? 'item' : 'items'} in this order
+          <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
+        </summary>
+        <ul className="space-y-1.5 border-t border-border px-4 py-3 text-sm text-muted-foreground">
+          {order.items.map((item, index) => (
+            <li key={index} className="flex justify-between gap-3">
+              <span>
+                {item.title}
+                {item.variantTitle ? ` — ${item.variantTitle}` : ''}
+                <span className="tabular"> × {item.quantity}</span>
+              </span>
+              <span className="tabular shrink-0">{formatPrice(item.lineTotal)}</span>
+            </li>
+          ))}
+        </ul>
+      </details>
+
+      {timeline.some((entry) => entry.note) ? (
+        <details className="group mt-3 rounded-lg border border-border bg-surface">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-sm font-semibold text-foreground">
+            Updates from our team
+            <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
+          </summary>
+          <ol className="space-y-2 border-t border-border px-4 py-3">
+            {[...timeline]
+              .filter((entry) => entry.note)
+              .reverse()
+              .map((entry, index) => (
+                <li key={index} className="text-sm text-muted-foreground">
+                  <span className="font-medium text-foreground">{formatDate(entry.at)}</span> —{' '}
+                  {entry.note}
+                </li>
+              ))}
+          </ol>
+        </details>
+      ) : null}
+
+      <p className="mt-5 text-sm text-muted-foreground">
+        Question about this order?{' '}
+        <Link href="/support" className="font-medium text-primary underline-offset-4 hover:underline">
+          Contact support
+        </Link>{' '}
+        and quote <span className="tabular font-medium text-foreground">{order.orderNumber}</span>.
+      </p>
+    </div>
+  );
+});
