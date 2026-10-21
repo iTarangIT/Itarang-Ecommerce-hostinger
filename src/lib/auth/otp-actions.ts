@@ -28,19 +28,29 @@ import { createUser, findUserByEmail, markEmailVerified, normaliseEmail } from '
  * customer flow can grow without anybody editing the sign-in that the one real
  * administrator account depends on.
  *
- * Signup and login are the same flow, and that is a security property rather
- * than a shortcut. A code is issued for an address whether or not it has an
- * account; the account is created when the code comes back proved. Because the
- * response is identical either way, there is no request an unauthenticated
- * caller can make that distinguishes "registered" from "not registered" — the
- * thing `loginAction` works hard to hide is here simply not knowable.
+ * Signing in and signing up are separate doors (business decision, Oct 2026).
+ * `/login` asks with `intent=login` and `/register` with `intent=signup`, and
+ * the request step answers the wrong door plainly: an unknown address on
+ * `/login` is told to create an account first, a known one on `/register` is
+ * told to sign in. Neither sends a code.
  *
- * The same two rules as `actions.ts` apply: no enumeration, and `redirect()`
- * outside any try/catch, because it works by throwing.
+ * That answers "is this address registered?" to anyone who asks — a trade the
+ * business made knowingly for clearer screens. What bounds it is the rate
+ * limiter, consumed *before* the lookup: per address and per IP, the same
+ * budget that already limits code requests.
+ *
+ * `redirect()` stays outside any try/catch, because it works by throwing.
  */
 
+export type OtpIntent = 'login' | 'signup';
+
 export type OtpFormState =
-  | { step: 'identifier'; error?: string }
+  | {
+      step: 'identifier';
+      error?: string;
+      /** The address belongs on the other door: `missing` → sign up, `exists` → sign in. */
+      account?: { status: 'missing' | 'exists'; identifier: string };
+    }
   | { step: 'code'; identifier: string; error?: string; notice?: string }
   | null;
 
@@ -99,9 +109,20 @@ export async function requestLoginCodeAction(
     return { step: 'identifier', error: THROTTLED };
   }
 
+  // Which door the visitor came through. Anything but `signup` is a sign-in,
+  // so a form that forgets the field cannot create accounts by accident.
+  const intent: OtpIntent = formData.get('intent') === 'signup' ? 'signup' : 'login';
+  const existing = await findUserByEmail(identifier);
+
+  if (intent === 'login' && !existing) {
+    return { step: 'identifier', account: { status: 'missing', identifier } };
+  }
+  if (intent === 'signup' && existing) {
+    return { step: 'identifier', account: { status: 'exists', identifier } };
+  }
+
   // A resend that arrives before the previous mail has plausibly landed is
-  // answered without issuing anything. Advancing to the code step regardless
-  // keeps the response shape identical and lets the visitor type the code they
+  // answered without issuing anything, and lets the visitor type the code they
   // already have.
   const wait = await secondsUntilResendAllowed(identifier);
   if (wait > 0) {
@@ -112,10 +133,6 @@ export async function requestLoginCodeAction(
     };
   }
 
-  // Looked up so the code can be tied to the account when there is one. The
-  // answer never reaches the caller: both branches issue, send and respond
-  // identically.
-  const existing = await findUserByEmail(identifier);
   const meta = await requestMeta();
 
   const { code } = await issueOtp({

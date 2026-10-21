@@ -82,10 +82,11 @@ vi.mock('@/lib/analytics/events', () => ({
 }));
 
 const { loginAction, registerAction, requestResetAction } = await import('./actions');
-const { verifyLoginCodeAction } = await import('./otp-actions');
+const { requestLoginCodeAction, verifyLoginCodeAction } = await import('./otp-actions');
 const { hashPassword } = await import('./password');
 const { createUser } = await import('./users');
 const { issueOtp } = await import('./otp');
+const { LIMITS } = await import('@/lib/security/rate-limit');
 
 /* --------------------------------------------------------------- fixtures */
 
@@ -397,6 +398,86 @@ describe.skipIf(!CONFIGURED)('the customer / admin authentication boundary', () 
       // A customer completing a reset would still be refused at sign-in, so the
       // mail would promise a route that does not exist.
       expect(await tokens(customer.id)).toBe(0);
+    },
+    DB_TIMEOUT,
+  );
+
+  /* ------------------------------------------- sign in vs sign up: the door */
+
+  const issuedCodes = async (identifier: string) =>
+    Number(
+      (
+        await queryOne<{ n: string }>(`SELECT count(*) AS n FROM auth_otps WHERE identifier = $1`, [
+          identifier,
+        ])
+      )?.n ?? 0,
+    );
+
+  it(
+    'sends an unknown address on the sign-in page to sign up, without a code',
+    async () => {
+      const stranger = `stranger${DOMAIN}`;
+
+      const result = await run(
+        requestLoginCodeAction,
+        form({ email: stranger, intent: 'login' }),
+      );
+
+      expect(result.state).toMatchObject({
+        step: 'identifier',
+        account: { status: 'missing', identifier: stranger },
+      });
+      expect(await issuedCodes(stranger)).toBe(0);
+    },
+    DB_TIMEOUT,
+  );
+
+  it(
+    'treats a request with no intent as a sign-in, so it cannot create accounts',
+    async () => {
+      const stranger = `no-intent${DOMAIN}`;
+
+      const result = await run(requestLoginCodeAction, form({ email: stranger }));
+
+      expect(result.state).toMatchObject({ account: { status: 'missing' } });
+      expect(await issuedCodes(stranger)).toBe(0);
+    },
+    DB_TIMEOUT,
+  );
+
+  it(
+    'sends a registered address on the sign-up page to sign in, without a code',
+    async () => {
+      await seedUsers();
+
+      const result = await run(
+        requestLoginCodeAction,
+        form({ email: CUSTOMER, intent: 'signup' }),
+      );
+
+      expect(result.state).toMatchObject({
+        step: 'identifier',
+        account: { status: 'exists', identifier: CUSTOMER },
+      });
+      expect(await issuedCodes(CUSTOMER)).toBe(0);
+    },
+    DB_TIMEOUT,
+  );
+
+  it(
+    'still throttles before saying whether an address is registered',
+    async () => {
+      // The limiter is what bounds address probing, so it must run first:
+      // once the per-address budget is spent, the answer stops coming.
+      const probe = form({ email: `probe${DOMAIN}`, intent: 'login' });
+      for (let i = 0; i < LIMITS.otpRequest.limit; i += 1) {
+        await run(requestLoginCodeAction, probe);
+      }
+
+      const result = await run(requestLoginCodeAction, probe);
+
+      expect(result.state?.error).toMatch(/too many/i);
+      expect(result.state).not.toHaveProperty('account');
     },
     DB_TIMEOUT,
   );

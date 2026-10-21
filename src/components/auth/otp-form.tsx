@@ -1,23 +1,24 @@
 'use client';
 
 import { useActionState, useEffect, useRef, useState } from 'react';
-import { AlertCircle, ArrowLeft, Loader2, LogIn, Mail } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Info, Loader2, LogIn, Mail, UserPlus } from 'lucide-react';
 import {
   requestLoginCodeAction,
   verifyLoginCodeAction,
   type OtpFormState,
+  type OtpIntent,
 } from '@/lib/auth/otp-actions';
-import { Button } from '@/components/ui/button';
+import { Button, ButtonLink } from '@/components/ui/button';
 import { Field, Input } from '@/components/ui/field';
 
 /**
- * Sign in with a code sent by email.
+ * Sign in, or sign up, with a code sent by email.
  *
  * Two steps in one conversation: ask for an address, then prove a code. The
- * same form does signup and sign-in, and nothing here asks which the visitor
- * intends — the server issues a code either way and creates the account when
- * the code comes back proved. That is also why no message on this screen ever
- * says whether an address is registered.
+ * page says which door this is through `intent`, and the server answers the
+ * wrong one — an unknown address trying to sign in, a known one trying to sign
+ * up — with no code and a pointer to the other page, which `AccountPrompt`
+ * renders with the address carried across.
  *
  * The two steps hold **separate** action state, and the code step is keyed on
  * the address. That is not tidiness: a single shared state would let a stale
@@ -37,11 +38,61 @@ function ErrorNote({ message }: { message?: string }) {
   );
 }
 
+/** `/login` or `/register`, keeping the address and where to go afterwards. */
+function doorHref(path: '/login' | '/register', email: string, next?: string): string {
+  const params = new URLSearchParams({ email });
+  if (next) params.set('next', next);
+  return `${path}?${params.toString()}`;
+}
+
+function AccountPrompt({
+  status,
+  identifier,
+  next,
+}: {
+  status: 'missing' | 'exists';
+  identifier: string;
+  next?: string;
+}) {
+  const missing = status === 'missing';
+  return (
+    <div role="status" className="space-y-3 rounded-lg border border-border bg-surface p-4 text-sm">
+      <p className="flex items-start gap-2">
+        <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+        <span>
+          {missing ? (
+            <>
+              There is no account for <strong>{identifier}</strong> yet. Create one first, then
+              you can sign in.
+            </>
+          ) : (
+            <>
+              <strong>{identifier}</strong> already has an account. Sign in instead.
+            </>
+          )}
+        </span>
+      </p>
+      <ButtonLink
+        href={doorHref(missing ? '/register' : '/login', identifier, next)}
+        variant="primary"
+        fullWidth
+      >
+        {missing ? <UserPlus className="h-4 w-4" /> : <LogIn className="h-4 w-4" />}
+        {missing ? 'Create an account' : 'Sign in'}
+      </ButtonLink>
+    </div>
+  );
+}
+
 export function OtpSignInForm({
   next,
+  intent = 'login',
+  defaultEmail = '',
   ctaLabel = 'Email me a code',
 }: {
   next?: string;
+  intent?: OtpIntent;
+  defaultEmail?: string;
   ctaLabel?: string;
 }) {
   const [state, requestAction, requesting] = useActionState<OtpFormState, FormData>(
@@ -52,7 +103,7 @@ export function OtpSignInForm({
   // Set when the visitor asks to go back, cleared the moment a new code is
   // issued — otherwise the effect below would leave them stuck on step one.
   const [editingAddress, setEditingAddress] = useState(false);
-  const [typedEmail, setTypedEmail] = useState('');
+  const [typedEmail, setTypedEmail] = useState(defaultEmail);
 
   useEffect(() => {
     if (state?.step === 'code') setEditingAddress(false);
@@ -66,6 +117,7 @@ export function OtpSignInForm({
         identifier={state.identifier}
         notice={state.notice}
         next={next}
+        intent={intent}
         resending={requesting}
         resendAction={requestAction}
         onUseAnotherAddress={() => {
@@ -76,9 +128,16 @@ export function OtpSignInForm({
     );
   }
 
+  // Only while the field still holds the address the answer was about; typing
+  // another one makes it stale.
+  const answered = state?.step === 'identifier' ? state.account : undefined;
+  const prompt =
+    answered && answered.identifier === typedEmail.trim().toLowerCase() ? answered : null;
+
   return (
     <form action={requestAction} className="space-y-4">
       {next ? <input type="hidden" name="next" value={next} /> : null}
+      <input type="hidden" name="intent" value={intent} />
 
       <Field label="Email address" htmlFor="email" required>
         <Input
@@ -96,10 +155,14 @@ export function OtpSignInForm({
 
       <ErrorNote message={state?.error} />
 
-      <Button type="submit" variant="primary" size="lg" fullWidth disabled={requesting}>
-        {requesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
-        {requesting ? 'Sending code…' : ctaLabel}
-      </Button>
+      {prompt ? (
+        <AccountPrompt status={prompt.status} identifier={prompt.identifier} next={next} />
+      ) : (
+        <Button type="submit" variant="primary" size="lg" fullWidth disabled={requesting}>
+          {requesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
+          {requesting ? 'Sending code…' : ctaLabel}
+        </Button>
+      )}
 
       <p className="text-center text-sm text-muted-foreground">
         We will email you a 6-digit code. There is no password to remember.
@@ -112,6 +175,7 @@ function CodeStep({
   identifier,
   notice,
   next,
+  intent,
   resending,
   resendAction,
   onUseAnotherAddress,
@@ -119,6 +183,7 @@ function CodeStep({
   identifier: string;
   notice?: string;
   next?: string;
+  intent: OtpIntent;
   resending: boolean;
   resendAction: (formData: FormData) => void;
   onUseAnotherAddress: () => void;
@@ -180,6 +245,9 @@ function CodeStep({
             arrives too soon and says how many seconds are left. */}
         <form action={resendAction}>
           <input type="hidden" name="email" value={identifier} />
+          {/* A resend on /register must stay a sign-up, or it would be
+              refused for an address that has no account yet. */}
+          <input type="hidden" name="intent" value={intent} />
           <button
             type="submit"
             disabled={resending}
