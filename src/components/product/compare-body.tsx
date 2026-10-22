@@ -109,7 +109,7 @@ export function CompareBody({ suggestions }: { suggestions: ProductSummary[] }) 
             />
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="relative overflow-x-auto">
             <table className="w-full min-w-[46rem] border-separate border-spacing-0 text-sm">
               <caption className="sr-only">Product comparison</caption>
               <thead>

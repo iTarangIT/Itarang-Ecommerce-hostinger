@@ -100,7 +100,9 @@ export default async function PricingPage({
             <h2 id={`group-${group.slug}`} className="heading-3">
               {group.name}
             </h2>
-            <div className="mt-3 overflow-x-auto rounded-lg border border-border">
+            {/* `relative` keeps the table's screen-reader-only labels inside
+                the scroll box; without it they widen the whole page on a phone. */}
+            <div className="relative mt-3 overflow-x-auto rounded-lg border border-border">
               <table className="w-full min-w-[44rem] text-sm">
                 <thead>
                   <tr className="bg-surface text-left">

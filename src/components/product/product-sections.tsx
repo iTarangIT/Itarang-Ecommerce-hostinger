@@ -182,7 +182,7 @@ export function ProductSections({ sections }: { sections: readonly ProductSectio
           ) : null}
 
           {/* Wide content scrolls inside its own container rather than the page. */}
-          <div className="mt-4 overflow-x-auto rounded-lg border border-border">
+          <div className="relative mt-4 overflow-x-auto rounded-lg border border-border">
             <table className="w-full min-w-[34rem] border-collapse text-sm">
               <thead>
                 <tr className="bg-surface text-left">
