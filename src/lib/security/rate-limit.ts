@@ -119,6 +119,8 @@ export const LIMITS = {
   supportRequestByIp: { limit: 20, windowSeconds: 60 * 60 },
   /** Writing a product review, per account. */
   review: { limit: 10, windowSeconds: 60 * 60 },
+  /** "Helpful" votes on reviews, per account. */
+  reviewVote: { limit: 60, windowSeconds: 60 * 60 },
   /** The product-page delivery check and dealer search, per IP. */
   pincodeLookup: { limit: 120, windowSeconds: 10 * 60 },
 } as const satisfies Record<string, RateLimit>;

@@ -5,7 +5,12 @@ import { redirect } from 'next/navigation';
 import { currentUser } from '@/lib/auth/session';
 import { CATALOG_TAG } from '@/lib/commerce/db/db-provider';
 import { invalidateCatalogSnapshot } from '@/lib/commerce';
-import { moderateReview, type ReviewStatus } from '@/lib/reviews/reviews';
+import {
+  REVIEW_STATUSES,
+  moderateReview,
+  replyToReview,
+  type ReviewStatus,
+} from '@/lib/reviews/reviews';
 import { createDealer, setDealerActive } from '@/lib/support/dealers';
 import { updateSupportRequest, type SupportRequestStatus } from '@/lib/support/requests';
 import { parseCoverageCsv, upsertCoverage } from '@/lib/support/serviceability-server';
@@ -47,20 +52,48 @@ export async function updateSupportRequestAction(formData: FormData): Promise<vo
 
 /* ---------------------------------------------------------------- reviews */
 
-const REVIEW_STATUSES = new Set<ReviewStatus>(['pending', 'published', 'hidden']);
+/**
+ * Back to the review list the admin was on — same tab, filters and page — so
+ * working through a queue does not reset it after every click. Only a path
+ * under /admin/reviews is accepted; anything else is the plain list.
+ */
+function doneReviews(formData: FormData, notice: string): never {
+  const back = String(formData.get('back') ?? '');
+  const target = /^\/admin\/reviews(\?[^#\s]*)?$/.test(back) ? back : '/admin/reviews';
+  const url = new URL(target, 'http://admin.local');
+  url.searchParams.set('notice', notice);
+  revalidatePath('/admin/reviews');
+  redirect(`${url.pathname}${url.search}`);
+}
+
+/** Ratings and replies ride on the cached catalogue snapshot, so purge it. */
+function refreshStorefront(): void {
+  invalidateCatalogSnapshot();
+  revalidateTag(CATALOG_TAG);
+}
 
 export async function moderateReviewAction(formData: FormData): Promise<void> {
   const actor = await requireAdminActor('/admin/reviews');
   const id = Number(formData.get('id'));
   const status = String(formData.get('status') ?? '') as ReviewStatus;
-  if (!Number.isInteger(id) || !REVIEW_STATUSES.has(status)) return;
+  if (!Number.isInteger(id) || !REVIEW_STATUSES.includes(status)) return;
 
   await moderateReview(id, status, actor);
-  // Ratings ride on the cached catalogue snapshot, so publishing or hiding a
-  // review has to purge it, or the stars on the product page would not move.
-  invalidateCatalogSnapshot();
-  revalidateTag(CATALOG_TAG);
-  done('/admin/reviews', status === 'published' ? 'Review published.' : `Review marked ${status}.`);
+  // Publishing or hiding moves the stars on the product page.
+  refreshStorefront();
+  doneReviews(formData, status === 'published' ? 'Review published.' : `Review marked ${status}.`);
+}
+
+/** Post, change or (with empty text) remove the public "Response from iTarang". */
+export async function replyToReviewAction(formData: FormData): Promise<void> {
+  const actor = await requireAdminActor('/admin/reviews');
+  const id = Number(formData.get('id'));
+  const reply = String(formData.get('reply') ?? '').trim().slice(0, 2000);
+  if (!Number.isInteger(id)) return;
+
+  await replyToReview(id, reply, actor);
+  refreshStorefront();
+  doneReviews(formData, reply ? 'Reply saved.' : 'Reply removed.');
 }
 
 /* --------------------------------------------------------------- coverage */
