@@ -12,17 +12,16 @@ import { Field, Input } from '@/components/ui/field';
 import { OrderProgress } from '@/components/account/order-progress';
 
 /**
- * Guest order tracking.
+ * The order tracker on /track, in one of two modes.
  *
- * Both the order number and the phone number on the order are required — the
- * number alone would expose a stranger's address. A wrong phone and a
- * non-existent order return the same message, so this cannot be used to work
- * out which order numbers exist.
+ * - `owner` — a signed-in customer. No lookup form: they pick an order from
+ *   their own list, which links to /track?order=<number>, and this opens it.
+ *   The API matches their orders on the session, so nobody else's can open.
+ * - `staff` — an admin. A "Find your order" box by order number alone; the API
+ *   lets an admin read any order, so no phone number is asked.
  *
- * A signed-in customer opening /track?order=<their order> sees it straight
- * away: the API matches their own orders on the session, no phone needed. The
- * order number (never the phone) is kept in the address bar so a refresh or a
- * shared link lands on the same order.
+ * The order number is kept in the address bar so a refresh or a shared link
+ * lands on the same order.
  */
 
 interface TrackedOrder {
@@ -48,32 +47,34 @@ type Result = { order: TrackedOrder; timeline: TrackedTimeline[] };
 
 export function TrackForm({
   initialOrder = '',
-  signedIn = false,
+  mode,
 }: {
   initialOrder?: string;
-  signedIn?: boolean;
+  mode: 'owner' | 'staff';
 }) {
   const [order, setOrder] = React.useState(initialOrder.toUpperCase());
-  const [phone, setPhone] = React.useState('');
-  const [errors, setErrors] = React.useState<{ order?: string; phone?: string }>({});
-  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | undefined>();
+  const [loading, setLoading] = React.useState(Boolean(initialOrder));
   const [problem, setProblem] = React.useState<string | null>(null);
   const [result, setResult] = React.useState<Result | null>(null);
   const resultRef = React.useRef<HTMLDivElement>(null);
 
-  const lookup = React.useCallback(async (orderNumber: string, phoneNumber: string) => {
+  const lookup = React.useCallback(async (orderNumber: string) => {
     setLoading(true);
     setProblem(null);
     setResult(null);
     try {
-      const query = phoneNumber ? `?phone=${encodeURIComponent(phoneNumber)}` : '';
-      const response = await fetch(`/api/orders/${encodeURIComponent(orderNumber)}${query}`);
+      const response = await fetch(`/api/orders/${encodeURIComponent(orderNumber)}`);
       if (response.status === 429) {
         setProblem('Too many tries. Please wait a few minutes and try again.');
         return false;
       }
       if (!response.ok) {
-        setProblem('No order matches that order number and mobile number. Check both and try again.');
+        setProblem(
+          mode === 'staff'
+            ? 'No order has that number. Check it and try again.'
+            : 'That order is not on your account.',
+        );
         return false;
       }
       setResult(await response.json());
@@ -88,118 +89,113 @@ export function TrackForm({
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [mode]);
 
-  // Signed in and arrived with ?order=: open it without asking for anything.
-  // If it is not theirs the API answers "not found" and the form is there.
+  // Arrived with ?order=: open it without asking for anything.
   const opened = React.useRef(false);
   React.useEffect(() => {
-    if (opened.current || !signedIn || !initialOrder) return;
+    if (opened.current || !initialOrder) return;
     opened.current = true;
-    void lookup(initialOrder.toUpperCase(), '').then((ok) => {
-      if (!ok) setProblem(null);
-    });
-  }, [signedIn, initialOrder, lookup]);
+    void lookup(initialOrder.toUpperCase());
+  }, [initialOrder, lookup]);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-
-    const next: { order?: string; phone?: string } = {};
-    if (!order.trim()) next.order = 'Enter your order number.';
-    if (!/^[6-9]\d{9}$/.test(phone)) next.phone = 'Enter the 10-digit mobile number on the order.';
-    setErrors(next);
-    if (Object.keys(next).length > 0) return;
-
-    await lookup(order.trim(), phone);
+    if (!order.trim()) {
+      setError('Enter the order number.');
+      return;
+    }
+    setError(undefined);
+    await lookup(order.trim());
   };
 
   const reset = () => {
     setResult(null);
     setProblem(null);
-    setPhone('');
     const url = new URL(window.location.href);
     url.searchParams.delete('order');
     window.history.replaceState(null, '', url);
   };
 
   if (result) {
-    return <OrderResult ref={resultRef} result={result} onReset={reset} />;
+    return <OrderResult ref={resultRef} result={result} onReset={reset} mode={mode} />;
+  }
+
+  // A customer has no form: nothing to show until they pick an order.
+  if (mode === 'owner') {
+    if (loading) {
+      return (
+        <p className="flex items-center gap-2 rounded-xl border border-border bg-card p-5 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Opening your order…
+        </p>
+      );
+    }
+    return problem ? <Problem message={problem} /> : null;
   }
 
   return (
     <div className="rounded-xl border border-border bg-card p-5 sm:p-6">
-      <h2 className="heading-3">Find your order</h2>
+      <h2 className="heading-3">Find an order</h2>
       <p className="mt-1.5 text-sm text-muted-foreground">
-        Your order number is in the confirmation we sent when the order was placed.
+        Open any customer&apos;s order and see where it is — the same tracker the customer sees.
       </p>
 
-      <form noValidate className="mt-6 space-y-4" onSubmit={submit}>
+      <form noValidate className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-start" onSubmit={submit}>
         <Field
           label="Order number"
           htmlFor="order"
           required
-          error={errors.order}
+          error={error}
           hint="For example ITG-2608-7K4QM2"
+          className="flex-1"
         >
           <Input
             id="order"
             value={order}
             onChange={(e) => {
               setOrder(e.target.value.toUpperCase());
-              setErrors((x) => ({ ...x, order: undefined }));
+              setError(undefined);
             }}
             placeholder="ITG-…"
             className="tabular uppercase"
             autoComplete="off"
-            aria-invalid={Boolean(errors.order)}
+            aria-invalid={Boolean(error)}
           />
         </Field>
 
-        <Field label="Mobile number on the order" htmlFor="phone" required error={errors.phone}>
-          <Input
-            id="phone"
-            inputMode="numeric"
-            autoComplete="tel-national"
-            maxLength={10}
-            value={phone}
-            onChange={(e) => {
-              setPhone(e.target.value.replace(/\D/g, ''));
-              setErrors((x) => ({ ...x, phone: undefined }));
-            }}
-            placeholder="10-digit mobile number"
-            className="tabular"
-            aria-invalid={Boolean(errors.phone)}
-          />
-        </Field>
-
-        <Button type="submit" variant="accent" size="lg" disabled={loading} className="w-full sm:w-auto">
+        <Button type="submit" variant="accent" size="lg" disabled={loading} className="sm:mt-7">
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-          {loading ? 'Finding your order…' : 'Track order'}
+          {loading ? 'Finding…' : 'Track order'}
         </Button>
       </form>
 
-      {problem ? (
-        <p
-          role="status"
-          className="mt-6 flex items-start gap-2 rounded-lg border border-border bg-surface p-4 text-sm"
-        >
-          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
-          <span>
-            {problem}{' '}
-            <Link href="/support" className="font-medium text-primary underline-offset-4 hover:underline">
-              Contact support
-            </Link>
-          </span>
-        </p>
-      ) : null}
+      {problem ? <Problem message={problem} className="mt-5" /> : null}
     </div>
+  );
+}
+
+function Problem({ message, className }: { message: string; className?: string }) {
+  return (
+    <p
+      role="status"
+      className={`flex items-start gap-2 rounded-lg border border-border bg-surface p-4 text-sm ${className ?? ''}`}
+    >
+      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+      <span>
+        {message}{' '}
+        <Link href="/support" className="font-medium text-primary underline-offset-4 hover:underline">
+          Contact support
+        </Link>
+      </span>
+    </p>
   );
 }
 
 const OrderResult = React.forwardRef<
   HTMLDivElement,
-  { result: Result; onReset: () => void }
->(function OrderResult({ result, onReset }, ref) {
+  { result: Result; onReset: () => void; mode: 'owner' | 'staff' }
+>(function OrderResult({ result, onReset, mode }, ref) {
   const { order, timeline } = result;
   const view = trackView(order.status, order.placedAt, timeline);
   const itemCount = order.items.reduce((sum, item) => sum + item.quantity, 0);
@@ -223,8 +219,8 @@ const OrderResult = React.forwardRef<
             </span>
           ) : null}
           <Button type="button" variant="outline" size="sm" onClick={onReset}>
-            <Search className="h-4 w-4" />
-            Track another
+            {mode === 'staff' ? <Search className="h-4 w-4" /> : null}
+            {mode === 'staff' ? 'Track another' : 'Close'}
           </Button>
         </div>
       </div>
