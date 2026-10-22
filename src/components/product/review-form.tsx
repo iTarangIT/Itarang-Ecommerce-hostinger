@@ -15,7 +15,16 @@ import { cn } from '@/lib/utils';
  * decides who may actually review (signed in, bought it, not yet reviewed) and
  * this renders its answer — including a sign-in link that comes back here.
  */
-export function ReviewForm({ productKey, productPath }: { productKey: string; productPath: string }) {
+export function ReviewForm({
+  productKey,
+  productPath,
+  label = 'Write a review',
+}: {
+  productKey: string;
+  /** Where the sign-in link returns to. */
+  productPath: string;
+  label?: string;
+}) {
   const [open, setOpen] = React.useState(false);
   const [rating, setRating] = React.useState(0);
   const [hover, setHover] = React.useState(0);
@@ -31,8 +40,8 @@ export function ReviewForm({ productKey, productPath }: { productKey: string; pr
       <p className="flex items-start gap-2 rounded-lg border border-success/30 bg-success-soft p-3 text-sm text-foreground">
         <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" />
         {done === 'updated'
-          ? 'Your review has been updated. It will reappear once our team has checked the changes.'
-          : 'Thank you. Your review will appear once our team has checked it.'}
+          ? 'Your review has been updated and is now showing on the product page.'
+          : 'Thank you. Your review is now showing on the product page.'}
       </p>
     );
   }
@@ -40,7 +49,7 @@ export function ReviewForm({ productKey, productPath }: { productKey: string; pr
   if (!open) {
     return (
       <Button variant="outline" fullWidth onClick={() => setOpen(true)}>
-        Write a review
+        {label}
       </Button>
     );
   }

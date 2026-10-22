@@ -11,6 +11,7 @@ import { formatDate } from '@/lib/utils';
 import { Breadcrumbs } from '@/components/ui/breadcrumbs';
 import { ButtonLink } from '@/components/ui/button';
 import { StateBlock } from '@/components/ui/states';
+import { ReviewForm } from '@/components/product/review-form';
 import type { OrderStatus } from '@/lib/orders/types';
 
 export const dynamic = 'force-dynamic';
@@ -20,10 +21,11 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
+// Packing is part of shipping, so an order still in the old `packed` status
+// shows as confirmed until it ships.
 const TIMELINE: Array<{ status: OrderStatus; label: string; icon: typeof Package }> = [
   { status: 'confirmed', label: 'Confirmed', icon: CheckCircle2 },
-  { status: 'packed', label: 'Packed', icon: Package },
-  { status: 'shipped', label: 'Shipped', icon: Truck },
+  { status: 'shipped', label: 'Packed & shipped', icon: Truck },
   { status: 'delivered', label: 'Delivered', icon: MapPin },
 ];
 
@@ -65,8 +67,12 @@ export default async function OrderPage({
   if (!order) notFound();
 
   const events = await repository.listEvents(order.id);
-  const currentIndex = TIMELINE.findIndex((entry) => entry.status === order.status);
+  const timelineStatus = order.status === 'packed' ? 'confirmed' : order.status;
+  const currentIndex = TIMELINE.findIndex((entry) => entry.status === timelineStatus);
   const awaitingPayment = order.status === 'pending_payment';
+  // Reviews open once the battery has arrived; the review action still checks
+  // the signed-in customer bought it.
+  const canReview = order.status === 'delivered' && order.paymentStatus !== 'refunded';
 
   return (
     <div className="container py-6 lg:py-10">
@@ -138,24 +144,35 @@ export default async function OrderPage({
           <h2 className="heading-3">What you ordered</h2>
           <ul className="mt-4 divide-y divide-border rounded-lg border border-border bg-card">
             {order.items.map((item) => (
-              <li key={`${item.variantId}`} className="flex gap-3 p-4">
-                <span className="relative h-16 w-16 shrink-0 overflow-hidden rounded-md border border-border bg-surface">
-                  {item.image ? (
-                    <Image src={item.image} alt="" fill sizes="64px" className="object-contain p-1" />
-                  ) : null}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-semibold text-foreground">{item.title}</span>
-                  {item.variantTitle ? (
-                    <span className="block text-xs text-muted-foreground">{item.variantTitle}</span>
-                  ) : null}
-                  <span className="tabular mt-1 block text-xs text-muted-foreground">
-                    SKU {item.sku} · qty {item.quantity}
+              <li key={`${item.variantId}`} className="p-4">
+                <div className="flex gap-3">
+                  <span className="relative h-16 w-16 shrink-0 overflow-hidden rounded-md border border-border bg-surface">
+                    {item.image ? (
+                      <Image src={item.image} alt="" fill sizes="64px" className="object-contain p-1" />
+                    ) : null}
                   </span>
-                </span>
-                <span className="tabular shrink-0 text-sm font-bold text-foreground">
-                  {formatPrice(item.lineTotal)}
-                </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-semibold text-foreground">{item.title}</span>
+                    {item.variantTitle ? (
+                      <span className="block text-xs text-muted-foreground">{item.variantTitle}</span>
+                    ) : null}
+                    <span className="tabular mt-1 block text-xs text-muted-foreground">
+                      SKU {item.sku} · qty {item.quantity}
+                    </span>
+                  </span>
+                  <span className="tabular shrink-0 text-sm font-bold text-foreground">
+                    {formatPrice(item.lineTotal)}
+                  </span>
+                </div>
+                {canReview ? (
+                  <div className="mt-3">
+                    <ReviewForm
+                      productKey={item.productId}
+                      productPath={`/order/${order.orderNumber}`}
+                      label="Rate & review this product"
+                    />
+                  </div>
+                ) : null}
               </li>
             ))}
           </ul>

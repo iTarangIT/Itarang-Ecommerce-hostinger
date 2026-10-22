@@ -1,11 +1,10 @@
-import { Check, CheckCircle2, Clock, CreditCard, MapPin, Package, PackageCheck, Truck, XCircle } from 'lucide-react';
+import { Check, CheckCircle2, Clock, CreditCard, MapPin, Package, Truck, XCircle } from 'lucide-react';
 import type { StepKey, TrackView } from '@/lib/orders/tracking';
 import { cn, formatDate } from '@/lib/utils';
 
 const ICON: Record<StepKey, typeof Package> = {
   placed: CreditCard,
   confirmed: CheckCircle2,
-  packed: PackageCheck,
   shipped: Truck,
   delivered: MapPin,
 };
@@ -21,7 +20,7 @@ export function OrderProgress({ view }: { view: TrackView }) {
       <StatusBanner view={view} />
 
       {/* Horizontal — sm and up */}
-      <ol className="mt-6 hidden grid-cols-5 sm:grid" aria-label="Order progress">
+      <ol className="mt-6 hidden grid-cols-4 sm:grid" aria-label="Order progress">
         {view.steps.map((step, index) => {
           const Icon = ICON[step.key];
           return (

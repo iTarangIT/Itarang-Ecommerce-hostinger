@@ -1,6 +1,9 @@
 'use server';
 
+import { revalidateTag } from 'next/cache';
 import { z } from 'zod';
+import { invalidateCatalogSnapshot } from '@/lib/commerce';
+import { CATALOG_TAG } from '@/lib/commerce/db/db-provider';
 import { currentUser } from '@/lib/auth/session';
 import { LIMITS, consume } from '@/lib/security/rate-limit';
 import { hasPurchased, saveReview, toggleHelpful } from './reviews';
@@ -16,8 +19,8 @@ import { hasPurchased, saveReview, toggleHelpful } from './reviews';
  * again before it shows.
  *
  * Only buyers may review. A paid order containing the product is the proof, and
- * the review is stored as verified. Nothing is shown until an administrator
- * publishes it.
+ * the review is stored as verified and shown straight away; an administrator
+ * can hide it afterwards.
  */
 
 export type ReviewSubmitResult =
@@ -78,6 +81,10 @@ export async function submitReviewAction(input: {
       body,
       verified: true,
     });
+    // Ratings ride on the cached catalogue, so the product page shows the new
+    // review on its next load.
+    invalidateCatalogSnapshot();
+    revalidateTag(CATALOG_TAG);
     return { ok: true, updated: result === 'updated' };
   } catch (error) {
     console.error('[reviews] could not save review', error);

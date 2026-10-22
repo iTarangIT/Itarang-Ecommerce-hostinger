@@ -9,21 +9,24 @@ import type { OrderStatus } from './types';
  * ever records, so a customer waited for a step that could not happen.
  */
 
-export type StepKey = 'placed' | 'confirmed' | 'packed' | 'shipped' | 'delivered';
+export type StepKey = 'placed' | 'confirmed' | 'shipped' | 'delivered';
 
 export const TRACK_STEPS: ReadonlyArray<{ key: StepKey; label: string; detail: string }> = [
   { key: 'placed', label: 'Order placed', detail: 'We have your order.' },
   { key: 'confirmed', label: 'Confirmed', detail: 'Payment received; queued for dispatch.' },
-  { key: 'packed', label: 'Packed', detail: 'Boxed and ready for the carrier.' },
-  { key: 'shipped', label: 'Shipped', detail: 'On its way with the carrier.' },
+  { key: 'shipped', label: 'Packed & shipped', detail: 'Packed and on its way with the carrier.' },
   { key: 'delivered', label: 'Delivered', detail: 'Received at your address.' },
 ];
 
-/** Which step each status means; pending_payment is still "placed". */
+/**
+ * Which step each status means; pending_payment is still "placed". Packing is
+ * part of shipping now, so an order left in the old `packed` status has not
+ * reached the next step yet.
+ */
 const STEP_OF: Record<Exclude<OrderStatus, 'cancelled'>, StepKey> = {
   pending_payment: 'placed',
   confirmed: 'confirmed',
-  packed: 'packed',
+  packed: 'confirmed',
   shipped: 'shipped',
   delivered: 'delivered',
 };

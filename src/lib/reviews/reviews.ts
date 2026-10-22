@@ -2,14 +2,15 @@ import { query, queryOne } from '@/lib/db/pool';
 import type { RatingSummary, Review } from '@/lib/commerce/types';
 
 /**
- * Product reviews: written by signed-in customers, shown once an administrator
- * publishes them.
+ * Product reviews: written by signed-in buyers and shown straight away. An
+ * administrator can hide one afterwards.
  *
  * Server-only. Two rules shape everything here:
  *
- * - **Nothing is shown unmoderated.** A review is `pending` until published;
- *   only `published` rows reach the storefront, the rating average or the
- *   structured data a search engine reads. An edit sends it back to `pending`.
+ * - **Buyers' reviews publish on save.** Only verified buyers can write one,
+ *   so a review is `published` when saved; only `published` rows reach the
+ *   storefront, the rating average or the structured data a search engine
+ *   reads. A review the team has hidden stays hidden when it is edited.
  * - **"Verified purchase" means the customer really has it.** A paid order, or
  *   a delivered one (cash on delivery is often marked paid late, or never),
  *   decided when the review is written and stored.
@@ -208,9 +209,8 @@ export async function hasPurchased(userId: number, productKey: string): Promise<
 /**
  * Write a review, or replace this customer's existing one for the product.
  *
- * An edit goes back to `pending` — the published text is what was checked, and
- * new text has not been. The team's reply stays: it answers the customer, and
- * the moderator sees both before publishing again.
+ * Both publish immediately, except that an edit to a review the team hid
+ * stays hidden. The team's reply stays: it answers the customer.
  */
 export async function saveReview(input: {
   productKey: string;
@@ -223,12 +223,13 @@ export async function saveReview(input: {
   verified: boolean;
 }): Promise<'created' | 'updated'> {
   const row = await queryOne<{ inserted: boolean }>(
-    `INSERT INTO product_reviews (product_key, user_id, author_name, city, rating, title, body, verified)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    `INSERT INTO product_reviews (product_key, user_id, author_name, city, rating, title, body, verified, status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'published')
      ON CONFLICT (product_key, user_id) DO UPDATE
        SET author_name = EXCLUDED.author_name, city = EXCLUDED.city, rating = EXCLUDED.rating,
            title = EXCLUDED.title, body = EXCLUDED.body, verified = EXCLUDED.verified,
-           status = 'pending', updated_at = now()
+           status = CASE WHEN product_reviews.status = 'hidden' THEN 'hidden' ELSE 'published' END,
+           updated_at = now()
      RETURNING (xmax = 0) AS inserted`,
     [
       input.productKey,
