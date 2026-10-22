@@ -1,4 +1,6 @@
 import { env } from '@/lib/env';
+import { allProducts } from '@/lib/catalog/collections';
+import { CUSTOMER_QUANTITY_CEILING } from '@/lib/commerce/purchase';
 import { paymentProvider, type PaymentIntent } from '@/lib/payments';
 import { couponRule } from '@/lib/offers/coupons';
 import { stateCode } from '@/lib/checkout/validation';
@@ -218,10 +220,17 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
     idempotencyKey: input.idempotencyKey,
   };
 
-  // `maxQuantity` on a quote line is the variant's live stock, read from the
-  // catalogue moments ago — the figure the repository checks against.
+  // The variant's live stock, read from the catalogue moments ago — the figure
+  // the repository checks against. Not `maxQuantity` on the quote line: that
+  // is the cart stepper's ceiling, capped at CUSTOMER_QUANTITY_CEILING so the
+  // real count never reaches the browser. Used here it made 10 the most any
+  // product could ever hold, and seeded the stock ledger at 10.
+  const products = await allProducts();
+  const stockOf = new Map(
+    products.flatMap((product) => product.variants.map((variant) => [variant.id, variant.stock])),
+  );
   const availableByVariant = Object.fromEntries(
-    quote.items.map((item) => [item.id, item.maxQuantity]),
+    quote.items.map((item) => [item.id, stockOf.get(item.id) ?? 0]),
   );
 
   const created = await repository.createOrder({
@@ -232,7 +241,14 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
   });
 
   if (!created.ok) {
-    return { ok: false, code: 'insufficient_stock', variantId: created.variantId, available: created.available };
+    // This result is sent to the browser as-is, so the count is capped the way
+    // the cart's is: "fewer than you asked for", never the figure we hold.
+    return {
+      ok: false,
+      code: 'insufficient_stock',
+      variantId: created.variantId,
+      available: Math.min(created.available, CUSTOMER_QUANTITY_CEILING),
+    };
   }
 
   const order = created.order;
