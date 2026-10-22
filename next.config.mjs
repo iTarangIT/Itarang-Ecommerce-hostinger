@@ -113,6 +113,14 @@ const nextConfig = {
   output: process.env.NEXT_OUTPUT === 'standalone' ? 'standalone' : undefined,
 
   /**
+   * How long a CDN may keep serving a stale page while it fetches a fresh one:
+   * `stale-while-revalidate = expireTime - revalidate`. The default is a year,
+   * which would undo the five-minute `revalidate` in the root layout for any
+   * CDN that honours stale-while-revalidate. An hour bounds it.
+   */
+  expireTime: 3600,
+
+  /**
    * The storefront's old URL prefixes, kept alive.
    *
    * Categories moved from `/c/batteries` to `/batteries` and products from
