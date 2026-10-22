@@ -122,16 +122,25 @@ describe.skipIf(!CONFIGURED)('product reviews', () => {
     expect(await hasPurchased(voter, PRODUCT)).toBe(false);
   });
 
-  it('writing again replaces the review and sends it back for checking', async () => {
+  it('a review shows at once, and writing again replaces it', async () => {
     expect(await saveReview({ ...REVIEW, userId: buyer })).toBe('created');
     const [first] = (await reviewsByUser(buyer));
-    await moderateReview(first!.id, 'published', 'admin@example.com');
+    expect(first).toMatchObject({ status: 'published' });
     expect(await publishedReviews(PRODUCT)).toHaveLength(1);
 
     expect(await saveReview({ ...REVIEW, userId: buyer, rating: 2, title: 'Changed my mind' })).toBe('updated');
     const [edited] = await reviewsByUser(buyer);
-    expect(edited).toMatchObject({ id: first!.id, rating: 2, status: 'pending' });
+    expect(edited).toMatchObject({ id: first!.id, rating: 2, status: 'published' });
     expect(edited!.updatedAt).not.toBeNull();
+    expect(await publishedReviews(PRODUCT)).toHaveLength(1);
+  });
+
+  it('a review the team hid stays hidden when edited', async () => {
+    await saveReview({ ...REVIEW, userId: buyer });
+    const [own] = await reviewsByUser(buyer);
+    await moderateReview(own!.id, 'hidden', 'admin@example.com');
+    await saveReview({ ...REVIEW, userId: buyer, title: 'Trying again' });
+    expect((await reviewsByUser(buyer))[0]).toMatchObject({ status: 'hidden' });
     expect(await publishedReviews(PRODUCT)).toHaveLength(0);
   });
 
@@ -139,14 +148,14 @@ describe.skipIf(!CONFIGURED)('product reviews', () => {
     await saveReview({ ...REVIEW, userId: buyer });
     const [own] = await reviewsByUser(buyer);
 
-    // Not published yet: nothing to vote on.
-    expect(await toggleHelpful(own!.id, voter)).toBeNull();
-    await moderateReview(own!.id, 'published', 'admin@example.com');
-
     expect(await toggleHelpful(own!.id, buyer)).toBe('own');
     expect(await toggleHelpful(own!.id, voter)).toEqual({ count: 1, voted: true });
     expect((await publishedReviews(PRODUCT))[0]!.helpfulCount).toBe(1);
     expect(await toggleHelpful(own!.id, voter)).toEqual({ count: 0, voted: false });
+
+    // Hidden by the team: nothing to vote on.
+    await moderateReview(own!.id, 'hidden', 'admin@example.com');
+    expect(await toggleHelpful(own!.id, voter)).toBeNull();
   });
 
   it('the team reply reaches the storefront and the moderation filters', async () => {
