@@ -4,8 +4,11 @@ import { ChevronRight, MessageCircle, Package, Phone } from 'lucide-react';
 import { Breadcrumbs } from '@/components/ui/breadcrumbs';
 import { TrackForm } from '@/components/account/track-form';
 import { OrderProgressBar } from '@/components/account/order-progress';
+import { OrderTrackingTable } from '@/components/admin/order-tracking-table';
 import { currentUser } from '@/lib/auth/session';
+import { isAdmin } from '@/lib/auth/guards';
 import { orders } from '@/lib/orders/postgres-repository';
+import { type RawParams, parseTrackingQuery, toListFilters } from '@/lib/orders/admin-tracking';
 import { TRACK_STEPS, trackView } from '@/lib/orders/tracking';
 import { formatPrice } from '@/lib/catalog/pricing';
 import { SITE } from '@/lib/site';
@@ -22,9 +25,12 @@ export const metadata: Metadata = {
 export default async function TrackPage({
   searchParams,
 }: {
-  searchParams: Promise<{ order?: string }>;
+  searchParams: Promise<RawParams & { order?: string }>;
 }) {
-  const [{ order: initialOrder = '' }, session] = await Promise.all([searchParams, currentUser()]);
+  const [params, session] = await Promise.all([searchParams, currentUser()]);
+  const initialOrder = typeof params.order === 'string' ? params.order : '';
+
+  if (isAdmin(session)) return <AdminTrackPage params={params} initialOrder={initialOrder} />;
 
   // Signed in: their own orders, newest first — filtered on user_id in SQL with
   // the id from the session, so no one else's order is ever in hand. Each is a
@@ -177,6 +183,67 @@ export default async function TrackPage({
             </div>
           </div>
         </aside>
+      </div>
+    </>
+  );
+}
+
+/**
+ * An admin is not tracking their own parcel — they are answering for every
+ * customer's. So instead of "your orders" they get the whole order book as a
+ * filterable, sortable table with a CSV export; a row's Track opens the same
+ * visual tracker a customer sees, above the table. The admin's session already
+ * lets the lookup API read any order, so no phone number is asked.
+ */
+async function AdminTrackPage({ params, initialOrder }: { params: RawParams; initialOrder: string }) {
+  const { query, dateError } = parseTrackingQuery(params);
+  const filters = toListFilters(query);
+  const repository = orders();
+  const [{ orders: list, total }, counts] = await Promise.all([
+    repository.listOrders(filters),
+    repository.countByStatus(filters),
+  ]);
+
+  return (
+    <>
+      <div className="border-b border-border bg-surface">
+        <div className="container py-6 sm:py-8">
+          <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Track order' }]} />
+          <div className="mt-4 flex flex-wrap items-start justify-between gap-4">
+            <div className="flex items-start gap-4">
+              <span className="hidden h-12 w-12 shrink-0 place-items-center rounded-lg bg-card text-primary shadow-card sm:grid">
+                <Package className="h-6 w-6" />
+              </span>
+              <div>
+                <h1 className="heading-1 text-balance">Order tracking</h1>
+                <p className="mt-3 max-w-2xl text-pretty text-sm leading-relaxed text-muted-foreground sm:text-base">
+                  Every customer&apos;s order and where it is. Filter by stage, payment or date, sort any
+                  column, and download the result as CSV.
+                </p>
+              </div>
+            </div>
+            <Link
+              href="/admin"
+              className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+            >
+              Admin console
+              <ChevronRight className="h-4 w-4" />
+            </Link>
+          </div>
+        </div>
+      </div>
+
+      <div className="container space-y-8 py-8 lg:py-10">
+        {initialOrder ? (
+          <TrackForm key={initialOrder} initialOrder={initialOrder} signedIn />
+        ) : null}
+        <OrderTrackingTable
+          query={query}
+          list={list}
+          total={total}
+          counts={counts}
+          dateError={dateError}
+        />
       </div>
     </>
   );
