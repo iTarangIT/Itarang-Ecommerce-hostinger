@@ -10,14 +10,16 @@
  * for the case where the archive has been replaced by newer photography.
  *
  * Idempotent in the way that matters: an object key is derived from the product
- * key and the image's role, so a second run overwrites the same object
- * (`x-upsert`) and `ON CONFLICT (storage_path)` updates the same row. Running
- * it twice does not double a gallery.
+ * key, the image's role and a hash of its bytes, so a second run overwrites the
+ * same object (`x-upsert`) and `ON CONFLICT (storage_path)` updates the same
+ * row. Changed bytes get a new key, and the rows for the old one are removed,
+ * so running it twice does not double a gallery.
  *
  * It writes only rows this catalogue owns. Nothing here touches Hostinger, and
  * nothing here changes a product's status — an image arriving does not publish
  * anything.
  */
+import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -154,6 +156,15 @@ async function upload(storagePath: string, body: Buffer, contentType: string): P
   }
 }
 
+/** Best-effort: the row is already gone, and an orphaned object only costs storage. */
+async function remove(storagePath: string): Promise<void> {
+  const response = await fetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET}/${storagePath}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${SERVICE_KEY}` },
+  });
+  if (!response.ok) console.warn(`  ! Could not delete ${storagePath} (${response.status}).`);
+}
+
 /* ------------------------------------------------------------------- main */
 
 async function main(): Promise<void> {
@@ -217,10 +228,17 @@ async function main(): Promise<void> {
         fail(`${product.productKey} is not in the database. Run npm run products:import first.`);
       }
 
+      const written: string[] = [];
+
       for (const [index, media] of product.media.entries()) {
         const bytes = files.get(media.file)!;
-        const storagePath = `products/${product.productKey}/${index}-${media.role}.jpg`;
+        // The content hash is in the key because the object is served with an
+        // immutable cache header: replacing the bytes at an unchanged key would
+        // leave browsers and the next/image cache showing the old picture.
+        const hash = createHash('sha256').update(bytes).digest('hex').slice(0, 8);
+        const storagePath = `products/${product.productKey}/${index}-${media.role}-${hash}.jpg`;
         const size = jpegSize(bytes);
+        written.push(storagePath);
 
         await upload(storagePath, bytes, 'image/jpeg');
 
@@ -258,7 +276,23 @@ async function main(): Promise<void> {
         );
       }
 
-      console.log(`    ${product.media.length} images  ${product.productKey}`);
+      // Rows this script wrote for older bytes. Only keys of its own shape
+      // (`<n>-<role>[-<hash>].jpg`) are touched; admin uploads are
+      // `<role>-<token>.<ext>` and stay.
+      const stale = await client.query<{ storage_path: string }>(
+        `DELETE FROM product_media
+          WHERE product_id = $1
+            AND storage_path ~ $2
+            AND NOT (storage_path = ANY($3::text[]))
+          RETURNING storage_path`,
+        [productId, `^products/${product.productKey}/[0-9]+-[a-z]+(-[0-9a-f]{8})?\\.jpg$`, written],
+      );
+      for (const { storage_path } of stale.rows) await remove(storage_path);
+
+      console.log(
+        `    ${product.media.length} images  ${product.productKey}` +
+          (stale.rowCount ? `  (${stale.rowCount} superseded removed)` : ''),
+      );
     }
 
     console.log('\n  ✓ Media uploaded and recorded.\n');

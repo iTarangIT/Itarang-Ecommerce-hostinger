@@ -1,24 +1,51 @@
 import type { Metadata } from 'next';
-import { Package } from 'lucide-react';
+import Link from 'next/link';
+import { ChevronRight, MessageCircle, Package, Phone } from 'lucide-react';
 import { Breadcrumbs } from '@/components/ui/breadcrumbs';
 import { TrackForm } from '@/components/account/track-form';
+import { OrderProgressBar } from '@/components/account/order-progress';
+import { OrderTrackingTable } from '@/components/admin/order-tracking-table';
+import { currentUser } from '@/lib/auth/session';
+import { isAdmin } from '@/lib/auth/guards';
+import { orders } from '@/lib/orders/postgres-repository';
+import { type RawParams, parseTrackingQuery, toListFilters } from '@/lib/orders/admin-tracking';
+import { TRACK_STEPS, trackView } from '@/lib/orders/tracking';
+import { formatPrice } from '@/lib/catalog/pricing';
+import { SITE } from '@/lib/site';
+import { formatDate } from '@/lib/utils';
+
+export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   title: 'Track your order',
-  description: 'Follow your iTarang order from confirmation through delivery and installation.',
+  description: 'See where your iTarang order is, from confirmation to delivery.',
   alternates: { canonical: '/track' },
 };
 
-const STAGES = [
-  { title: 'Order confirmed', detail: 'Payment received and the order is queued for dispatch.' },
-  { title: 'Packed', detail: 'Batteries are crated and the inverter is boxed for transit.' },
-  { title: 'Shipped', detail: 'Handed to the carrier with a tracking reference.' },
-  { title: 'Out for delivery', detail: 'On the vehicle for delivery to your address.' },
-  { title: 'Delivered', detail: 'Received at your address.' },
-  { title: 'Installed', detail: 'Commissioned and load-tested by a certified technician.' },
-];
+export default async function TrackPage({
+  searchParams,
+}: {
+  searchParams: Promise<RawParams & { order?: string }>;
+}) {
+  const [params, session] = await Promise.all([searchParams, currentUser()]);
+  const initialOrder = typeof params.order === 'string' ? params.order : '';
 
-export default function TrackPage() {
+  if (isAdmin(session)) return <AdminTrackPage params={params} initialOrder={initialOrder} />;
+
+  // Signed in: their own orders, newest first — filtered on user_id in SQL with
+  // the id from the session, so no one else's order is ever in hand. Each is a
+  // one-click track; nothing to type.
+  const mine = session
+    ? (await orders().listOrdersForUser(session.id, 10)).orders.map((order) => ({
+        orderNumber: order.orderNumber,
+        placedAt: order.createdAt,
+        total: order.amounts.total,
+        itemCount: order.items.reduce((sum, item) => sum + item.quantity, 0),
+        firstItem: order.items[0]?.title ?? 'Order',
+        view: trackView(order.status, order.createdAt),
+      }))
+    : [];
+
   return (
     <>
       <div className="border-b border-border bg-surface">
@@ -31,8 +58,9 @@ export default function TrackPage() {
             <div>
               <h1 className="heading-1 text-balance">Track your order</h1>
               <p className="mt-3 max-w-2xl text-pretty text-sm leading-relaxed text-muted-foreground sm:text-base">
-                No account needed — your order number and the mobile number on the order are
-                enough.
+                {session
+                  ? 'Pick an order below to see where it is, or look one up by its number.'
+                  : 'Enter your order number and the mobile number on the order — no account needed.'}
               </p>
             </div>
           </div>
@@ -40,40 +68,182 @@ export default function TrackPage() {
       </div>
 
       <div className="container grid gap-8 py-8 lg:grid-cols-12 lg:gap-10 lg:py-10">
-        <div className="lg:col-span-7">
-          <TrackForm />
+        <div className="space-y-6 lg:col-span-8">
+          {mine.length > 0 ? (
+            <section aria-labelledby="your-orders" className="rounded-xl border border-border bg-card p-5 sm:p-6">
+              <h2 id="your-orders" className="heading-3">
+                Your orders
+              </h2>
+              <ul className="mt-4 divide-y divide-border">
+                {mine.map((order) => (
+                  <li key={order.orderNumber}>
+                    <Link
+                      href={`/track?order=${encodeURIComponent(order.orderNumber)}`}
+                      className="group flex items-center gap-4 py-4"
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="flex flex-wrap items-baseline justify-between gap-x-3">
+                          <span className="truncate text-sm font-semibold text-foreground">
+                            {order.firstItem}
+                            {order.itemCount > 1 ? (
+                              <span className="font-normal text-muted-foreground">
+                                {' '}
+                                + {order.itemCount - 1} more
+                              </span>
+                            ) : null}
+                          </span>
+                          <span className="tabular text-sm text-muted-foreground">
+                            {formatPrice(order.total)}
+                          </span>
+                        </span>
+                        <span className="mt-0.5 block text-xs text-muted-foreground">
+                          <span className="tabular">{order.orderNumber}</span> · {formatDate(order.placedAt)}
+                        </span>
+                        <span className="mt-2 flex items-center gap-3">
+                          <span className="w-28 shrink-0 sm:w-40">
+                            <OrderProgressBar view={order.view} />
+                          </span>
+                          <span className="truncate text-xs font-semibold text-foreground">
+                            {order.view.cancelled
+                              ? 'Cancelled'
+                              : order.view.awaitingPayment
+                                ? 'Waiting for payment'
+                                : TRACK_STEPS[order.view.currentIndex].label}
+                          </span>
+                        </span>
+                      </span>
+                      <span className="hidden shrink-0 items-center gap-1 text-sm font-medium text-primary sm:flex">
+                        Track
+                        <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+                      </span>
+                      <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground sm:hidden" />
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+
+          <TrackForm key={initialOrder} initialOrder={initialOrder} signedIn={Boolean(session)} />
+
+          {!session ? (
+            <p className="text-sm text-muted-foreground">
+              Have an account?{' '}
+              <Link
+                href={`/login?next=${encodeURIComponent('/track')}`}
+                className="font-medium text-primary underline-offset-4 hover:underline"
+              >
+                Sign in
+              </Link>{' '}
+              to see all your orders here without typing anything.
+            </p>
+          ) : null}
         </div>
 
-        <aside className="lg:col-span-5">
+        <aside className="space-y-6 lg:col-span-4">
           <div className="rounded-xl border border-border bg-card p-5 sm:p-6">
-            <h2 className="heading-3">What each stage means</h2>
-            <ol className="mt-5 space-y-0">
-              {STAGES.map((stage, index) => (
-                <li key={stage.title} className="relative flex gap-4 pb-6 last:pb-0">
-                  {index < STAGES.length - 1 ? (
-                    <span
-                      aria-hidden="true"
-                      className="absolute left-[0.6875rem] top-6 h-full w-px bg-border"
-                    />
-                  ) : null}
-                  <span className="relative z-10 mt-1 grid h-6 w-6 shrink-0 place-items-center rounded-full border-2 border-border bg-card">
-                    <span className="tabular text-[0.625rem] font-bold text-muted-foreground">
-                      {index + 1}
-                    </span>
+            <h2 className="heading-3">How your order moves</h2>
+            <ol className="mt-4 space-y-3">
+              {TRACK_STEPS.map((step, index) => (
+                <li key={step.key} className="flex gap-3">
+                  <span className="tabular grid h-6 w-6 shrink-0 place-items-center rounded-full bg-secondary text-xs font-bold text-secondary-foreground">
+                    {index + 1}
                   </span>
-                  <span className="min-w-0">
-                    <span className="block text-sm font-semibold text-foreground">
-                      {stage.title}
-                    </span>
-                    <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
-                      {stage.detail}
-                    </span>
+                  <span className="text-sm">
+                    <span className="font-semibold text-foreground">{step.label}</span>
+                    <span className="block text-xs text-muted-foreground">{step.detail}</span>
                   </span>
                 </li>
               ))}
             </ol>
           </div>
+
+          <div className="rounded-xl border border-border bg-card p-5 sm:p-6">
+            <h2 className="heading-3">Need help?</h2>
+            <p className="mt-1.5 text-sm text-muted-foreground">
+              Can&apos;t find your order number, or it&apos;s running late? We&apos;ll check for you.
+            </p>
+            <div className="mt-4 flex flex-col gap-2">
+              <a
+                href={SITE.whatsapp}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 text-sm font-medium text-primary underline-offset-4 hover:underline"
+              >
+                <MessageCircle className="h-4 w-4" />
+                Chat on WhatsApp
+              </a>
+              <a
+                href={SITE.phoneHref}
+                className="inline-flex items-center gap-2 text-sm font-medium text-primary underline-offset-4 hover:underline"
+              >
+                <Phone className="h-4 w-4" />
+                Call {SITE.phone}
+              </a>
+            </div>
+          </div>
         </aside>
+      </div>
+    </>
+  );
+}
+
+/**
+ * An admin is not tracking their own parcel — they are answering for every
+ * customer's. So instead of "your orders" they get the whole order book as a
+ * filterable, sortable table with a CSV export; a row's Track opens the same
+ * visual tracker a customer sees, above the table. The admin's session already
+ * lets the lookup API read any order, so no phone number is asked.
+ */
+async function AdminTrackPage({ params, initialOrder }: { params: RawParams; initialOrder: string }) {
+  const { query, dateError } = parseTrackingQuery(params);
+  const filters = toListFilters(query);
+  const repository = orders();
+  const [{ orders: list, total }, counts] = await Promise.all([
+    repository.listOrders(filters),
+    repository.countByStatus(filters),
+  ]);
+
+  return (
+    <>
+      <div className="border-b border-border bg-surface">
+        <div className="container py-6 sm:py-8">
+          <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Track order' }]} />
+          <div className="mt-4 flex flex-wrap items-start justify-between gap-4">
+            <div className="flex items-start gap-4">
+              <span className="hidden h-12 w-12 shrink-0 place-items-center rounded-lg bg-card text-primary shadow-card sm:grid">
+                <Package className="h-6 w-6" />
+              </span>
+              <div>
+                <h1 className="heading-1 text-balance">Order tracking</h1>
+                <p className="mt-3 max-w-2xl text-pretty text-sm leading-relaxed text-muted-foreground sm:text-base">
+                  Every customer&apos;s order and where it is. Filter by stage, payment or date, sort any
+                  column, and download the result as CSV.
+                </p>
+              </div>
+            </div>
+            <Link
+              href="/admin"
+              className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+            >
+              Admin console
+              <ChevronRight className="h-4 w-4" />
+            </Link>
+          </div>
+        </div>
+      </div>
+
+      <div className="container space-y-8 py-8 lg:py-10">
+        {initialOrder ? (
+          <TrackForm key={initialOrder} initialOrder={initialOrder} signedIn />
+        ) : null}
+        <OrderTrackingTable
+          query={query}
+          list={list}
+          total={total}
+          counts={counts}
+          dateError={dateError}
+        />
       </div>
     </>
   );

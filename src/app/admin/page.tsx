@@ -9,6 +9,7 @@ import {
   Package,
   LifeBuoy,
   RefreshCw,
+  Truck,
   UserRound,
 } from 'lucide-react';
 import {
@@ -99,6 +100,13 @@ export default async function AdminOrdersPage({
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <Link
+            href="/track"
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+          >
+            <Truck className="h-4 w-4" />
+            Tracking
+          </Link>
           <Link
             href="/admin/products"
             className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary"

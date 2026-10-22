@@ -17,6 +17,7 @@ import type {
   CustomerOrderStats,
   OrderListFilters,
   OrderRepository,
+  OrderSort,
 } from './repository';
 import type {
   Order,
@@ -159,6 +160,65 @@ const ORDER_COLUMNS = `
   total, gst_amount, gst_rate, place_of_supply, buyer_gstin, seller_gstin,
   payment_method, is_test, idempotency_key, gateway_order_id,
   created_at, updated_at`;
+
+/** The only columns a caller's `sort` can reach — never interpolated from input. */
+const ORDER_SORT_COLUMNS: Record<OrderSort, string> = {
+  placed: 'created_at',
+  updated: 'updated_at',
+  total: 'total',
+  customer: 'customer_name',
+};
+
+/**
+ * The WHERE clause shared by the order list and its status counts, so a count
+ * chip can never disagree with the rows it filters to.
+ *
+ * Dates are IST calendar days, inclusive at both ends: `placedTo` becomes the
+ * start of the following day, exclusive, so an order at 23:59 IST is in.
+ */
+function orderListWhere(filters: OrderListFilters): { where: string; params: unknown[] } {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (filters.status) {
+    params.push(filters.status);
+    conditions.push(`status = $${params.length}`);
+  }
+  if (filters.paymentStatus) {
+    params.push(filters.paymentStatus);
+    conditions.push(`payment_status = $${params.length}`);
+  }
+  if (filters.paymentMethod) {
+    params.push(filters.paymentMethod);
+    conditions.push(`payment_method = $${params.length}`);
+  }
+  if (filters.isTest !== undefined) {
+    params.push(filters.isTest);
+    conditions.push(`is_test = $${params.length}`);
+  }
+  if (filters.placedFrom) {
+    params.push(filters.placedFrom);
+    conditions.push(`created_at >= ($${params.length}::date::timestamp AT TIME ZONE 'Asia/Kolkata')`);
+  }
+  if (filters.placedTo) {
+    params.push(filters.placedTo);
+    conditions.push(
+      `created_at < (($${params.length}::date + 1)::timestamp AT TIME ZONE 'Asia/Kolkata')`,
+    );
+  }
+  if (filters.search) {
+    params.push(`%${filters.search.trim()}%`);
+    const i = params.length;
+    // Email is included because orders now belong to accounts, and the
+    // address is what an admin has to hand when a customer writes in.
+    conditions.push(
+      `(order_number ILIKE $${i} OR customer_phone ILIKE $${i} ` +
+        `OR customer_name ILIKE $${i} OR customer_email ILIKE $${i})`,
+    );
+  }
+
+  return { where: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '', params };
+}
 
 /**
  * Reservations that still count against stock: active-and-unexpired, or sold
@@ -341,31 +401,11 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
   }
 
   async listOrders(filters: OrderListFilters) {
-    const conditions: string[] = [];
-    const params: unknown[] = [];
-
-    if (filters.status) {
-      params.push(filters.status);
-      conditions.push(`status = $${params.length}`);
-    }
-    if (filters.paymentStatus) {
-      params.push(filters.paymentStatus);
-      conditions.push(`payment_status = $${params.length}`);
-    }
-    if (filters.search) {
-      params.push(`%${filters.search.trim()}%`);
-      const i = params.length;
-      // Email is included because orders now belong to accounts, and the
-      // address is what an admin has to hand when a customer writes in.
-      conditions.push(
-        `(order_number ILIKE $${i} OR customer_phone ILIKE $${i} ` +
-          `OR customer_name ILIKE $${i} OR customer_email ILIKE $${i})`,
-      );
-    }
-
-    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const { where, params } = orderListWhere(filters);
     const limit = Math.min(filters.limit ?? 50, 200);
     const offset = filters.offset ?? 0;
+    const direction = filters.direction === 'asc' ? 'ASC' : 'DESC';
+    const column = ORDER_SORT_COLUMNS[filters.sort ?? 'placed'] ?? 'created_at';
 
     // Two independent reads against the same snapshot — the admin console paid
     // for both round trips in series on every page view and every pagination
@@ -375,14 +415,34 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
         `SELECT count(*)::bigint AS count FROM orders ${where}`,
         params,
       ),
+      // `id` breaks ties, so paging through equal totals or names never shows
+      // a row twice or skips one.
       query<OrderRow>(
         `SELECT ${ORDER_COLUMNS} FROM orders ${where}
-          ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`,
+          ORDER BY ${column} ${direction}, id ${direction} LIMIT ${limit} OFFSET ${offset}`,
         params,
       ),
     ]);
 
     return { orders: await this.hydrate(rows), total: totalRow?.count ?? 0 };
+  }
+
+  async countByStatus(filters: OrderListFilters) {
+    const { where, params } = orderListWhere({ ...filters, status: undefined });
+    const rows = await query<{ status: OrderStatus; count: number }>(
+      `SELECT status, count(*)::int AS count FROM orders ${where} GROUP BY status`,
+      params,
+    );
+    const counts: Record<OrderStatus, number> = {
+      pending_payment: 0,
+      confirmed: 0,
+      packed: 0,
+      shipped: 0,
+      delivered: 0,
+      cancelled: 0,
+    };
+    for (const row of rows) counts[row.status] = Number(row.count);
+    return counts;
   }
 
   /* ------------------------------------------------------ order creation */
