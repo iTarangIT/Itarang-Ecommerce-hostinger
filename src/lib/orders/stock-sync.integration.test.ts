@@ -366,6 +366,107 @@ describe.skipIf(!CONFIGURED)('a paid order moves the catalogue quantity', { time
     // NULL means "not counted", which is not the same as none left.
     expect(await currentStock()).toBeNull();
   });
+
+  /* ------------------------------------------------- cash on delivery */
+
+  /** Place a COD order the way `placeOrder` does: confirmed, then consumed. */
+  async function sellCod(quantity: number) {
+    const available = (await currentStock()) ?? 99;
+    const created = await repository.createOrder({
+      order: { ...draftOrder(VARIANT_ID, quantity), paymentMethod: 'cod', status: 'confirmed' },
+      reservations: [{ variantId: VARIANT_ID, quantity }],
+      availableByVariant: { [VARIANT_ID]: available },
+      reservationTtlMinutes: 15,
+    });
+    if (!created.ok) return null;
+    await repository.consumeReservations(created.order.id);
+    return created.order;
+  }
+
+  it('a cash on delivery sale moves the quantity, and paying later does not move it again', async () => {
+    const order = await sellCod(1);
+    expect(order).not.toBeNull();
+    // It used to stay at 2: the product page kept saying "In stock".
+    expect(await currentStock()).toBe(1);
+
+    await repository.applyPaymentStatus(order!.id, 'paid', 'courier');
+    expect(await currentStock()).toBe(1);
+  });
+
+  it('cash on delivery can sell the shelf out, and the next order is refused', async () => {
+    await sellCod(2);
+    expect(await currentStock()).toBe(0);
+    expect(await sellCod(1)).toBeNull();
+  });
+
+  /* ---------------------------------------------------- cancellations */
+
+  it('cancelling a cash on delivery order puts its units back on the shelf', async () => {
+    const order = await sellCod(2);
+    expect(await currentStock()).toBe(0);
+
+    await repository.transitionOrderStatus(order!.id, 'cancelled', 'admin@example.com');
+    expect(await currentStock()).toBe(2);
+    expect((await repository.availability([VARIANT_ID]))[VARIANT_ID]).toBe(2);
+
+    // Sellable again.
+    expect(await sellCod(1)).not.toBeNull();
+    expect(await currentStock()).toBe(1);
+  });
+
+  it('cancelling a paid order restocks it, and records the product as back in stock', async () => {
+    const { order } = await sell(2);
+    expect(await currentStock()).toBe(0);
+
+    await repository.transitionOrderStatus(order!.id, 'cancelled', 'admin@example.com');
+    expect(await currentStock()).toBe(2);
+
+    const transitions = await query<{ direction: string }>(
+      `SELECT direction FROM stock_transitions WHERE product_id = $1 ORDER BY id DESC LIMIT 1`,
+      [KEY],
+    );
+    // What lets the admin send the "Notify me" emails.
+    expect(transitions[0]?.direction).toBe('back-in-stock');
+    await query(`DELETE FROM stock_transitions WHERE product_id = $1`, [KEY]);
+  });
+
+  it('cancelling an unpaid order releases its hold without inventing stock', async () => {
+    const created = await repository.createOrder({
+      order: draftOrder(VARIANT_ID, 1),
+      reservations: [{ variantId: VARIANT_ID, quantity: 1 }],
+      availableByVariant: { [VARIANT_ID]: 2 },
+      reservationTtlMinutes: 15,
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    expect((await repository.availability([VARIANT_ID]))[VARIANT_ID]).toBe(1);
+
+    await repository.transitionOrderStatus(created.order.id, 'cancelled', 'admin@example.com');
+    // Never sold, so never deducted: the count stays 2, and the hold is gone.
+    expect(await currentStock()).toBe(2);
+    expect((await repository.availability([VARIANT_ID]))[VARIANT_ID]).toBe(2);
+  });
+
+  it('a sale that was never deducted is released on cancel, not added twice', async () => {
+    // A COD sale from before COD deducted stock: consumed, not reconciled, and
+    // the column never lowered.
+    const created = await repository.createOrder({
+      order: { ...draftOrder(VARIANT_ID, 1), paymentMethod: 'cod', status: 'confirmed' },
+      reservations: [{ variantId: VARIANT_ID, quantity: 1 }],
+      availableByVariant: { [VARIANT_ID]: 2 },
+      reservationTtlMinutes: 15,
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    await query(`UPDATE stock_reservations SET state = 'consumed' WHERE order_id = $1`, [
+      created.order.id,
+    ]);
+    expect((await repository.availability([VARIANT_ID]))[VARIANT_ID]).toBe(1);
+
+    await repository.transitionOrderStatus(created.order.id, 'cancelled', 'admin@example.com');
+    expect(await currentStock()).toBe(2);
+    expect((await repository.availability([VARIANT_ID]))[VARIANT_ID]).toBe(2);
+  });
 });
 
 /* ------------------------------------------- the real catalogue, read-only */

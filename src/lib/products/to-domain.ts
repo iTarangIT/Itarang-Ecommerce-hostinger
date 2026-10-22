@@ -32,7 +32,7 @@ import type { ProductRecord, ProductVariantRecord } from './types';
  * is high enough never to trip either, which is the honest rendering of "not
  * tracked". Zero would print "Sold out", a claim nobody made.
  */
-const UNTRACKED_STOCK = 99;
+export const UNTRACKED_STOCK = 99;
 
 function availabilityFor(stock: number): Availability {
   if (stock <= 0) return 'out-of-stock';
