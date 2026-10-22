@@ -13,9 +13,14 @@ import {
 describe('order status transitions', () => {
   it('follows the fulfilment path', () => {
     expect(canTransitionOrder('pending_payment', 'confirmed')).toBe(true);
-    expect(canTransitionOrder('confirmed', 'packed')).toBe(true);
-    expect(canTransitionOrder('packed', 'shipped')).toBe(true);
+    expect(canTransitionOrder('confirmed', 'shipped')).toBe(true);
     expect(canTransitionOrder('shipped', 'delivered')).toBe(true);
+  });
+
+  it('treats packing and shipping as one step', () => {
+    expect(nextOrderStatuses('confirmed')).toEqual(['shipped', 'cancelled']);
+    // Orders already marked packed can still move on.
+    expect(canTransitionOrder('packed', 'shipped')).toBe(true);
   });
 
   it('refuses to move backwards', () => {
