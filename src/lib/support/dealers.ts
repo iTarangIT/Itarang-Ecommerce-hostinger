@@ -1,4 +1,5 @@
-import { query, queryOne } from '@/lib/db/pool';
+import { query, queryOne, transaction } from '@/lib/db/pool';
+import type { ExistingDealer } from './dealer-import';
 
 /**
  * Dealers and service centres. Server-only.
@@ -119,6 +120,49 @@ export async function createDealer(input: DealerInput, actor: string): Promise<v
       actor,
     ],
   );
+}
+
+/** Every dealer, hidden ones included, as the bulk upload matches against. */
+export async function listDealerKeys(): Promise<ExistingDealer[]> {
+  const rows = await query<ExistingDealer>(`SELECT id, name, pincode, phone, whatsapp FROM dealers`);
+  return rows.map((row) => ({ ...row, id: Number(row.id) }));
+}
+
+/**
+ * Many dealers in one transaction: an upload is added whole or not at all, so a
+ * failure part-way never leaves half a sheet on the locator.
+ */
+export async function createDealers(inputs: DealerInput[], actor: string): Promise<number> {
+  if (inputs.length === 0) return 0;
+  await transaction(async (client) => {
+    for (let start = 0; start < inputs.length; start += 200) {
+      const chunk = inputs.slice(start, start + 200);
+      const params: unknown[] = [];
+      const values = chunk.map((input) => {
+        const at = params.length;
+        params.push(
+          input.name,
+          input.kind,
+          input.address,
+          input.city,
+          input.state,
+          input.pincode,
+          input.phone,
+          input.whatsapp,
+          input.latitude,
+          input.longitude,
+          actor,
+        );
+        return `(${Array.from({ length: 11 }, (_, i) => `$${at + i + 1}`).join(', ')})`;
+      });
+      await client.query(
+        `INSERT INTO dealers (name, kind, address, city, state, pincode, phone, whatsapp, latitude, longitude, updated_by)
+         VALUES ${values.join(', ')}`,
+        params,
+      );
+    }
+  });
+  return inputs.length;
 }
 
 export async function setDealerActive(id: number, active: boolean, actor: string): Promise<void> {
