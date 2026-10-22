@@ -5,6 +5,7 @@ import { AlertTriangle, RotateCcw } from 'lucide-react';
 import { SITE } from '@/lib/site';
 import { Button, ButtonLink } from '@/components/ui/button';
 import { StateBlock } from '@/components/ui/states';
+import { isStaleBuildError, reloadOnceForStaleBuild } from '@/lib/stale-build';
 
 export default function Error({
   error,
@@ -13,10 +14,16 @@ export default function Error({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const staleBuild = isStaleBuildError(error);
+
   React.useEffect(() => {
     // Wire this to the error reporter when one is configured.
     console.error(error);
-  }, [error]);
+    if (staleBuild) reloadOnceForStaleBuild();
+  }, [error, staleBuild]);
+
+  // Old cached code can't be retried in place; a reload fetches the new build.
+  const retry = staleBuild ? () => window.location.reload() : reset;
 
   return (
     <div className="container py-16 lg:py-24">
@@ -37,7 +44,7 @@ export default function Error({
         }
         actions={
           <>
-            <Button onClick={reset} variant="primary">
+            <Button onClick={retry} variant="primary">
               <RotateCcw className="h-4 w-4" />
               Try again
             </Button>
