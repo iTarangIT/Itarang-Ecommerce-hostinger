@@ -128,8 +128,12 @@ export async function setDealerActive(id: number, active: boolean, actor: string
   );
 }
 
-/** A phone number as digits for tel:/wa.me links, with India's code. */
+/**
+ * A phone number as digits for tel:/wa.me links, with India's code. Admins type
+ * numbers as "98765 43210", "098765 43210" or "+91 98765 43210"; the last ten
+ * digits are the subscriber number in every case.
+ */
 export function dialable(phone: string): string {
   const digits = phone.replace(/\D/g, '');
-  return digits.length === 10 ? `91${digits}` : digits;
+  return digits.length >= 10 ? `91${digits.slice(-10)}` : digits;
 }

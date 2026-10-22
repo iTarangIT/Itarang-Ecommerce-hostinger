@@ -116,7 +116,9 @@ export default async function DealersPage({
                         className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-secondary"
                       >
                         <Phone className="h-4 w-4" />
-                        Call
+                        {/* The number itself, not just "Call": a phone dials it
+                            from the SIM, and on a computer it can be read off. */}
+                        Call <span className="tabular">{dealer.phone}</span>
                       </a>
                     ) : null}
                     {dealer.whatsapp ? (
