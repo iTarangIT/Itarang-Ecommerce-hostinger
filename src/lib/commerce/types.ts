@@ -212,6 +212,8 @@ export interface Review {
   createdAt: string;
   helpfulCount: number;
   hasPhotos: boolean;
+  /** A public reply from the iTarang team, shown under the review. */
+  reply?: { body: string; at: string };
 }
 
 export interface Product {

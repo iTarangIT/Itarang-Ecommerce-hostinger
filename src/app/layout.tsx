@@ -31,6 +31,25 @@ const jakartaDisplay = Plus_Jakarta_Sans({
   display: 'swap',
 });
 
+/**
+ * Every statically rendered page is re-rendered at most five minutes after it
+ * goes stale — and, more importantly, that is what the CDN is told.
+ *
+ * Next sends `Cache-Control: s-maxage=31536000` (a year) for a page with
+ * `revalidate = false`, and Hostinger's CDN obeys it, keeping a separate copy
+ * per request variant. So `revalidateTag` refreshed our server while the CDN
+ * kept serving the old HTML: after a redesign, signed-out desktop Chrome got a
+ * home page several days old while other browsers — and anyone signed in, who
+ * bypasses the CDN — saw the new one. With a number here the header becomes
+ * `s-maxage=300, stale-while-revalidate=…` (see `expireTime` in
+ * next.config.mjs), so no copy outlives five minutes plus one refresh.
+ *
+ * Tag purges on admin writes still apply immediately on the server; this only
+ * puts a ceiling on how long any copy, anywhere, can be stale. Pages that read
+ * the session are `force-dynamic` and stay uncached (`private, no-store`).
+ */
+export const revalidate = 300;
+
 export const metadata: Metadata = {
   metadataBase: new URL(SITE.url),
   title: {

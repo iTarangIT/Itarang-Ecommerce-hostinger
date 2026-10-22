@@ -18,6 +18,8 @@ import type { ProductSummary } from '@/lib/commerce/summary';
 import { useForgetWishlist, useWishlist } from '@/lib/store/hooks';
 import { logoutAction, logoutEverywhereAction } from '@/lib/auth/actions';
 import type { CustomerAddress } from '@/lib/account/addresses';
+import type { OwnReview } from '@/lib/reviews/reviews';
+import { OwnReviews } from './own-reviews';
 import { ResendVerification } from './resend-verification';
 import { AddressList } from './address-list';
 import { ProfileForm } from './profile-form';
@@ -87,12 +89,15 @@ export function AccountBody({
   user,
   orders,
   addresses,
+  reviews,
 }: {
   suggestions: ProductSummary[];
   user: AccountUser | null;
   orders: AccountOrder[];
   /** Already scoped to this account by the page, which reads them with the session id. */
   addresses: CustomerAddress[];
+  /** This account's own reviews, any status; read by the page with the session id. */
+  reviews: OwnReview[];
 }) {
   const searchParams = useSearchParams();
   const requested = searchParams.get('tab') as TabId | null;
@@ -156,11 +161,16 @@ export function AccountBody({
           />
         ) : null}
         {tab === 'reviews' ? (
-          <AccountPlaceholder
-            icon={<Star className="h-6 w-6" />}
-            title="No reviews yet"
-            description="We only accept a review that is attached to a delivered order, so nobody can post about a product they have not bought. Ordering is not open yet, so there is nothing to review from here."
-          />
+          user ? (
+            <OwnReviews reviews={reviews} />
+          ) : (
+            <AccountPlaceholder
+              icon={<Star className="h-6 w-6" />}
+              title="Sign in to see your reviews"
+              description="Reviews are kept with your account. Only customers who bought a product can review it."
+              action={{ label: 'Sign in', href: '/login?next=%2Faccount%3Ftab%3Dreviews' }}
+            />
+          )
         ) : null}
       </div>
     </div>

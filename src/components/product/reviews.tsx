@@ -1,7 +1,10 @@
 'use client';
 
 import * as React from 'react';
-import { BadgeCheck, Camera, MapPin, MessageSquarePlus, ThumbsUp } from 'lucide-react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { BadgeCheck, Camera, MapPin, MessageSquarePlus, Store, ThumbsUp } from 'lucide-react';
+import { toggleHelpfulAction } from '@/lib/reviews/review-actions';
 import type { RatingSummary, Review } from '@/lib/commerce/types';
 import { Rating } from '@/components/ui/rating';
 import { Button } from '@/components/ui/button';
@@ -50,7 +53,47 @@ export function Reviews({
   const [starFilter, setStarFilter] = React.useState<number | null>(null);
   const [photosOnly, setPhotosOnly] = React.useState(false);
   const [visible, setVisible] = React.useState(4);
-  const [voted, setVoted] = React.useState<string[]>([]);
+  // Votes cast in this visit: the page is static, so it cannot know earlier
+  // ones. The server holds the real tally and answers each click with it.
+  const [votes, setVotes] = React.useState<Record<string, { count: number; voted: boolean }>>({});
+  const [voteNote, setVoteNote] = React.useState<{
+    id: string;
+    message: string;
+    signin: boolean;
+  } | null>(null);
+  const [voting, setVoting] = React.useState<string | null>(null);
+  const pathname = usePathname();
+  // No review can carry photos yet; a filter that never matches is a dead end.
+  const anyPhotos = reviews.some((r) => r.hasPhotos);
+
+  async function vote(id: string) {
+    setVoting(id);
+    setVoteNote(null);
+    try {
+      const result = await toggleHelpfulAction(id);
+      if (result.ok)
+        setVotes((v) => ({
+          ...v,
+          [id]: { count: result.count, voted: result.voted },
+        }));
+      else
+        setVoteNote({
+          id,
+          message: result.message,
+          signin: result.reason === 'signin',
+        });
+    } catch {
+      setVoteNote({
+        id,
+        message: 'We could not record your vote. Please try again.',
+        signin: false,
+      });
+    } finally {
+      setVoting(null);
+    }
+  }
+
+  const helpfulOf = (review: Review) => votes[review.id]?.count ?? review.helpfulCount;
 
   const filtered = React.useMemo(() => {
     let list = reviews;
@@ -66,7 +109,7 @@ export function Reviews({
         case 'low':
           return a.rating - b.rating;
         default:
-          return b.helpfulCount - a.helpfulCount;
+          return b.helpfulCount - a.helpfulCount || b.createdAt.localeCompare(a.createdAt);
       }
     });
   }, [reviews, sort, starFilter, photosOnly]);
@@ -124,7 +167,10 @@ export function Reviews({
                     </span>
                     <span className="h-2 flex-1 overflow-hidden rounded-full bg-border">
                       <span
-                        className={cn('block h-full rounded-full', active ? 'bg-primary' : 'bg-accent')}
+                        className={cn(
+                          'block h-full rounded-full',
+                          active ? 'bg-primary' : 'bg-accent',
+                        )}
                         style={{ width: `${percent}%` }}
                       />
                     </span>
@@ -157,20 +203,22 @@ export function Reviews({
                 {starFilter} star ✕
               </button>
             ) : null}
-            <button
-              type="button"
-              onClick={() => setPhotosOnly((p) => !p)}
-              aria-pressed={photosOnly}
-              className={cn(
-                'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
-                photosOnly
-                  ? 'border-primary bg-primary text-primary-foreground'
-                  : 'border-border bg-card text-foreground hover:border-accent/50',
-              )}
-            >
-              <Camera className="h-3.5 w-3.5" />
-              With photos
-            </button>
+            {anyPhotos ? (
+              <button
+                type="button"
+                onClick={() => setPhotosOnly((p) => !p)}
+                aria-pressed={photosOnly}
+                className={cn(
+                  'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+                  photosOnly
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-border bg-card text-foreground hover:border-accent/50',
+                )}
+              >
+                <Camera className="h-3.5 w-3.5" />
+                With photos
+              </button>
+            ) : null}
           </div>
 
           <label className="flex items-center gap-2 text-sm">
@@ -208,7 +256,7 @@ export function Reviews({
           <>
             <ul className="divide-y divide-border">
               {filtered.slice(0, visible).map((review) => {
-                const hasVoted = voted.includes(review.id);
+                const hasVoted = votes[review.id]?.voted ?? false;
                 return (
                   <li key={review.id} className="py-5">
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -242,13 +290,8 @@ export function Reviews({
                       <span>{formatDate(review.createdAt)}</span>
                       <button
                         type="button"
-                        onClick={() =>
-                          setVoted((v) =>
-                            v.includes(review.id)
-                              ? v.filter((id) => id !== review.id)
-                              : [...v, review.id],
-                          )
-                        }
+                        onClick={() => void vote(review.id)}
+                        disabled={voting === review.id}
                         aria-pressed={hasVoted}
                         className={cn(
                           'inline-flex items-center gap-1.5 rounded-sm px-2 py-1 transition-colors hover:bg-secondary',
@@ -256,9 +299,37 @@ export function Reviews({
                         )}
                       >
                         <ThumbsUp className={cn('h-3.5 w-3.5', hasVoted && 'fill-current')} />
-                        Helpful ({review.helpfulCount + (hasVoted ? 1 : 0)})
+                        Helpful ({helpfulOf(review)})
                       </button>
+                      {voteNote?.id === review.id ? (
+                        <span role="status" className="text-destructive">
+                          {voteNote.message}{' '}
+                          {voteNote.signin ? (
+                            <Link
+                              href={`/login?next=${encodeURIComponent(`${pathname}#reviews`)}`}
+                              className="underline"
+                            >
+                              Sign in
+                            </Link>
+                          ) : null}
+                        </span>
+                      ) : null}
                     </div>
+
+                    {review.reply ? (
+                      <div className="mt-3 rounded-md border-l-2 border-primary bg-surface px-3 py-2.5">
+                        <p className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+                          <Store className="h-3.5 w-3.5 text-primary" />
+                          Response from iTarang
+                          <span className="font-normal text-muted-foreground">
+                            · {formatDate(review.reply.at)}
+                          </span>
+                        </p>
+                        <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-muted-foreground">
+                          {review.reply.body}
+                        </p>
+                      </div>
+                    ) : null}
                   </li>
                 );
               })}

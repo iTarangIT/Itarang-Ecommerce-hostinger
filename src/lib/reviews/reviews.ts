@@ -9,20 +9,27 @@ import type { RatingSummary, Review } from '@/lib/commerce/types';
  *
  * - **Nothing is shown unmoderated.** A review is `pending` until published;
  *   only `published` rows reach the storefront, the rating average or the
- *   structured data a search engine reads.
- * - **"Verified purchase" means a paid order.** It is decided when the review
- *   is written, from the reviewer's own orders, and stored.
+ *   structured data a search engine reads. An edit sends it back to `pending`.
+ * - **"Verified purchase" means the customer really has it.** A paid order, or
+ *   a delivered one (cash on delivery is often marked paid late, or never),
+ *   decided when the review is written and stored.
  *
- * The read paths fail soft. The catalogue calls them on every product load,
- * and a database that has not had migration 0021 yet must still serve
- * products — with no ratings, which is the truth for that database.
+ * The storefront read paths fail soft. The catalogue calls them on every
+ * product load, and a database that has not had migration 0021 yet must still
+ * serve products — with no ratings, which is the truth for that database. One
+ * that has 0021 but not 0022 (votes, replies) falls back to the old query
+ * rather than losing every review: the deploy does not run migrations.
  */
 
 export type ReviewStatus = 'pending' | 'published' | 'hidden';
 
+export const REVIEW_STATUSES: ReviewStatus[] = ['pending', 'published', 'hidden'];
+
 export interface ModerationReview {
   id: number;
   productKey: string;
+  productTitle: string | null;
+  productSlug: string | null;
   authorName: string;
   city: string | null;
   rating: number;
@@ -31,7 +38,28 @@ export interface ModerationReview {
   verified: boolean;
   status: ReviewStatus;
   createdAt: string;
+  updatedAt: string | null;
   moderatedBy: string | null;
+  helpfulCount: number;
+  reply: string | null;
+  replyBy: string | null;
+}
+
+/** A customer's own review, for /account. */
+export interface OwnReview {
+  id: number;
+  productKey: string;
+  productTitle: string | null;
+  productSlug: string | null;
+  rating: number;
+  title: string;
+  body: string;
+  city: string | null;
+  status: ReviewStatus;
+  createdAt: string;
+  updatedAt: string | null;
+  helpfulCount: number;
+  reply: string | null;
 }
 
 interface Row {
@@ -45,7 +73,14 @@ interface Row {
   verified: boolean;
   status: ReviewStatus;
   created_at: Date;
+  updated_at?: Date | null;
   moderated_by: string | null;
+  admin_reply?: string | null;
+  admin_reply_at?: Date | null;
+  admin_reply_by?: string | null;
+  helpful_count?: number;
+  product_title?: string | null;
+  product_slug?: string | null;
 }
 
 let warned = false;
@@ -58,6 +93,18 @@ function softFail<T>(fallback: T) {
     return fallback;
   };
 }
+
+/** Run the current query; on a database without migration 0022, the old one. */
+async function withLegacy<T>(current: () => Promise<T>, legacy: () => Promise<T>): Promise<T> {
+  try {
+    return await current();
+  } catch (error) {
+    console.warn('[reviews] falling back (has migration 0022 run?):', (error as Error).message);
+    return legacy();
+  }
+}
+
+const HELPFUL = `(SELECT count(*)::int FROM product_review_votes v WHERE v.review_id = r.id)`;
 
 function toReview(row: Row): Review {
   return {
@@ -72,18 +119,32 @@ function toReview(row: Row): Review {
     city: row.city ? `${row.author_name}, ${row.city}` : row.author_name,
     verifiedPurchase: row.verified,
     createdAt: row.created_at.toISOString(),
-    helpfulCount: 0,
+    helpfulCount: Number(row.helpful_count ?? 0),
     hasPhotos: false,
+    reply:
+      row.admin_reply && row.admin_reply_at
+        ? { body: row.admin_reply, at: row.admin_reply_at.toISOString() }
+        : undefined,
   };
 }
 
 /** Published reviews for one product, newest first. */
 export async function publishedReviews(productKey: string, limit = 100): Promise<Review[]> {
-  return query<Row>(
-    `SELECT * FROM product_reviews
-      WHERE product_key = $1 AND status = 'published'
-      ORDER BY created_at DESC LIMIT $2`,
-    [productKey, limit],
+  return withLegacy(
+    () =>
+      query<Row>(
+        `SELECT r.*, ${HELPFUL} AS helpful_count FROM product_reviews r
+          WHERE r.product_key = $1 AND r.status = 'published'
+          ORDER BY r.created_at DESC LIMIT $2`,
+        [productKey, limit],
+      ),
+    () =>
+      query<Row>(
+        `SELECT * FROM product_reviews
+          WHERE product_key = $1 AND status = 'published'
+          ORDER BY created_at DESC LIMIT $2`,
+        [productKey, limit],
+      ),
   )
     .then((rows) => rows.map(toReview))
     .catch(softFail<Review[]>([]));
@@ -128,29 +189,30 @@ export async function ratingSummaries(): Promise<Map<string, RatingSummary>> {
 }
 
 /**
- * Whether this customer bought this product: a paid order of theirs with a
- * line for it. Order lines record the product id, which is the product key.
+ * Whether this customer has this product: an order of theirs with a line for
+ * it that is paid, or delivered (cash on delivery). Order lines record the
+ * product id, which is the product key. A refunded order is neither.
  */
 export async function hasPurchased(userId: number, productKey: string): Promise<boolean> {
   const row = await queryOne<{ found: boolean }>(
     `SELECT EXISTS (
        SELECT 1 FROM orders o JOIN order_items i ON i.order_id = o.id
-        WHERE o.user_id = $1 AND i.product_id = $2 AND o.payment_status = 'paid'
+        WHERE o.user_id = $1 AND i.product_id = $2
+          AND (o.payment_status = 'paid' OR (o.status = 'delivered' AND o.payment_status <> 'refunded'))
      ) AS found`,
     [userId, productKey],
   );
   return row?.found ?? false;
 }
 
-export async function hasReviewed(userId: number, productKey: string): Promise<boolean> {
-  const row = await queryOne<{ found: boolean }>(
-    `SELECT EXISTS (SELECT 1 FROM product_reviews WHERE user_id = $1 AND product_key = $2) AS found`,
-    [userId, productKey],
-  );
-  return row?.found ?? false;
-}
-
-export async function createReview(input: {
+/**
+ * Write a review, or replace this customer's existing one for the product.
+ *
+ * An edit goes back to `pending` — the published text is what was checked, and
+ * new text has not been. The team's reply stays: it answers the customer, and
+ * the moderator sees both before publishing again.
+ */
+export async function saveReview(input: {
   productKey: string;
   userId: number;
   authorName: string;
@@ -159,12 +221,15 @@ export async function createReview(input: {
   title: string;
   body: string;
   verified: boolean;
-}): Promise<'created' | 'duplicate'> {
-  const row = await queryOne<{ id: number }>(
+}): Promise<'created' | 'updated'> {
+  const row = await queryOne<{ inserted: boolean }>(
     `INSERT INTO product_reviews (product_key, user_id, author_name, city, rating, title, body, verified)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-     ON CONFLICT (product_key, user_id) DO NOTHING
-     RETURNING id`,
+     ON CONFLICT (product_key, user_id) DO UPDATE
+       SET author_name = EXCLUDED.author_name, city = EXCLUDED.city, rating = EXCLUDED.rating,
+           title = EXCLUDED.title, body = EXCLUDED.body, verified = EXCLUDED.verified,
+           status = 'pending', updated_at = now()
+     RETURNING (xmax = 0) AS inserted`,
     [
       input.productKey,
       input.userId,
@@ -176,32 +241,185 @@ export async function createReview(input: {
       input.verified,
     ],
   );
-  return row ? 'created' : 'duplicate';
+  return row?.inserted ? 'created' : 'updated';
 }
 
-export async function reviewsForModeration(status: ReviewStatus): Promise<ModerationReview[]> {
+/**
+ * Toggle this account's "helpful" vote on a published review. Returns the new
+ * count and whether the account now has a vote on it, or null when there is no
+ * such published review. A customer cannot vote on their own review.
+ */
+export async function toggleHelpful(
+  reviewId: number,
+  userId: number,
+): Promise<{ count: number; voted: boolean } | 'own' | null> {
+  const review = await queryOne<{ user_id: number }>(
+    `SELECT user_id FROM product_reviews WHERE id = $1 AND status = 'published'`,
+    [reviewId],
+  );
+  if (!review) return null;
+  if (Number(review.user_id) === userId) return 'own';
+
+  const removed = await queryOne<{ review_id: number }>(
+    `DELETE FROM product_review_votes WHERE review_id = $1 AND user_id = $2 RETURNING review_id`,
+    [reviewId, userId],
+  );
+  if (!removed) {
+    await query(
+      `INSERT INTO product_review_votes (review_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      [reviewId, userId],
+    );
+  }
+  const row = await queryOne<{ count: number }>(
+    `SELECT count(*)::int AS count FROM product_review_votes WHERE review_id = $1`,
+    [reviewId],
+  );
+  return { count: Number(row?.count ?? 0), voted: !removed };
+}
+
+/** This account's own reviews, newest first, with where each one stands. */
+export async function reviewsByUser(userId: number): Promise<OwnReview[]> {
   const rows = await query<Row>(
-    `SELECT * FROM product_reviews WHERE status = $1 ORDER BY created_at DESC LIMIT 200`,
-    [status],
+    `SELECT r.*, ${HELPFUL} AS helpful_count, p.title AS product_title, p.slug AS product_slug
+       FROM product_reviews r LEFT JOIN products p ON p.product_key = r.product_key
+      WHERE r.user_id = $1 ORDER BY r.created_at DESC LIMIT 100`,
+    [userId],
   );
   return rows.map((row) => ({
-    id: row.id,
+    id: Number(row.id),
     productKey: row.product_key,
-    authorName: row.author_name,
-    city: row.city,
+    productTitle: row.product_title ?? null,
+    productSlug: row.product_slug ?? null,
     rating: row.rating,
     title: row.title,
     body: row.body,
-    verified: row.verified,
+    city: row.city,
     status: row.status,
     createdAt: row.created_at.toISOString(),
-    moderatedBy: row.moderated_by,
+    updatedAt: row.updated_at ? row.updated_at.toISOString() : null,
+    helpfulCount: Number(row.helpful_count ?? 0),
+    reply: row.admin_reply ?? null,
   }));
+}
+
+/* ------------------------------------------------------------- moderation */
+
+export interface ModerationFilters {
+  status?: ReviewStatus;
+  rating?: number;
+  /** Matches product title or key, review title or text, and author. */
+  search?: string;
+  /** Only reviews the team has not replied to. */
+  unreplied?: boolean;
+  limit: number;
+  offset: number;
+}
+
+function moderationWhere(filters: Omit<ModerationFilters, 'limit' | 'offset'>) {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  if (filters.status) {
+    params.push(filters.status);
+    conditions.push(`r.status = $${params.length}`);
+  }
+  if (filters.rating) {
+    params.push(filters.rating);
+    conditions.push(`r.rating = $${params.length}`);
+  }
+  if (filters.unreplied) conditions.push(`r.admin_reply IS NULL`);
+  if (filters.search) {
+    params.push(`%${filters.search}%`);
+    const i = params.length;
+    conditions.push(
+      `(p.title ILIKE $${i} OR r.product_key ILIKE $${i} OR r.title ILIKE $${i} ` +
+        `OR r.body ILIKE $${i} OR r.author_name ILIKE $${i})`,
+    );
+  }
+  return { where: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '', params };
+}
+
+export async function reviewsForModeration(
+  filters: ModerationFilters,
+): Promise<{ reviews: ModerationReview[]; total: number }> {
+  const { where, params } = moderationWhere(filters);
+  const from = `FROM product_reviews r LEFT JOIN products p ON p.product_key = r.product_key ${where}`;
+  const [totalRow, rows] = await Promise.all([
+    queryOne<{ count: number }>(`SELECT count(*)::int AS count ${from}`, params),
+    query<Row>(
+      `SELECT r.*, ${HELPFUL} AS helpful_count, p.title AS product_title, p.slug AS product_slug
+       ${from} ORDER BY r.created_at DESC, r.id DESC
+       LIMIT ${Math.min(filters.limit, 100)} OFFSET ${Math.max(0, filters.offset)}`,
+      params,
+    ),
+  ]);
+  return {
+    total: Number(totalRow?.count ?? 0),
+    reviews: rows.map((row) => ({
+      id: Number(row.id),
+      productKey: row.product_key,
+      productTitle: row.product_title ?? null,
+      productSlug: row.product_slug ?? null,
+      authorName: row.author_name,
+      city: row.city,
+      rating: row.rating,
+      title: row.title,
+      body: row.body,
+      verified: row.verified,
+      status: row.status,
+      createdAt: row.created_at.toISOString(),
+      updatedAt: row.updated_at ? row.updated_at.toISOString() : null,
+      moderatedBy: row.moderated_by,
+      helpfulCount: Number(row.helpful_count ?? 0),
+      reply: row.admin_reply ?? null,
+      replyBy: row.admin_reply_by ?? null,
+    })),
+  };
+}
+
+/** The numbers at the top of the review dashboard. */
+export async function reviewStats(): Promise<{
+  byStatus: Record<ReviewStatus, number>;
+  /** Published only — what shoppers see. */
+  average: number | null;
+  distribution: [number, number, number, number, number];
+  unreplied: number;
+}> {
+  const rows = await query<{ status: ReviewStatus; rating: number; replied: boolean; count: number }>(
+    `SELECT status, rating, admin_reply IS NOT NULL AS replied, count(*)::int AS count
+       FROM product_reviews GROUP BY status, rating, admin_reply IS NOT NULL`,
+  );
+  const byStatus: Record<ReviewStatus, number> = { pending: 0, published: 0, hidden: 0 };
+  const distribution: [number, number, number, number, number] = [0, 0, 0, 0, 0];
+  let unreplied = 0;
+  for (const row of rows) {
+    const count = Number(row.count);
+    byStatus[row.status] += count;
+    if (row.status === 'published') {
+      distribution[row.rating - 1] += count;
+      if (!row.replied) unreplied += count;
+    }
+  }
+  const published = byStatus.published;
+  const average =
+    published > 0
+      ? Math.round((distribution.reduce((sum, n, i) => sum + n * (i + 1), 0) / published) * 10) / 10
+      : null;
+  return { byStatus, average, distribution, unreplied };
 }
 
 export async function moderateReview(id: number, status: ReviewStatus, actor: string): Promise<void> {
   await query(
     `UPDATE product_reviews SET status = $2, moderated_at = now(), moderated_by = $3 WHERE id = $1`,
     [id, status, actor],
+  );
+}
+
+/** Set, replace or (with an empty reply) remove the team's public reply. */
+export async function replyToReview(id: number, reply: string, actor: string): Promise<void> {
+  await query(
+    reply
+      ? `UPDATE product_reviews SET admin_reply = $2, admin_reply_at = now(), admin_reply_by = $3 WHERE id = $1`
+      : `UPDATE product_reviews SET admin_reply = NULL, admin_reply_at = NULL, admin_reply_by = NULL WHERE id = $1`,
+    reply ? [id, reply, actor] : [id],
   );
 }

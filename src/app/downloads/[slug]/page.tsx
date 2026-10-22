@@ -35,8 +35,11 @@ export async function generateStaticParams() {
  */
 export const dynamicParams = true;
 
-/** Purged by `revalidateTag(CATALOG_TAG)` on admin writes, never on a timer. */
-export const revalidate = false;
+/**
+ * Purged by `revalidateTag(CATALOG_TAG)` on admin writes, and capped at five
+ * minutes so the CDN never holds a copy for a year (see the root layout).
+ */
+export const revalidate = 300;
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const product = await catalog().getProduct((await params).slug);
