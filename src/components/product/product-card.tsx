@@ -259,7 +259,7 @@ export function ProductCard({
               purchase is switched on. While it is off there is nothing to
               choose between, and every card carries the same disabled button. */}
           {PURCHASE_ENABLED && !soldOut && product.hasOptions ? (
-            <ButtonLink href={productPath(product.slug)} variant="outline" size="md" fullWidth>
+            <ButtonLink href={productPath(product.slug)} variant="outline" size="md" fullWidth className="whitespace-nowrap px-2 sm:px-4">
               Choose options
             </ButtonLink>
           ) : (
@@ -269,6 +269,9 @@ export function ProductCard({
               variant="outline"
               size="md"
               fullWidth
+              // Two cards side by side on a 360px phone leave ~130px: tighter
+              // padding keeps the label on one line.
+              className="gap-1.5 whitespace-nowrap px-2 sm:px-4"
             >
               <ShoppingCart className="h-4 w-4" />
               {soldOut ? 'Out of stock' : 'Add to cart'}

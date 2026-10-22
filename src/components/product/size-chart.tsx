@@ -19,7 +19,7 @@ export function SizeChart({ chart }: { chart: SizeChartData }) {
       <h2 id="size-chart-heading" className="heading-3">
         {chart.title}
       </h2>
-      <div className="mt-4 overflow-x-auto rounded-lg border border-border">
+      <div className="relative mt-4 overflow-x-auto rounded-lg border border-border">
         <table className="w-full min-w-[30rem] border-collapse text-left text-sm">
           <thead>
             <tr className="bg-surface">
