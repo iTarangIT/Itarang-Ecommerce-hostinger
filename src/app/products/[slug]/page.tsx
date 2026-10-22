@@ -674,16 +674,15 @@ export default async function ProductPage({ params }: PageProps) {
 export const dynamicParams = true;
 
 /**
- * Cached until something says otherwise — never on a timer.
+ * Purged by `revalidateTag(CATALOG_TAG)` from the admin write path, so an
+ * edited price reaches our server's copy at once — and re-rendered at most
+ * every five minutes on top of that.
  *
- * This was the implicit default and it is now stated, because the implicit
- * version was indistinguishable from an oversight and behaved like one: the
- * page was built once and never rebuilt, so an edited price reached the
- * category grid within seconds and this page never at all.
- *
- * A time-based `revalidate` is deliberately not used. Product pages change when
- * an administrator changes them, which is rare and known exactly — so they are
- * purged by `revalidateTag(CATALOG_TAG)` from the admin write path rather than
- * re-rendered on a schedule that would be wrong in both directions.
+ * The timer is not for our server; it is for the CDN in front of it. With
+ * `revalidate = false` Next told Hostinger's CDN to keep the HTML for a year,
+ * and a tag purge never reaches the CDN, so an edited price could stay wrong
+ * there indefinitely. A number caps every copy at five minutes. Same value as
+ * the root layout, which would impose it anyway; stated here so this page does
+ * not read as uncached-forever.
  */
-export const revalidate = false;
+export const revalidate = 300;

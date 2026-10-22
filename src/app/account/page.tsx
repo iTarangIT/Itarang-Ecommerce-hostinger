@@ -4,6 +4,7 @@ import { Breadcrumbs } from '@/components/ui/breadcrumbs';
 import { currentUser } from '@/lib/auth/session';
 import { orders } from '@/lib/orders/postgres-repository';
 import { listAddresses } from '@/lib/account/addresses';
+import { reviewsByUser } from '@/lib/reviews/reviews';
 import { AccountBody } from '@/components/account/account-body';
 
 export const dynamic = 'force-dynamic';
@@ -37,7 +38,7 @@ export default async function AccountPage() {
   // Only ever this account's own orders and addresses. Both are filtered on
   // `user_id` in SQL with the id taken from the session, so there is no moment
   // at which somebody else's row is in hand — and no id the client can name.
-  const [history, addresses] = session
+  const [history, addresses, reviews] = session
     ? await Promise.all([
         orders()
           .listOrdersForUser(session.id, 20)
@@ -52,8 +53,13 @@ export default async function AccountPage() {
             })),
           ),
         listAddresses(session.id),
+        // A reviews outage must not take the account page down with it.
+        reviewsByUser(session.id).catch((error: unknown) => {
+          console.warn('[account] reviews unavailable:', (error as Error).message);
+          return [];
+        }),
       ])
-    : [[], []];
+    : [[], [], []];
 
   return (
     <>
@@ -73,6 +79,7 @@ export default async function AccountPage() {
           user={user}
           orders={history}
           addresses={addresses}
+          reviews={reviews}
         />
       </div>
     </>

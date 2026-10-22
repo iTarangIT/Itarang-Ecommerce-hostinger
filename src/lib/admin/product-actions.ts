@@ -7,7 +7,9 @@ import { currentUser } from '@/lib/auth/session';
 import { invalidateCatalogSnapshot } from '@/lib/commerce';
 import { CATALOG_TAG } from '@/lib/commerce/db/db-provider';
 import type { BadgeKind, ProductFacetValues, ProductSection } from '@/lib/commerce/types';
+import { orders } from '@/lib/orders/postgres-repository';
 import { productRepository } from '@/lib/products/postgres-repository';
+import { UNTRACKED_STOCK } from '@/lib/products/to-domain';
 import { dispatchStockAlertsInBackground } from '@/lib/stock/alerts';
 import { slugify } from '@/lib/utils';
 import {
@@ -594,9 +596,42 @@ export async function updateProductPricingAction(formData: FormData): Promise<vo
    * round trip, and must not see a save fail because a mail server did.
    * `settle` throws a redirect, so this has to happen before it.
    */
-  if (result.ok) dispatchStockAlertsInBackground();
+  if (result.ok) {
+    dispatchStockAlertsInBackground();
+    await syncCheckoutStock(productKey, variants);
+  }
 
   settle(productKey, 'pricing', result);
+}
+
+/**
+ * Make checkout agree with the stock just saved.
+ *
+ * Checkout does not read `product_variants.stock` directly: it checks against
+ * `inventory_baseline`, the ledger it locks while reserving units, and takes
+ * the smaller of the two. Nothing used to write that ledger when stock was
+ * edited here, so a row seeded at 0 stayed 0 — the product page said "Only 2
+ * left" while every checkout answered "One of your items just went out of
+ * stock". The number typed here is the new count on the shelf, which is what
+ * `reconcileInventory` records (sales already deducted from it are marked
+ * settled so they are not subtracted twice; units held by orders awaiting
+ * payment still count against it).
+ *
+ * The product save has already committed. A failure here is logged rather than
+ * reported as a failed save — which it was not — and the "resync stock" button
+ * on /admin repairs it.
+ */
+async function syncCheckoutStock(productKey: string, variants: VariantInput[]): Promise<void> {
+  try {
+    await orders().reconcileInventory(
+      variants.map((variant) => ({
+        variantId: `${productKey}:${variant.variantKey}`,
+        quantity: variant.stock ?? UNTRACKED_STOCK,
+      })),
+    );
+  } catch (error) {
+    console.error(`[admin] checkout stock not synced for ${productKey}:`, error);
+  }
 }
 
 /* ----------------------------------------------------------------- parties */

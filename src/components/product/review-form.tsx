@@ -23,14 +23,16 @@ export function ReviewForm({ productKey, productPath }: { productKey: string; pr
   const [body, setBody] = React.useState('');
   const [city, setCity] = React.useState('');
   const [error, setError] = React.useState<{ message: string; signin?: boolean } | null>(null);
-  const [done, setDone] = React.useState(false);
+  const [done, setDone] = React.useState<'created' | 'updated' | null>(null);
   const [pending, startTransition] = React.useTransition();
 
   if (done) {
     return (
       <p className="flex items-start gap-2 rounded-lg border border-success/30 bg-success-soft p-3 text-sm text-foreground">
         <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" />
-        Thank you. Your review will appear once our team has checked it.
+        {done === 'updated'
+          ? 'Your review has been updated. It will reappear once our team has checked the changes.'
+          : 'Thank you. Your review will appear once our team has checked it.'}
       </p>
     );
   }
@@ -51,7 +53,7 @@ export function ReviewForm({ productKey, productPath }: { productKey: string; pr
         setError(null);
         startTransition(async () => {
           const result = await submitReviewAction({ productKey, rating, title, body, city });
-          if (result.ok) setDone(true);
+          if (result.ok) setDone(result.updated ? 'updated' : 'created');
           else setError({ message: result.message, signin: result.reason === 'signin' });
         });
       }}
@@ -125,7 +127,7 @@ export function ReviewForm({ productKey, productPath }: { productKey: string; pr
       </div>
       <p className="text-xs text-muted-foreground">
         Only customers who bought this product can review it. Reviews are checked before they
-        appear.
+        appear. Reviewed it already? Submitting again replaces your earlier review.
       </p>
     </form>
   );

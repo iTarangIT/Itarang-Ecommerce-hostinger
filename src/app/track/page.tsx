@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { ChevronRight, MessageCircle, Package, Phone } from 'lucide-react';
+import { ChevronRight, LogIn, MessageCircle, Package, Phone, ShoppingBag } from 'lucide-react';
+import { ButtonLink } from '@/components/ui/button';
+import { StateBlock } from '@/components/ui/states';
 import { Breadcrumbs } from '@/components/ui/breadcrumbs';
 import { TrackForm } from '@/components/account/track-form';
 import { OrderProgressBar } from '@/components/account/order-progress';
@@ -58,9 +60,11 @@ export default async function TrackPage({
             <div>
               <h1 className="heading-1 text-balance">Track your order</h1>
               <p className="mt-3 max-w-2xl text-pretty text-sm leading-relaxed text-muted-foreground sm:text-base">
-                {session
-                  ? 'Pick an order below to see where it is, or look one up by its number.'
-                  : 'Enter your order number and the mobile number on the order — no account needed.'}
+                {!session
+                  ? 'Sign in to see your orders and where each one is.'
+                  : mine.length > 0
+                    ? 'Pick an order below to see where it is.'
+                    : 'Your orders will appear here once you place one.'}
               </p>
             </div>
           </div>
@@ -69,6 +73,11 @@ export default async function TrackPage({
 
       <div className="container grid gap-8 py-8 lg:grid-cols-12 lg:gap-10 lg:py-10">
         <div className="space-y-6 lg:col-span-8">
+          {/* The tracker for the order picked below, above the list. */}
+          {session && initialOrder ? (
+            <TrackForm key={initialOrder} initialOrder={initialOrder} mode="owner" />
+          ) : null}
+
           {mine.length > 0 ? (
             <section aria-labelledby="your-orders" className="rounded-xl border border-border bg-card p-5 sm:p-6">
               <h2 id="your-orders" className="heading-3">
@@ -124,19 +133,30 @@ export default async function TrackPage({
             </section>
           ) : null}
 
-          <TrackForm key={initialOrder} initialOrder={initialOrder} signedIn={Boolean(session)} />
-
+          {/* No lookup form for customers — that is an admin tool. A customer
+              tracks from their own list; signed out, they sign in first. */}
           {!session ? (
-            <p className="text-sm text-muted-foreground">
-              Have an account?{' '}
-              <Link
-                href={`/login?next=${encodeURIComponent('/track')}`}
-                className="font-medium text-primary underline-offset-4 hover:underline"
-              >
-                Sign in
-              </Link>{' '}
-              to see all your orders here without typing anything.
-            </p>
+            <StateBlock
+              icon={<LogIn className="h-6 w-6" />}
+              title="Sign in to track your orders"
+              description="Your orders are kept with your account. Sign in and every order you have placed appears here, with where it is right now."
+              actions={
+                <ButtonLink href={`/login?next=${encodeURIComponent('/track')}`} variant="primary">
+                  Sign in
+                </ButtonLink>
+              }
+            />
+          ) : mine.length === 0 ? (
+            <StateBlock
+              icon={<ShoppingBag className="h-6 w-6" />}
+              title="No orders yet"
+              description="You have not placed an order with us yet. Once you do, it shows up here and you can follow it from confirmation to delivery."
+              actions={
+                <ButtonLink href="/products" variant="primary">
+                  Shop batteries
+                </ButtonLink>
+              }
+            />
           ) : null}
         </div>
 
@@ -234,9 +254,7 @@ async function AdminTrackPage({ params, initialOrder }: { params: RawParams; ini
       </div>
 
       <div className="container space-y-8 py-8 lg:py-10">
-        {initialOrder ? (
-          <TrackForm key={initialOrder} initialOrder={initialOrder} signedIn />
-        ) : null}
+        <TrackForm key={initialOrder} initialOrder={initialOrder} mode="staff" />
         <OrderTrackingTable
           query={query}
           list={list}
