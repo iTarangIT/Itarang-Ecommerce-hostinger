@@ -275,13 +275,13 @@ const COMMITTED_RESERVATIONS = `
  * needs one job per variant carrying the total, and the ids of exactly the rows
  * that total came from.
  */
-function groupByVariant(
-  rows: Array<{ id: string; variant_id: string; quantity: number }>,
-): Map<string, Array<{ id: string; quantity: number }>> {
-  const grouped = new Map<string, Array<{ id: string; quantity: number }>>();
+function groupByVariant<Row extends { id: string; variant_id: string; quantity: number }>(
+  rows: Row[],
+): Map<string, Row[]> {
+  const grouped = new Map<string, Row[]>();
   for (const row of rows) {
     const bucket = grouped.get(row.variant_id) ?? [];
-    bucket.push({ id: row.id, quantity: row.quantity });
+    bucket.push(row);
     grouped.set(row.variant_id, bucket);
   }
   return grouped;
@@ -948,7 +948,10 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
     actor: string,
     note?: string,
   ): Promise<Order | null> {
-    return transaction(async (client) => {
+    // Acted on after the commit, as in `applyPaymentStatus`.
+    let restock = { stockChanged: false, transitionRecorded: false };
+
+    const result = await transaction(async (client) => {
       const current = await client.query<OrderRow>(
         `SELECT ${ORDER_COLUMNS} FROM orders WHERE id = $1 FOR UPDATE`,
         [orderId],
@@ -978,12 +981,18 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
       );
 
       if (to === 'cancelled') {
+        // Units held for an unpaid order go back to the pool; units already
+        // sold — cash on delivery, or a captured payment — go back on the shelf.
         await this.releaseWithin(client, orderId);
+        restock = await this.restockWithin(client, orderId);
       }
 
       const [hydrated] = await this.hydrateWithin(client, updated.rows);
       return hydrated;
     });
+
+    afterStockChange(restock.stockChanged, restock.transitionRecorded);
+    return result;
   }
 
   /**
@@ -1374,6 +1383,103 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
       `UPDATE stock_reservations SET state = 'released' WHERE order_id = $1 AND state = 'active'`,
       [orderId],
     );
+  }
+
+  /**
+   * A cancelled order's sold units, back in stock. The reverse of
+   * `consumeWithin`, inside the cancellation's transaction.
+   *
+   * Per variant, only for our own catalogue:
+   *
+   *   - **Deducted** (`reconciled_at` set): the units came off
+   *     `product_variants.stock` — at the sale, or because an admin's count
+   *     already reflected it — so they are added back, the ledger follows the
+   *     column, and a 0 → n crossing is recorded as `back-in-stock`, which is
+   *     what lets the admin send the "Notify me" emails.
+   *   - **Never deducted** (`reconciled_at` null — an untracked variant, or a
+   *     cash on delivery sale from before COD deducted stock): the column was
+   *     never lowered, so nothing is added; releasing the row is what stops it
+   *     counting against availability.
+   *
+   * Either way the reservation becomes `released`, so a second cancellation
+   * finds nothing to return. A variant that is not ours (Hostinger) is left
+   * alone: its deduction went upstream and has to be reversed there.
+   */
+  private async restockWithin(
+    client: PoolClient,
+    orderId: number,
+  ): Promise<{ stockChanged: boolean; transitionRecorded: boolean }> {
+    let stockChanged = false;
+    let transitionRecorded = false;
+
+    const sold = await client.query<{
+      id: string;
+      variant_id: string;
+      quantity: number;
+      reconciled: boolean;
+    }>(
+      `SELECT id, variant_id, quantity, reconciled_at IS NOT NULL AS reconciled
+         FROM stock_reservations
+        WHERE order_id = $1 AND state = 'consumed'
+          FOR UPDATE`,
+      [orderId],
+    );
+
+    for (const [variantId, rows] of groupByVariant(sold.rows)) {
+      const owned = await client.query<{
+        id: number;
+        stock: number | null;
+        sku: string;
+        product_key: string;
+      }>(
+        `SELECT v.id, v.stock, v.sku, p.product_key
+           FROM product_variants v
+           JOIN products p ON p.id = v.product_id
+          WHERE p.product_key || ':' || v.variant_key = $1
+          FOR UPDATE OF v`,
+        [variantId],
+      );
+      const variant = owned.rows[0];
+      if (!variant) continue;
+
+      const deducted = rows
+        .filter((row) => row.reconciled)
+        .reduce((sum, row) => sum + row.quantity, 0);
+
+      if (variant.stock !== null && deducted > 0) {
+        const after = await client.query<{ stock: number }>(
+          `UPDATE product_variants SET stock = stock + $2 WHERE id = $1 RETURNING stock`,
+          [variant.id, deducted],
+        );
+        const restocked = after.rows[0]!.stock;
+
+        await client.query(
+          `INSERT INTO inventory_baseline (variant_id, hostinger_quantity, synced_at)
+           VALUES ($1, $2, now())
+           ON CONFLICT (variant_id)
+           DO UPDATE SET hostinger_quantity = EXCLUDED.hostinger_quantity, synced_at = now()`,
+          [variantId, restocked],
+        );
+
+        const direction = transitionBetween(variant.stock, restocked);
+        if (direction) {
+          await recordStockTransitions(client, [
+            { productId: variant.product_key, sku: variant.sku, direction, source: 'order' },
+          ]);
+          transitionRecorded = true;
+        }
+        stockChanged = true;
+      }
+
+      await client.query(
+        `UPDATE stock_reservations SET state = 'released' WHERE id = ANY($1::bigint[])`,
+        [rows.map((row) => row.id)],
+      );
+      // Releasing a never-deducted row still raises availability.
+      stockChanged = true;
+    }
+
+    return { stockChanged, transitionRecorded };
   }
 
   private async releaseWithin(client: PoolClient, orderId: number) {
