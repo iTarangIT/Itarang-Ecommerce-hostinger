@@ -193,7 +193,7 @@ export default async function AdminOrderDetailPage({
                 >
                   {transitions.map((status) => (
                     <option key={status} value={status}>
-                      {status.replace(/_/g, ' ')}
+                      {status === 'shipped' ? 'packed & shipped' : status.replace(/_/g, ' ')}
                     </option>
                   ))}
                 </select>

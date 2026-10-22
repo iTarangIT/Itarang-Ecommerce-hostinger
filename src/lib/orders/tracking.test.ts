@@ -10,13 +10,13 @@ describe('trackView', () => {
       { status: 'packed', at: '2026-10-21T09:00:00.000Z' },
       { status: 'shipped', at: '2026-10-21T15:00:00.000Z' },
     ]);
-    expect(view.steps.map((s) => s.state)).toEqual(['done', 'done', 'done', 'current', 'upcoming']);
+    expect(view.steps.map((s) => s.state)).toEqual(['done', 'done', 'current', 'upcoming']);
     expect(view.steps[0].at).toBe(placedAt);
-    expect(view.steps[3].at).toBe('2026-10-21T15:00:00.000Z');
-    expect(view.steps[4].at).toBeUndefined();
-    expect(view.headline).toBe('Shipped — on its way with the carrier');
+    expect(view.steps[2].at).toBe('2026-10-21T15:00:00.000Z');
+    expect(view.steps[3].at).toBeUndefined();
+    expect(view.headline).toBe('Packed & shipped — packed and on its way with the carrier');
     expect(view.next).toBe('Next: delivered.');
-    expect(view.percent).toBe(75);
+    expect(view.percent).toBe(67);
   });
 
   it('awaiting payment sits on the first step', () => {
@@ -36,8 +36,8 @@ describe('trackView', () => {
 
   it('a step the timeline skipped still counts as done', () => {
     const view = trackView('shipped', placedAt, [{ status: 'shipped', at: '2026-10-21T15:00:00.000Z' }]);
-    expect(view.steps[2].state).toBe('done');
-    expect(view.steps[2].at).toBeUndefined();
+    expect(view.steps[1].state).toBe('done');
+    expect(view.steps[1].at).toBeUndefined();
   });
 
   it('cancelled after packing: shows how far it got, nothing current', () => {
@@ -48,19 +48,25 @@ describe('trackView', () => {
     ]);
     expect(view.cancelled).toBe(true);
     expect(view.currentIndex).toBe(-1);
-    expect(view.steps.map((s) => s.state)).toEqual(['done', 'done', 'done', 'upcoming', 'upcoming']);
+    expect(view.steps.map((s) => s.state)).toEqual(['done', 'done', 'upcoming', 'upcoming']);
     expect(view.next).toBeNull();
   });
 
   it('uses the latest time a status was entered', () => {
-    const view = trackView('packed', placedAt, [
-      { status: 'packed', at: '2026-10-21T09:00:00.000Z' },
-      { status: 'packed', at: '2026-10-22T09:00:00.000Z' },
+    const view = trackView('shipped', placedAt, [
+      { status: 'shipped', at: '2026-10-21T09:00:00.000Z' },
+      { status: 'shipped', at: '2026-10-22T09:00:00.000Z' },
     ]);
     expect(view.steps[2].at).toBe('2026-10-22T09:00:00.000Z');
   });
 
+  it('an order left in the old packed status is still waiting to ship', () => {
+    const view = trackView('packed', placedAt);
+    expect(view.steps.map((s) => s.state)).toEqual(['done', 'current', 'upcoming', 'upcoming']);
+    expect(view.next).toBe('Next: packed & shipped.');
+  });
+
   it('lists only statuses an order can reach', () => {
-    expect(TRACK_STEPS.map((s) => s.key)).toEqual(['placed', 'confirmed', 'packed', 'shipped', 'delivered']);
+    expect(TRACK_STEPS.map((s) => s.key)).toEqual(['placed', 'confirmed', 'shipped', 'delivered']);
   });
 });
