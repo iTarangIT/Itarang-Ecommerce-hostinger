@@ -99,7 +99,7 @@ function BlockView({ block, id }: { block: Block; id?: string }) {
 
     case 'table':
       return (
-        <div className="mt-6 overflow-x-auto rounded-lg border border-border">
+        <div className="relative mt-6 overflow-x-auto rounded-lg border border-border">
           <table className="w-full min-w-[28rem] border-collapse text-left text-sm">
             {block.caption ? (
               <caption className="border-b border-border bg-surface px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">

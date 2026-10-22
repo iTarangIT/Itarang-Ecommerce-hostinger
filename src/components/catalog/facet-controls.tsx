@@ -431,7 +431,12 @@ export function MobileFilterButton({
             >
               Clear all
             </Button>
-            <Button variant="accent" fullWidth onClick={() => setOpen(false)}>
+            <Button
+              variant="accent"
+              fullWidth
+              className="whitespace-nowrap px-3"
+              onClick={() => setOpen(false)}
+            >
               Show {total} {total === 1 ? 'product' : 'products'}
             </Button>
           </div>

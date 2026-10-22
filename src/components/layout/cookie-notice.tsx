@@ -44,17 +44,16 @@ export function CookieNotice() {
     <div
       role="region"
       aria-label="Cookie notice"
-      className="fixed inset-x-3 print:hidden bottom-[calc(var(--bottom-nav-height)+0.75rem)] z-50 mx-auto max-w-xl rounded-lg border border-border bg-card p-4 shadow-lg lg:bottom-6"
+      className="fixed inset-x-3 print:hidden bottom-[calc(var(--bottom-nav-height)+0.75rem)] z-50 mx-auto flex max-w-xl items-center gap-3 rounded-lg border border-border bg-card p-3 shadow-lg sm:p-4 lg:bottom-6"
     >
-      <p className="text-sm text-muted-foreground">
+      {/* One compact row on a phone so it does not cover half the screen. */}
+      <p className="min-w-0 flex-1 text-xs text-muted-foreground sm:text-sm">
         We use our own cookies to keep you signed in, remember your cart and understand how the
         site is used. No advertising trackers.
       </p>
-      <div className="mt-3 flex justify-end">
-        <Button size="sm" onClick={dismiss}>
-          Got it
-        </Button>
-      </div>
+      <Button size="sm" className="shrink-0" onClick={dismiss}>
+        Got it
+      </Button>
     </div>
   );
 }
