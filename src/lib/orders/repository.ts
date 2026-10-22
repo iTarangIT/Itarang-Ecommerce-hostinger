@@ -4,6 +4,7 @@ import type {
   Order,
   OrderEvent,
   OrderStatus,
+  PaymentMethod,
   PaymentRecord,
   PaymentStatus,
   StockReservation,
@@ -34,10 +35,23 @@ export type CreateOrderResult =
   | { ok: true; order: Order; reused: boolean }
   | { ok: false; reason: 'insufficient_stock'; variantId: string; available: number };
 
+/** Columns the order list can be sorted by. Mapped to SQL by a whitelist. */
+export type OrderSort = 'placed' | 'updated' | 'total' | 'customer';
+
 export interface OrderListFilters {
   status?: OrderStatus;
   paymentStatus?: PaymentStatus;
+  paymentMethod?: PaymentMethod;
   search?: string;
+  /** First day placed, `YYYY-MM-DD`, inclusive, an IST calendar day. Validated by the caller. */
+  placedFrom?: string;
+  /** Last day placed, `YYYY-MM-DD`, inclusive, an IST calendar day. Validated by the caller. */
+  placedTo?: string;
+  /** true: only test orders; false: hide them; undefined: both. */
+  isTest?: boolean;
+  /** Defaults to newest placed first. */
+  sort?: OrderSort;
+  direction?: 'asc' | 'desc';
   limit?: number;
   offset?: number;
 }
@@ -77,6 +91,9 @@ export interface OrderRepository {
   ): Promise<{ orders: Order[]; total: number }>;
 
   listOrders(filters: OrderListFilters): Promise<{ orders: Order[]; total: number }>;
+
+  /** How many orders match the filters in each status, ignoring `filters.status`. */
+  countByStatus(filters: OrderListFilters): Promise<Record<OrderStatus, number>>;
 
   /** Point the order at a gateway order, recording it in the attempt history. */
   setGatewayOrderId(orderId: number, gatewayOrderId: string, provider?: string): Promise<void>;
