@@ -1,5 +1,12 @@
 /**
- * Bulk MRP and selling-price updates, keyed on SKU.
+ * Bulk MRP, selling-price, cost-price, stock and availability updates, keyed
+ * on SKU.
+ *
+ * **The last three columns are optional and blank means "leave it".** They were
+ * added for the business's frequently changing fields: a sheet without a Stock
+ * column, or a row with an empty Stock cell, never changes the stock. Only a
+ * value typed into the cell is written. The scope note below is about every
+ * other column of `product_variants`.
  *
  * Pricing is edited one product at a time in the admin console, which is fine
  * for a correction and unusable for a price list. This module is the pure half
@@ -44,6 +51,10 @@ export interface RawPriceRow {
   sku: string;
   mrp: string;
   selling: string;
+  /** Optional columns: `undefined` when the sheet has no such column. */
+  cost?: string;
+  stock?: string;
+  availability?: string;
 }
 
 export type RowProblem =
@@ -52,7 +63,10 @@ export type RowProblem =
   | 'duplicate-sku'
   | 'missing-price'
   | 'invalid-price'
-  | 'selling-above-mrp';
+  | 'selling-above-mrp'
+  | 'invalid-cost'
+  | 'invalid-stock'
+  | 'invalid-availability';
 
 /** The sentence an administrator reads beside a rejected row. */
 export const ROW_PROBLEM_NOTE: Record<RowProblem, string> = {
@@ -62,14 +76,29 @@ export const ROW_PROBLEM_NOTE: Record<RowProblem, string> = {
   'missing-price': 'Both MRP and selling price are required.',
   'invalid-price': 'Prices must be a number of rupees, zero or more.',
   'selling-above-mrp': 'The selling price is higher than the MRP.',
+  'invalid-cost': 'Cost price must be a number of rupees, zero or more.',
+  'invalid-stock': 'Stock must be a whole number of units, zero or more.',
+  'invalid-availability':
+    'Availability must be one of: in-stock, low-stock, out-of-stock, preorder.',
 };
+
+export const AVAILABILITY_VALUES = ['in-stock', 'low-stock', 'out-of-stock', 'preorder'] as const;
+export type SheetAvailability = (typeof AVAILABILITY_VALUES)[number];
 
 export interface AcceptedRow {
   rowNumber: number;
   sku: string;
-  /** Paise, like every money column in the schema. */
-  mrp: number;
-  selling: number;
+  /**
+   * Paise, like every money column in the schema. The catalogue's current
+   * values (possibly null) when the row left both price cells blank and only
+   * changed cost, stock or availability.
+   */
+  mrp: number | null;
+  selling: number | null;
+  /** Present only when the row changes it. */
+  costPrice?: number;
+  stock?: number;
+  availability?: SheetAvailability;
   /**
    * What the catalogue held before this row, in paise, or null where the
    * variant had no price at all.
@@ -91,8 +120,8 @@ export interface AcceptedRow {
 export interface UnchangedRow {
   rowNumber: number;
   sku: string;
-  mrp: number;
-  selling: number;
+  mrp: number | null;
+  selling: number | null;
 }
 
 /**
@@ -109,6 +138,9 @@ export interface CatalogueSkuPrice {
   sku: string;
   mrp: number | null;
   selling: number | null;
+  costPrice?: number | null;
+  stock?: number | null;
+  availability?: string | null;
 }
 
 /** A row that names a product and states no price for it. */
@@ -143,8 +175,11 @@ export interface PricingImportReport {
   applicable: boolean;
 }
 
-/** The three columns the template ships with, in order. */
+/** The three columns every sheet must have, in order. */
 export const TEMPLATE_COLUMNS = ['SKU', 'MRP', 'Selling Price'] as const;
+
+/** Optional columns the template also ships with. Blank cells change nothing. */
+export const OPTIONAL_COLUMNS = ['Cost Price', 'Stock', 'Availability'] as const;
 
 /**
  * Rupees as typed into a spreadsheet cell, in paise.
@@ -172,6 +207,21 @@ function parsePrice(raw: string): number | null | undefined {
   const result = priceSchema.safeParse(raw);
   // `undefined` distinguishes "this is not a price" from "this cell was blank".
   return result.success ? result.data : undefined;
+}
+
+/** Blank → null, a whole number of units ≥ 0 → it, anything else → undefined. */
+function parseStock(raw: string): number | null | undefined {
+  const value = raw.trim().replace(/,/g, '');
+  if (value === '') return null;
+  const number = Number(value);
+  return Number.isInteger(number) && number >= 0 && number <= 1_000_000 ? number : undefined;
+}
+
+/** "Out of stock", "OUT-OF-STOCK" and "out_of_stock" all mean the same. */
+function parseAvailability(raw: string): SheetAvailability | null | undefined {
+  const value = raw.trim().toLowerCase().replace(/[\s_]+/g, '-');
+  if (value === '') return null;
+  return AVAILABILITY_VALUES.find((option) => option === value);
 }
 
 /**
@@ -248,8 +298,55 @@ export function buildPricingImportReport(
       continue;
     }
 
+    const cost = parsePrice(row.cost ?? '');
+    if (cost === undefined) {
+      reject('invalid-cost');
+      continue;
+    }
+    const stock = parseStock(row.stock ?? '');
+    if (stock === undefined) {
+      reject('invalid-stock');
+      continue;
+    }
+    const availability = parseAvailability(row.availability ?? '');
+    if (availability === undefined) {
+      reject('invalid-availability');
+      continue;
+    }
+
+    // Each optional field counts only when typed in and different from now.
+    const extras: Pick<AcceptedRow, 'costPrice' | 'stock' | 'availability'> = {};
+    if (cost !== null && cost !== (current.costPrice ?? null)) extras.costPrice = cost;
+    if (stock !== null && stock !== (current.stock ?? null)) extras.stock = stock;
+    if (availability !== null && availability !== (current.availability ?? null)) {
+      extras.availability = availability;
+    }
+    const extrasStated = cost !== null || stock !== null || availability !== null;
+    const extrasChanged = Object.keys(extras).length > 0;
+
     /**
-     * Both cells blank means "leave this product alone".
+     * Both price cells blank with only cost, stock or availability filled in:
+     * the prices stay what the catalogue holds and the rest is applied.
+     */
+    if (mrp === null && selling === null && extrasStated) {
+      if (!extrasChanged) {
+        unchanged.push({ rowNumber: row.rowNumber, sku, mrp: current.mrp, selling: current.selling });
+        continue;
+      }
+      accepted.push({
+        rowNumber: row.rowNumber,
+        sku,
+        mrp: current.mrp,
+        selling: current.selling,
+        ...extras,
+        previousMrp: current.mrp,
+        previousSelling: current.selling,
+      });
+      continue;
+    }
+
+    /**
+     * Both cells blank (and nothing else stated) means "leave this product alone".
      *
      * **This is what broke the upload.** The template used to arrive with every
      * price cell blank and the instruction "leave a row blank to leave that
@@ -292,7 +389,7 @@ export function buildPricingImportReport(
 
     // The row is valid either way; the only question left is whether it says
     // anything the catalogue does not already know.
-    if (current.mrp === mrp && current.selling === selling) {
+    if (current.mrp === mrp && current.selling === selling && !extrasChanged) {
       unchanged.push({ rowNumber: row.rowNumber, sku, mrp, selling });
       continue;
     }
@@ -302,6 +399,7 @@ export function buildPricingImportReport(
       sku,
       mrp,
       selling,
+      ...extras,
       previousMrp: current.mrp,
       previousSelling: current.selling,
     });
@@ -331,7 +429,17 @@ export function buildPricingImportReport(
  * readable — still imports. Returns `null` when a required column is absent,
  * which is a whole-file error rather than a row one.
  */
-export function mapHeader(header: readonly string[]): { sku: number; mrp: number; selling: number } | null {
+export interface SheetColumns {
+  sku: number;
+  mrp: number;
+  selling: number;
+  /** Optional columns; absent when the sheet does not have them. */
+  cost?: number;
+  stock?: number;
+  availability?: number;
+}
+
+export function mapHeader(header: readonly string[]): SheetColumns | null {
   const index = (candidates: string[]) =>
     header.findIndex((cell) => candidates.includes(cell.trim().toLowerCase()));
 
@@ -346,5 +454,13 @@ export function mapHeader(header: readonly string[]): { sku: number; mrp: number
   ]);
 
   if (sku === -1 || mrp === -1 || selling === -1) return null;
-  return { sku, mrp, selling };
+
+  const columns: SheetColumns = { sku, mrp, selling };
+  const cost = index(['cost price', 'cost', 'cost price (₹)', 'purchase price']);
+  const stock = index(['stock', 'units in stock', 'quantity', 'qty']);
+  const availability = index(['availability', 'stock status']);
+  if (cost !== -1) columns.cost = cost;
+  if (stock !== -1) columns.stock = stock;
+  if (availability !== -1) columns.availability = availability;
+  return columns;
 }

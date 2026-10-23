@@ -112,6 +112,46 @@ describe.skipIf(!CONFIGURED)('updateVariantPricesBySku', () => {
     expect(a.selling).toBe(130000);
   });
 
+  it('writes cost price, stock and availability only when the row carries them', async () => {
+    await productRepository().updateVariantPricesBySku(
+      [
+        { sku: SKU_A, mrp: 120000, selling: 100000, costPrice: 80000, stock: 0 },
+        { sku: SKU_B, mrp: 240000, selling: 200000, availability: 'preorder' },
+      ],
+      ACTOR,
+    );
+    const rows = await query<{ sku: string; cost_price: number | null; stock: number | null; availability: string }>(
+      `SELECT sku, cost_price, stock, availability FROM product_variants WHERE sku = ANY($1) ORDER BY sku`,
+      [[SKU_A, SKU_B]],
+    );
+    expect(rows).toEqual([
+      { sku: SKU_A, cost_price: 80000, stock: 0, availability: 'in-stock' },
+      { sku: SKU_B, cost_price: null, stock: 0, availability: 'preorder' },
+    ]);
+
+    // 7 → 0 is a sell-out, recorded for the out-of-stock alert like a product-page save.
+    const transitions = await query<{ direction: string }>(
+      `SELECT direction FROM stock_transitions WHERE sku = $1 ORDER BY id DESC LIMIT 1`,
+      [SKU_A],
+    );
+    expect(transitions[0]?.direction).toBe('out-of-stock');
+  });
+
+  it('keeps the cost price when the product page is saved by a caller that does not send it', async () => {
+    await productRepository().updateVariantPricesBySku(
+      [{ sku: SKU_A, mrp: 120000, selling: 100000, costPrice: 80000 }],
+      ACTOR,
+    );
+    const record = await productRepository().findByKey(KEY);
+    await productRepository().replaceVariants(
+      KEY,
+      record!.variants.map(({ costPrice: _cost, ...variant }) => ({ ...variant })),
+      ACTOR,
+    );
+    const after = await productRepository().findByKey(KEY);
+    expect(after!.variants.find((v) => v.sku === SKU_A)?.costPrice).toBe(80000);
+  });
+
   it('changes nothing else on the variant it touches', async () => {
     const before = await snapshot();
     await productRepository().updateVariantPricesBySku(

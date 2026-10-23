@@ -19,6 +19,7 @@ import { publicUrl } from './media';
 import { canTransitionProduct, publishBlockers } from './state-machine';
 import type { ProductRepository } from './repository';
 import type {
+  BulkVariantUpdate,
   CataloguePriceRow,
   CreateProductInput,
   Manufacturer,
@@ -113,6 +114,7 @@ interface VariantRow {
   option_values: Record<string, string> | null;
   mrp: number | null;
   selling: number | null;
+  cost_price: number | null;
   stock: number | null;
   availability: Availability | null;
   position: number;
@@ -268,6 +270,7 @@ function toVariant(row: VariantRow): ProductVariantRecord {
     optionValues: row.option_values ?? {},
     mrp: row.mrp,
     selling: row.selling,
+    costPrice: row.cost_price,
     stock: row.stock,
     availability: row.availability,
     position: row.position,
@@ -414,7 +417,7 @@ class PostgresProductRepository implements ProductRepository {
     const [variants, media, specGroups, faqs, sections] = await Promise.all([
       query<VariantRow>(
         `SELECT id, product_id, variant_key, sku, title, option_values, mrp, selling,
-                stock, availability, position
+                cost_price, stock, availability, position
            FROM product_variants
           WHERE product_id = ANY($1::bigint[])
           ORDER BY product_id, position, id`,
@@ -904,8 +907,13 @@ class PostgresProductRepository implements ProductRepository {
     id: number,
     variants: VariantInput[],
   ): Promise<number> {
-    const before = await client.query<{ sku: string; stock: number | null; product_key: string }>(
-      `SELECT v.sku, v.stock, p.product_key
+    const before = await client.query<{
+      sku: string;
+      stock: number | null;
+      cost_price: number | null;
+      product_key: string;
+    }>(
+      `SELECT v.sku, v.stock, v.cost_price, p.product_key
          FROM product_variants v
          JOIN products p ON p.id = v.product_id
         WHERE v.product_id = $1`,
@@ -913,6 +921,9 @@ class PostgresProductRepository implements ProductRepository {
     );
 
     const previousStock = new Map(before.rows.map((row) => [row.sku, row.stock]));
+    // A caller that says nothing about cost (the catalogue import, for one)
+    // must not wipe it: `undefined` keeps what the SKU had.
+    const previousCost = new Map(before.rows.map((row) => [row.sku, row.cost_price]));
     const productKey = before.rows[0]?.product_key;
 
     await client.query('DELETE FROM product_variants WHERE product_id = $1', [id]);
@@ -921,8 +932,8 @@ class PostgresProductRepository implements ProductRepository {
       await client.query(
         `INSERT INTO product_variants
            (product_id, variant_key, sku, title, option_values, mrp, selling, stock,
-            availability, position)
-         VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10)`,
+            availability, position, cost_price)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11)`,
         [
           id,
           variant.variantKey,
@@ -934,6 +945,7 @@ class PostgresProductRepository implements ProductRepository {
           variant.stock,
           variant.availability,
           index,
+          variant.costPrice === undefined ? (previousCost.get(variant.sku) ?? null) : variant.costPrice,
         ],
       );
     }
@@ -1063,16 +1075,26 @@ class PostgresProductRepository implements ProductRepository {
   async listVariantPrices(): Promise<CataloguePriceRow[]> {
     const rows = await query<{
       sku: string;
+      product_key: string;
+      variant_key: string;
       product_title: string;
       variant_title: string;
       mrp: string | number | null;
       selling: string | number | null;
+      cost_price: string | number | null;
+      stock: number | null;
+      availability: Availability | null;
     }>(
       `SELECT v.sku,
+              p.product_key,
+              v.variant_key,
               p.title AS product_title,
               v.title AS variant_title,
               v.mrp,
-              v.selling
+              v.selling,
+              v.cost_price,
+              v.stock,
+              v.availability
          FROM product_variants v
          JOIN products p ON p.id = v.product_id
         ORDER BY p.title, v.sku`,
@@ -1080,21 +1102,27 @@ class PostgresProductRepository implements ProductRepository {
 
     return rows.map((row) => ({
       sku: row.sku,
+      productKey: row.product_key,
+      variantKey: row.variant_key,
       productTitle: row.product_title,
       variantTitle: row.variant_title,
       mrp: row.mrp === null ? null : Number(row.mrp),
       selling: row.selling === null ? null : Number(row.selling),
+      costPrice: row.cost_price === null ? null : Number(row.cost_price),
+      stock: row.stock,
+      availability: row.availability,
     }));
   }
 
   async updateVariantPricesBySku(
-    rows: ReadonlyArray<{ sku: string; mrp: number; selling: number }>,
+    rows: ReadonlyArray<BulkVariantUpdate>,
     actor: string,
   ): Promise<{ ok: true; updated: number } | { ok: false; code: 'not_found'; sku: string }> {
     if (rows.length === 0) return { ok: true, updated: 0 };
 
     return transaction(async (client) => {
       const touchedProducts = new Set<number>();
+      const transitions: StockTransitionInput[] = [];
 
       for (const row of rows) {
         /**
@@ -1107,19 +1135,60 @@ class PostgresProductRepository implements ProductRepository {
          * reported as a success. Throwing rolls the whole file back, which is
          * the promised behaviour.
          */
-        const updated = await client.query<{ product_id: number }>(
-          `UPDATE product_variants
-              SET mrp = $2, selling = $3
-            WHERE sku = $1
-            RETURNING product_id`,
-          [row.sku, row.mrp, row.selling],
+        /**
+         * Cost, stock and availability are written only when the row carries
+         * them (`undefined` = the sheet had no such column, or the cell was
+         * left blank). A price list with no stock column must never wipe the
+         * stock by omission.
+         */
+        const extra: string[] = [];
+        const params: unknown[] = [row.sku, row.mrp, row.selling];
+        if (row.costPrice !== undefined) {
+          params.push(row.costPrice);
+          extra.push(`cost_price = $${params.length}`);
+        }
+        if (row.stock !== undefined) {
+          params.push(row.stock);
+          extra.push(`stock = $${params.length}`);
+        }
+        if (row.availability !== undefined) {
+          params.push(row.availability);
+          extra.push(`availability = $${params.length}`);
+        }
+
+        const before = await client.query<{ stock: number | null }>(
+          'SELECT stock FROM product_variants WHERE sku = $1 FOR UPDATE',
+          [row.sku],
+        );
+        const updated = await client.query<{ product_id: number; product_key: string }>(
+          `UPDATE product_variants v
+              SET mrp = $2, selling = $3${extra.map((set) => `, ${set}`).join('')}
+             FROM products p
+            WHERE v.sku = $1 AND p.id = v.product_id
+            RETURNING v.product_id, p.product_key`,
+          params,
         );
 
         if (updated.rows.length === 0) {
           throw new BulkPricingSkuMissing(row.sku);
         }
         touchedProducts.add(updated.rows[0]!.product_id);
+
+        // Same out-of-stock / back-in-stock alerts as a save on the product page.
+        if (row.stock !== undefined && before.rows[0]) {
+          const direction = transitionBetween(before.rows[0].stock, row.stock);
+          if (direction) {
+            transitions.push({
+              productId: updated.rows[0]!.product_key,
+              sku: row.sku,
+              direction,
+              source: 'admin',
+            });
+          }
+        }
       }
+
+      await recordStockTransitions(client, transitions);
 
       // One touch per product, not per variant, so a product with six variants
       // in the file is not stamped six times.

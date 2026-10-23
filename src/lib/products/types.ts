@@ -98,6 +98,8 @@ export interface ProductVariantRecord {
    */
   mrp: Paise | null;
   selling: Paise | null;
+  /** Purchase cost per unit. Admin-only; never reaches the storefront. */
+  costPrice?: Paise | null;
   /**
    * Two fields rather than one because "we do not track a number for this" and
    * "there are zero of these" are different statements. Only the second may
@@ -270,6 +272,8 @@ export interface VariantInput {
   optionValues?: Record<string, string>;
   mrp: Paise | null;
   selling: Paise | null;
+  /** Purchase cost per unit. Admin-only; never reaches the storefront. */
+  costPrice?: Paise | null;
   stock: number | null;
   availability: Availability | null;
 }
@@ -292,6 +296,26 @@ export interface CataloguePriceRow {
   variantTitle: string;
   mrp: Paise | null;
   selling: Paise | null;
+  /** Read from the database; optional so test fixtures can omit them. */
+  productKey?: string;
+  variantKey?: string;
+  costPrice?: Paise | null;
+  stock?: number | null;
+  availability?: Availability | null;
+}
+
+/**
+ * One row of the bulk price sheet, ready to write. `mrp`/`selling` are always
+ * written (they are the row's current values when the sheet left them blank);
+ * the other three only when present — `undefined` means "leave as it is".
+ */
+export interface BulkVariantUpdate {
+  sku: string;
+  mrp: Paise | null;
+  selling: Paise | null;
+  costPrice?: Paise | null;
+  stock?: number | null;
+  availability?: Availability | null;
 }
 
 export interface MediaInput {

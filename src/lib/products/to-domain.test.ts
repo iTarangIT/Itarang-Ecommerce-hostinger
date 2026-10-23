@@ -78,6 +78,14 @@ function record(overrides: Partial<ProductRecord> = {}): ProductRecord {
 }
 
 describe('toDomainProduct', () => {
+  it('never carries the cost price to the storefront', () => {
+    const base = record();
+    const product = toDomainProduct(
+      record({ variants: base.variants.map((variant) => ({ ...variant, costPrice: 55_000 })) }),
+    );
+    expect(JSON.stringify(product)).not.toMatch(/cost/i);
+  });
+
   it('uses our own key as the product id, never an upstream one', () => {
     const product = toDomainProduct(record({ hostingerProductId: 'prod_upstream_123' }));
     expect(product.id).toBe('test-product');

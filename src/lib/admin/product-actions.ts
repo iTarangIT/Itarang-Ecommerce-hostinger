@@ -558,10 +558,11 @@ export async function updateProductPricingAction(formData: FormData): Promise<vo
 
     const mrp = rupeesToPaise.safeParse(String(formData.get(`mrp-${index}`) ?? ''));
     const selling = rupeesToPaise.safeParse(String(formData.get(`selling-${index}`) ?? ''));
+    const cost = rupeesToPaise.safeParse(String(formData.get(`cost-${index}`) ?? ''));
     const stock = stockSchema.safeParse(String(formData.get(`stock-${index}`) ?? ''));
     const availability = String(formData.get(`availability-${index}`) ?? '').trim();
 
-    if (!mrp.success || !selling.success || !stock.success) {
+    if (!mrp.success || !selling.success || !cost.success || !stock.success) {
       backTo(productKey, 'pricing', { error: `Check the numbers on row ${index + 1}.` });
     }
 
@@ -572,6 +573,7 @@ export async function updateProductPricingAction(formData: FormData): Promise<vo
       optionValues: {},
       mrp: mrp.data,
       selling: selling.data,
+      costPrice: cost.data,
       stock: stock.data,
       availability:
         availability === 'in-stock' ||

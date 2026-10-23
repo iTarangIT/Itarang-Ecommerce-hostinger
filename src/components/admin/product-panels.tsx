@@ -346,7 +346,7 @@ export function PricingPanel({ product }: { product: ProductRecord }) {
               </Field>
             </div>
 
-            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <Field label="MRP (₹)" htmlFor={`mrp-${index}`}>
                 <Input
                   id={`mrp-${index}`}
@@ -361,6 +361,18 @@ export function PricingPanel({ product }: { product: ProductRecord }) {
                   name={`selling-${index}`} placeholder="e.g. 32000"
                   inputMode="decimal"
                   defaultValue={rupees(variant.selling)}
+                />
+              </Field>
+              <Field
+                label="Cost price (₹)"
+                htmlFor={`cost-${index}`}
+                hint="What one unit costs the business. Never shown to customers."
+              >
+                <Input
+                  id={`cost-${index}`}
+                  name={`cost-${index}`} placeholder="e.g. 26000"
+                  inputMode="decimal"
+                  defaultValue={rupees(variant.costPrice ?? null)}
                 />
               </Field>
               <Field

@@ -362,3 +362,85 @@ describe('the header row', () => {
     expect(mapHeader(['Product', 'MRP', 'Selling Price'])).toBeNull();
   });
 });
+
+describe('cost price, stock and availability columns', () => {
+  const WITH_STOCK: CatalogueSkuPrice[] = [
+    { sku: 'TK12100-01', mrp: 4800000, selling: 4200000, costPrice: 3000000, stock: 5, availability: null },
+    { sku: 'TK-LiFe-7332-01', mrp: null, selling: null, costPrice: null, stock: null, availability: null },
+  ];
+  const full = (
+    rowNumber: number,
+    sku: string,
+    mrp: string,
+    selling: string,
+    cost: string,
+    stock: string,
+    availability: string,
+  ): RawPriceRow => ({ rowNumber, sku, mrp, selling, cost, stock, availability });
+
+  it('marks a product out of stock with only the Stock cell filled in', () => {
+    const report = buildPricingImportReport([full(2, 'TK12100-01', '', '', '', '0', '')], WITH_STOCK);
+    expect(report.rejected).toEqual([]);
+    expect(report.accepted).toEqual([
+      expect.objectContaining({ sku: 'TK12100-01', stock: 0, mrp: 4800000, selling: 4200000 }),
+    ]);
+    // The prices were left alone, so the row carries the current ones.
+    expect(report.accepted[0]).not.toHaveProperty('costPrice');
+    expect(report.applicable).toBe(true);
+  });
+
+  it('changes the cost price alongside a new selling price', () => {
+    const report = buildPricingImportReport(
+      [full(2, 'TK12100-01', '48000', '41000', '29,500', '', '')],
+      WITH_STOCK,
+    );
+    expect(report.accepted[0]).toMatchObject({ selling: 4100000, costPrice: 2950000 });
+    expect(report.accepted[0]).not.toHaveProperty('stock');
+  });
+
+  it('treats figures equal to the catalogue as unchanged', () => {
+    const report = buildPricingImportReport(
+      [full(2, 'TK12100-01', '48000', '42000', '30000', '5', '')],
+      WITH_STOCK,
+    );
+    expect(report.accepted).toEqual([]);
+    expect(report.unchanged.map((r) => r.sku)).toEqual(['TK12100-01']);
+  });
+
+  it('accepts availability however it is spelt, and sets it on an unpriced variant', () => {
+    const report = buildPricingImportReport(
+      [full(3, 'TK-LiFe-7332-01', '', '', '', '', 'Out of stock')],
+      WITH_STOCK,
+    );
+    expect(report.accepted[0]).toMatchObject({ availability: 'out-of-stock', mrp: null, selling: null });
+  });
+
+  it('rejects the whole file over a bad stock, cost or availability cell', () => {
+    const report = buildPricingImportReport(
+      [
+        full(2, 'TK12100-01', '', '', '', '2.5', ''),
+        full(3, 'TK-LiFe-7332-01', '', '', '-10', '', ''),
+      ],
+      WITH_STOCK,
+    );
+    expect(report.rejected.map((r) => r.problem)).toEqual(['invalid-stock', 'invalid-cost']);
+    expect(report.applicable).toBe(false);
+
+    const badAvailability = buildPricingImportReport(
+      [full(2, 'TK12100-01', '', '', '', '', 'sold')],
+      WITH_STOCK,
+    );
+    expect(badAvailability.rejected[0]?.problem).toBe('invalid-availability');
+  });
+
+  it('maps the optional header columns when present', () => {
+    expect(mapHeader(['SKU', 'MRP', 'Selling Price', 'Cost Price', 'Stock', 'Availability'])).toEqual({
+      sku: 0,
+      mrp: 1,
+      selling: 2,
+      cost: 3,
+      stock: 4,
+      availability: 5,
+    });
+  });
+});
