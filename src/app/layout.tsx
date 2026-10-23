@@ -3,6 +3,8 @@ import { Plus_Jakarta_Sans } from 'next/font/google';
 import './globals.css';
 import { SITE } from '@/lib/site';
 import { buildNavigation } from '@/lib/navigation';
+import { COUPONS_ENABLED } from '@/lib/offers/coupons';
+import { listSiteCoupons } from '@/lib/offers/campaign-store';
 import { Providers } from './providers';
 import { SiteChromeBottom, SiteChromeTop } from '@/components/layout/site-chrome';
 import { Footer } from '@/components/layout/footer';
@@ -120,7 +122,11 @@ const WEBSITE_JSON_LD = {
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const categories = await buildNavigation();
+  const [categories, coupons] = await Promise.all([
+    buildNavigation(),
+    COUPONS_ENABLED ? listSiteCoupons() : Promise.resolve([]),
+  ]);
+  const announcements = coupons.map((coupon) => `${coupon.label} with code ${coupon.code}`);
 
   return (
     <html lang="en-IN" className={`${jakarta.variable} ${jakartaDisplay.variable}`} suppressHydrationWarning>
@@ -142,7 +148,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         </a>
 
         <Providers>
-          <SiteChromeTop categories={categories} />
+          <SiteChromeTop categories={categories} announcements={announcements} />
           <main id="main" className="flex-1 pb-safe-nav lg:pb-0">
             {children}
           </main>

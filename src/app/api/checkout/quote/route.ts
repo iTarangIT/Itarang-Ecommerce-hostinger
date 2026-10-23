@@ -42,7 +42,9 @@ export async function POST(request: Request) {
     );
   }
 
-  const quote = await buildQuote(parsed.data);
+  // The shopper comes from the session, never the body: it decides which
+  // campaign rules (first order, customer type, usage limits) apply.
+  const quote = await buildQuote({ ...parsed.data, shopper: { userId: auth.user.id } });
 
   return NextResponse.json({
     items: quote.items,

@@ -1,6 +1,7 @@
 import type { PoolClient } from 'pg';
 import { revalidateTag } from 'next/cache';
 import { query, queryOne, transaction } from '@/lib/db/pool';
+import { countRedemptions } from '@/lib/offers/campaign-store';
 import { dispatchStockAlertsInBackground } from '@/lib/stock/alerts';
 import { recordStockTransitions, transitionBetween } from '@/lib/stock/transitions';
 import { generateOrderNumber } from './numbering';
@@ -675,9 +676,28 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
       // has existed since the first migration and nothing ever wrote to it,
       // which is why per-customer coupon limits were unenforceable.
       if (order.amounts.couponCode) {
+        const limits = input.couponLimits;
+        if (limits && (limits.maxTotal !== null || limits.maxPerCustomer !== null)) {
+          // One checkout per code at a time past this point, so two orders
+          // cannot both count 0 of 1 uses and both take it. Released at commit.
+          await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+            `coupon:${order.amounts.couponCode.toUpperCase()}`,
+          ]);
+          const used = await countRedemptions(
+            order.amounts.couponCode,
+            { userId: limits.userId, phone: order.contact.phone },
+            client,
+          );
+          if (
+            (limits.maxTotal !== null && used.total >= limits.maxTotal) ||
+            (limits.maxPerCustomer !== null && used.customer >= limits.maxPerCustomer)
+          ) {
+            throw new CouponLimitReached();
+          }
+        }
         await client.query(
-          `INSERT INTO coupon_redemptions (order_id, code, phone) VALUES ($1, $2, $3)`,
-          [inserted.id, order.amounts.couponCode, order.contact.phone],
+          `INSERT INTO coupon_redemptions (order_id, code, phone, user_id) VALUES ($1, $2, $3, $4)`,
+          [inserted.id, order.amounts.couponCode, order.contact.phone, input.couponLimits?.userId ?? null],
         );
       }
 
@@ -693,6 +713,10 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
           return { ok: true, order: existing, reused: true } satisfies CreateOrderResult;
         }
         throw error;
+      }
+
+      if (error instanceof CouponLimitReached) {
+        return { ok: false, reason: 'coupon_limit' } satisfies CreateOrderResult;
       }
 
       if (error instanceof InsufficientStock) {
@@ -1605,6 +1629,13 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
 }
 
 /* ------------------------------------------------------------- helpers */
+
+class CouponLimitReached extends Error {
+  constructor() {
+    super('Coupon usage limit reached');
+    this.name = 'CouponLimitReached';
+  }
+}
 
 class InsufficientStock extends Error {
   constructor(

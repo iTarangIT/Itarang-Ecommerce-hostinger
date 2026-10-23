@@ -29,11 +29,22 @@ export interface CreateOrderInput {
   /** Live stock read from the catalogue at placement, for the oversell check. */
   availableByVariant: Record<string, number>;
   reservationTtlMinutes: number;
+  /**
+   * The applied campaign's usage limits, re-counted under a lock inside the
+   * order transaction so two simultaneous orders cannot both take the last
+   * redemption. Absent when no coupon is applied.
+   */
+  couponLimits?: {
+    userId: number | null;
+    maxTotal: number | null;
+    maxPerCustomer: number | null;
+  };
 }
 
 export type CreateOrderResult =
   | { ok: true; order: Order; reused: boolean }
-  | { ok: false; reason: 'insufficient_stock'; variantId: string; available: number };
+  | { ok: false; reason: 'insufficient_stock'; variantId: string; available: number }
+  | { ok: false; reason: 'coupon_limit' };
 
 /** Columns the order list can be sorted by. Mapped to SQL by a whitelist. */
 export type OrderSort = 'placed' | 'updated' | 'total' | 'customer';

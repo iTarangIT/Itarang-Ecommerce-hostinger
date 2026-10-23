@@ -518,9 +518,11 @@ describe('single-use coupons are enforced server-side', () => {
       join(ROOT, 'src', 'lib', 'orders', 'place-order.ts'),
       'utf8',
     );
-    expect(placeOrder, 'placement does not check for a previous redemption').toMatch(
-      /hasRedeemedCoupon\(/,
-    );
+    // Since campaigns (migration 0025) the per-customer and total limits are
+    // checked by the quote with the full shopper, and re-counted under a lock
+    // inside the order transaction.
+    expect(placeOrder, 'placement does not run the campaign rules as final').toMatch(/final:\s*true/);
+    expect(placeOrder, 'placement does not pass the limits to the transaction').toMatch(/couponLimits/);
 
     const repository = readFileSync(
       join(ROOT, 'src', 'lib', 'orders', 'postgres-repository.ts'),
@@ -529,6 +531,8 @@ describe('single-use coupons are enforced server-side', () => {
     expect(repository, 'redemptions are never recorded').toMatch(
       /INSERT INTO coupon_redemptions/,
     );
+    expect(repository, 'limits are not re-counted under a lock').toMatch(/pg_advisory_xact_lock/);
+
   });
 
   it('the client-safe coupon module never reads the database', () => {
@@ -536,6 +540,13 @@ describe('single-use coupons are enforced server-side', () => {
     // the bundle and move the check somewhere the browser could skip.
     const text = readFileSync(join(ROOT, 'src', 'lib', 'offers', 'coupons.ts'), 'utf8');
     expect(text, 'coupons.ts must stay client-safe').not.toMatch(/@\/lib\/db|from 'pg'/);
+  });
+
+  it('the shopper behind a quote comes from the session, not the request body', () => {
+    const route = readFileSync(join(ROOT, 'src', 'app', 'api', 'checkout', 'quote', 'route.ts'), 'utf8');
+    expect(route).toMatch(/shopper:\s*\{\s*userId:\s*auth\.user\.id\s*\}/);
+    const validation = readFileSync(join(ROOT, 'src', 'lib', 'checkout', 'validation.ts'), 'utf8');
+    expect(validation, 'the request schema must not accept a shopper').not.toMatch(/shopper\s*:/);
   });
 });
 

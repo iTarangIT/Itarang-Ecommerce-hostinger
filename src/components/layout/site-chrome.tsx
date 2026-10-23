@@ -16,10 +16,17 @@ import { Toaster } from '@/components/ui/toaster';
  * All interactive chrome in one client boundary, so the page tree below it can
  * stay entirely server-rendered.
  */
-export function SiteChromeTop({ categories }: { categories: NavCategory[] }) {
+export function SiteChromeTop({
+  categories,
+  announcements,
+}: {
+  categories: NavCategory[];
+  /** One line per live campaign marked "show on site". */
+  announcements: string[];
+}) {
   return (
     <>
-      <AnnouncementBar />
+      <AnnouncementBar coupons={announcements} />
       <Header categories={categories} />
     </>
   );

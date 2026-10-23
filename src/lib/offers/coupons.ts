@@ -1,5 +1,5 @@
 import type { CategorySlug, Paise } from '@/lib/commerce/types';
-import { subcategoryName } from '@/lib/catalog/category-names';
+import { categoryName, subcategoryName } from '@/lib/catalog/category-names';
 import type { AppliedCoupon, CartItem } from '@/lib/store/types';
 
 /**
@@ -99,13 +99,22 @@ export type CouponResult =
  * Checked before the code is even looked up, so a disabled build cannot be
  * probed for which codes exist.
  */
-export function validateCoupon(code: string, items: CartItem[]): CouponResult {
+/**
+ * `rules` defaults to the built-in list for the unit tests and the fallback;
+ * at checkout the server passes the campaign loaded from the `campaigns`
+ * table (see `campaign-store.ts`), and this decides only what it takes off.
+ */
+export function validateCoupon(
+  code: string,
+  items: CartItem[],
+  rules: readonly CouponRule[] = COUPONS,
+): CouponResult {
   if (!COUPONS_ENABLED) return { ok: false, reason: COUPONS_DISABLED_NOTE };
 
   const normalised = code.trim().toUpperCase();
   if (!normalised) return { ok: false, reason: 'Enter a coupon code.' };
 
-  const rule = COUPONS.find((c) => c.code === normalised);
+  const rule = rules.find((c) => c.code === normalised);
   if (!rule) return { ok: false, reason: `“${normalised}” is not a valid code.` };
 
   if (items.length === 0) return { ok: false, reason: 'Add something to your cart first.' };
@@ -119,7 +128,9 @@ export function validateCoupon(code: string, items: CartItem[]): CouponResult {
   if (qualifying.length === 0) {
     const scope = rule.subcategories
       ? rule.subcategories.map((slug) => subcategoryName(slug).toLowerCase()).join(' or ')
-      : (rule.categories?.join(', ') ?? 'eligible products');
+      : rule.categories
+        ? rule.categories.map((slug) => categoryName(slug).toLowerCase()).join(', ')
+        : 'eligible products';
     return { ok: false, reason: `${normalised} applies only to ${scope}.` };
   }
 

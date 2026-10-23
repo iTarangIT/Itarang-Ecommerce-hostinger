@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { buildNavigation } from '@/lib/navigation';
+import { listSiteCoupons } from '@/lib/offers/campaign-store';
 import {
   bestSellers,
   bySubcategory,
@@ -37,13 +38,14 @@ export const metadata: Metadata = {
 const HOME_FAQS = FAQ_SECTIONS.flatMap((section) => section.entries.slice(0, 2)).slice(0, 6);
 
 export default async function HomePage() {
-  const [categories, popular, rickshaw, homeBatteries, reviews, titles] = await Promise.all([
+  const [categories, popular, rickshaw, homeBatteries, reviews, titles, coupons] = await Promise.all([
     buildNavigation(),
     bestSellers(8),
     bySubcategory('ev-3-wheeler', 8),
     bySubcategory('home-inverter', 8),
     featuredReviews(6),
     productTitleMap(),
+    listSiteCoupons(),
   ]);
 
   return (
@@ -53,7 +55,7 @@ export default async function HomePage() {
 
       <CategoryTiles categories={categories} />
 
-      <WelcomeOffers />
+      <WelcomeOffers coupons={coupons} />
 
       {/* `popularityRank` is an editorial ordering — `to-domain.ts` says so in
           as many words — not a count of anything sold, so this rail makes no

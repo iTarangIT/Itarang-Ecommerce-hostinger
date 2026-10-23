@@ -80,7 +80,7 @@ export const FAQ_SECTIONS: FaqSection[] = [
         id: 'coupons',
         question: 'Which coupon codes can I use?',
         answer:
-          'WELCOME1000 for ₹1,000 off a home inverter battery, and WELCOME2000 for ₹2,000 off a 3-wheeler or e-rickshaw battery. Enter the code in your cart. One code per order, once per customer; the UPI discount applies on top.',
+          'The codes running right now, and what each applies to, are listed on the Offers page. Enter the code in your cart. One code per order; each code states its own limits, such as once per customer. The UPI discount applies on top.',
       },
       {
         id: 'returns-policy',
