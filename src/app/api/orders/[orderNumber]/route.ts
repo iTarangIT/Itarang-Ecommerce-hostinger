@@ -96,11 +96,16 @@ export async function GET(
       })),
       shippingAddress: order.shippingAddress,
       contactName: order.contact.name,
+      stages: order.stages,
+      shipment: order.shipment,
     },
-    timeline: events.map((event) => ({
-      status: event.toStatus,
-      note: event.note,
-      at: event.createdAt,
-    })),
+    // Internal admin notes ("Show to customer" unticked) never leave the server.
+    timeline: events
+      .filter((event) => event.customerVisible)
+      .map((event) => ({
+        status: event.toStatus,
+        note: event.note,
+        at: event.createdAt,
+      })),
   });
 }

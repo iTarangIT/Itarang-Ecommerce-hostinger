@@ -6,6 +6,8 @@ import { currentUser } from '@/lib/auth/session';
 import { invalidateCatalogSnapshot } from '@/lib/commerce';
 import { CATALOG_TAG } from '@/lib/commerce/db/db-provider';
 import { productRepository } from '@/lib/products/postgres-repository';
+import { orders } from '@/lib/orders/postgres-repository';
+import { dispatchStockAlertsInBackground } from '@/lib/stock/alerts';
 import { buildPricingImportReport, type PricingImportReport } from './bulk-pricing';
 import {
   MAX_WORKBOOK_BYTES,
@@ -74,7 +76,8 @@ export async function importPricingAction(
   // of its rows actually differ from what is stored. A template downloaded from
   // this console arrives carrying every current price, so without the
   // comparison a two-product change would rewrite the whole catalogue.
-  const report = buildPricingImportReport(rows, await repository.listVariantPrices());
+  const catalogue = await repository.listVariantPrices();
+  const report = buildPricingImportReport(rows, catalogue);
 
   // Nothing is written while any row is wrong. The report still goes back so
   // the administrator can see exactly which rows to correct — a file that is
@@ -92,6 +95,26 @@ export async function importPricingAction(
       report,
       error: `SKU ${result.sku} was removed from the catalogue while the file was being checked. Nothing was updated; upload again.`,
     };
+  }
+
+  // Stock typed into the sheet is the new count on the shelf: send the
+  // out-of-stock alerts and make checkout agree, as the product page does.
+  const stockRows = report.accepted.filter((row) => row.stock !== undefined);
+  if (stockRows.length > 0) {
+    dispatchStockAlertsInBackground();
+    const bySku = new Map(catalogue.map((entry) => [entry.sku, entry]));
+    try {
+      await orders().reconcileInventory(
+        stockRows.flatMap((row) => {
+          const entry = bySku.get(row.sku);
+          return entry?.productKey && entry.variantKey
+            ? [{ variantId: `${entry.productKey}:${entry.variantKey}`, quantity: row.stock! }]
+            : [];
+        }),
+      );
+    } catch (error) {
+      console.error('[admin] checkout stock not synced after bulk import:', error);
+    }
   }
 
   // Same invalidation the single-product pricing form performs, for the same

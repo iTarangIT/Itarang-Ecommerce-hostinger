@@ -4,8 +4,10 @@ import * as React from 'react';
 import Link from 'next/link';
 import { ArrowRight, X } from 'lucide-react';
 
-// v2: the offers changed, so a bar dismissed for the old ones shows again.
-const STORAGE_KEY = 'itarang.announcement.dismissed.v2';
+// v3: coupon lines now come from the admin's campaigns, so a bar dismissed for
+// the old fixed lines shows again. Changing the set of codes changes the key
+// too (see `storageKey`), so a new campaign is never hidden by an old dismissal.
+const STORAGE_PREFIX = 'itarang.announcement.dismissed.v3';
 
 /**
  * Only offers that exist.
@@ -18,14 +20,12 @@ const STORAGE_KEY = 'itarang.announcement.dismissed.v2';
  * on an empty category with a code that buys nothing.
  *
  * What is here now is what the business specified and the checkout applies:
- * the two WELCOME codes (`lib/offers/coupons.ts`), the UPI discount
+ * the campaigns marked "show on site" in /admin/campaigns, the UPI discount
  * (`UPI_DISCOUNT`, applied by `buildQuote`) and free delivery
  * (`FREE_SHIPPING_THRESHOLD`). No card offers and no no-cost EMI — the business
  * has neither online.
  */
-const MESSAGES = [
-  { text: '₹2,000 off 3-wheeler batteries with code WELCOME2000', href: '/offers' },
-  { text: '₹1,000 off home inverter batteries with code WELCOME1000', href: '/offers' },
+const STANDING_MESSAGES = [
   { text: 'Extra ₹200 off when you pay by UPI', href: '/offers' },
   { text: 'Free delivery on orders above ₹4,999', href: '/offers' },
 ];
@@ -34,29 +34,37 @@ const MESSAGES = [
  * Rotating announcement bar. Dismissal is remembered so it does not nag on
  * every visit, and rotation pauses on hover and for reduced-motion users.
  */
-export function AnnouncementBar() {
+export function AnnouncementBar({ coupons }: { coupons: string[] }) {
+  const messages = React.useMemo(
+    () => [...coupons.map((text) => ({ text, href: '/offers' })), ...STANDING_MESSAGES],
+    [coupons],
+  );
+  // Keyed on the lines themselves, so a new campaign is shown even to someone
+  // who dismissed the bar for the previous set.
+  const storageKey = `${STORAGE_PREFIX}.${coupons.join('|')}`;
   const [dismissed, setDismissed] = React.useState(true);
   const [index, setIndex] = React.useState(0);
   const [paused, setPaused] = React.useState(false);
 
   React.useEffect(() => {
     try {
-      setDismissed(window.localStorage.getItem(STORAGE_KEY) === '1');
+      setDismissed(window.localStorage.getItem(storageKey) === '1');
     } catch {
       setDismissed(false);
     }
-  }, []);
+  }, [storageKey]);
 
+  const count = messages.length;
   React.useEffect(() => {
     if (dismissed || paused) return;
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    const timer = window.setInterval(() => setIndex((i) => (i + 1) % MESSAGES.length), 5500);
+    const timer = window.setInterval(() => setIndex((i) => (i + 1) % count), 5500);
     return () => window.clearInterval(timer);
-  }, [dismissed, paused]);
+  }, [dismissed, paused, count]);
 
   if (dismissed) return null;
 
-  const message = MESSAGES[index];
+  const message = messages[index % count]!;
 
   return (
     <div
@@ -79,7 +87,7 @@ export function AnnouncementBar() {
         onClick={() => {
           setDismissed(true);
           try {
-            window.localStorage.setItem(STORAGE_KEY, '1');
+            window.localStorage.setItem(storageKey, '1');
           } catch {
             /* non-blocking */
           }

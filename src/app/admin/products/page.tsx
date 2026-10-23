@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { ArrowLeft, Package, PackageX, Plus, Upload } from 'lucide-react';
+import { ArrowLeft, Package, PackageX, Plus, Upload, FolderTree } from 'lucide-react';
 import { productRepository } from '@/lib/products/postgres-repository';
 import { PRODUCT_STATUSES, type ProductStatus } from '@/lib/products/types';
 import type { CategorySlug } from '@/lib/commerce/types';
@@ -10,6 +10,7 @@ import { ButtonLink } from '@/components/ui/button';
 import { StateBlock } from '@/components/ui/states';
 import { ProductStatusPill } from '@/components/admin/product-status-pill';
 import { ProductFilters, ProductPagination } from '@/components/admin/product-filters';
+import { loadCategoryOptions } from '@/lib/catalog/category-store';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,9 +27,9 @@ function asStatus(value: string | undefined): ProductStatus | undefined {
   return PRODUCT_STATUSES.find((status) => status === value);
 }
 
+/** A slug-shaped value only; the query binds it as a parameter either way. */
 function asCategory(value: string | undefined): CategorySlug | undefined {
-  const allowed: CategorySlug[] = ['inverters', 'batteries', 'ups', 'combos'];
-  return allowed.find((category) => category === value);
+  return value && /^[a-z0-9-]{1,60}$/.test(value) ? value : undefined;
 }
 
 export default async function AdminProductsPage({
@@ -81,6 +82,10 @@ export default async function AdminProductsPage({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <ButtonLink href="/admin/products/categories" variant="outline" size="sm">
+            <FolderTree className="h-4 w-4" />
+            Categories
+          </ButtonLink>
           <ButtonLink href="/admin/products/out-of-stock" variant="outline" size="sm">
             <PackageX className="h-4 w-4" />
             Out of stock
@@ -102,7 +107,10 @@ export default async function AdminProductsPage({
         </p>
       ) : null}
 
-      <ProductFilters current={{ q: search, status: params.status, category: params.category }} />
+      <ProductFilters
+        current={{ q: search, status: params.status, category: params.category }}
+        categories={(await loadCategoryOptions()).map((c) => ({ slug: c.slug, name: c.name }))}
+      />
 
       {items.length === 0 ? (
         <StateBlock

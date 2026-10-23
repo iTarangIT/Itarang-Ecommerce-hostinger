@@ -4,11 +4,11 @@ import * as React from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { BadgeCheck, Bookmark, Tag, Trash2, Truck, X } from 'lucide-react';
-import type { CartItem } from '@/lib/store/types';
+import type { AppliedCoupon, CartItem } from '@/lib/store/types';
 import type { CartTotals } from '@/lib/store/totals';
 import { FREE_SHIPPING_THRESHOLD } from '@/lib/store/totals';
 import { formatPrice } from '@/lib/catalog/pricing';
-import { COUPONS_DISABLED_NOTE, COUPONS_ENABLED, validateCoupon } from '@/lib/offers/coupons';
+import { COUPONS_DISABLED_NOTE, COUPONS_ENABLED } from '@/lib/offers/coupons';
 import { useCart } from '@/lib/store/hooks';
 import { useUI } from '@/lib/store/ui-provider';
 import { Button } from '@/components/ui/button';
@@ -168,6 +168,7 @@ export function CouponField() {
   const { toast } = useUI();
   const [code, setCode] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
+  const [checking, setChecking] = React.useState(false);
 
   /**
    * A cart saved before coupons were switched off still carries its code.
@@ -243,15 +244,38 @@ export function CouponField() {
 
   return (
     <form
-      onSubmit={(e) => {
+      onSubmit={async (e) => {
         e.preventDefault();
-        const result = validateCoupon(code, cart.items);
-        if (result.ok) {
-          cart.applyCoupon(result.coupon);
-          setError(null);
-          toast({ title: 'Coupon applied', description: result.coupon.label, tone: 'success' });
-        } else {
-          setError(result.reason);
+        if (!code.trim()) {
+          setError('Enter a coupon code.');
+          return;
+        }
+        // Campaigns are set up by the admin with dates, limits and customer
+        // rules, so the server decides (`/api/coupons/check`), not the browser.
+        setChecking(true);
+        try {
+          const response = await fetch('/api/coupons/check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              code,
+              lines: cart.items.map((item) => ({ variantId: item.id, quantity: item.quantity })),
+            }),
+          });
+          const result = (await response.json()) as
+            | { ok: true; coupon: AppliedCoupon }
+            | { ok: false; reason?: string; error?: string };
+          if (result.ok) {
+            cart.applyCoupon(result.coupon);
+            setError(null);
+            toast({ title: 'Coupon applied', description: result.coupon.label, tone: 'success' });
+          } else {
+            setError(result.reason ?? result.error ?? 'That code cannot be used right now.');
+          }
+        } catch {
+          setError('Could not check the code. Please try again.');
+        } finally {
+          setChecking(false);
         }
       }}
     >
@@ -267,8 +291,8 @@ export function CouponField() {
           aria-invalid={Boolean(error)}
           className="uppercase"
         />
-        <Button type="submit" variant="outline" className="shrink-0">
-          Apply
+        <Button type="submit" variant="outline" className="shrink-0" disabled={checking}>
+          {checking ? 'Checking…' : 'Apply'}
         </Button>
       </div>
       {error ? <p className="mt-1.5 text-xs font-medium text-destructive">{error}</p> : null}

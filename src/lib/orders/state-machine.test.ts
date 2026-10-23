@@ -17,9 +17,9 @@ describe('order status transitions', () => {
     expect(canTransitionOrder('shipped', 'delivered')).toBe(true);
   });
 
-  it('treats packing and shipping as one step', () => {
-    expect(nextOrderStatuses('confirmed')).toEqual(['shipped', 'cancelled']);
-    // Orders already marked packed can still move on.
+  it('has Packed as its own, optional step', () => {
+    expect(nextOrderStatuses('confirmed')).toEqual(['packed', 'shipped', 'cancelled']);
+    expect(nextOrderStatuses('packed')).toEqual(['shipped', 'cancelled']);
     expect(canTransitionOrder('packed', 'shipped')).toBe(true);
   });
 

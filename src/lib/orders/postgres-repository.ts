@@ -1,6 +1,7 @@
 import type { PoolClient } from 'pg';
 import { revalidateTag } from 'next/cache';
 import { query, queryOne, transaction } from '@/lib/db/pool';
+import { countRedemptions } from '@/lib/offers/campaign-store';
 import { dispatchStockAlertsInBackground } from '@/lib/stock/alerts';
 import { recordStockTransitions, transitionBetween } from '@/lib/stock/transitions';
 import { generateOrderNumber } from './numbering';
@@ -22,6 +23,7 @@ import type {
 import type {
   Order,
   OrderEvent,
+  Shipment,
   OrderItem,
   OrderStatus,
   PaymentRecord,
@@ -76,6 +78,17 @@ interface OrderRow {
   is_test: boolean;
   idempotency_key: string | null;
   gateway_order_id: string | null;
+  paid_at: Date | null;
+  confirmed_at: Date | null;
+  packed_at: Date | null;
+  shipped_at: Date | null;
+  delivered_at: Date | null;
+  cancelled_at: Date | null;
+  courier_name: string | null;
+  tracking_number: string | null;
+  tracking_url: string | null;
+  delivery_person: string | null;
+  delivery_phone: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -148,6 +161,21 @@ function toOrder(row: OrderRow, items: OrderItem[]): Order {
     sellerGstin: row.seller_gstin ?? undefined,
     idempotencyKey: row.idempotency_key ?? undefined,
     gatewayOrderId: row.gateway_order_id ?? undefined,
+    stages: {
+      paidAt: row.paid_at?.toISOString(),
+      confirmedAt: row.confirmed_at?.toISOString(),
+      packedAt: row.packed_at?.toISOString(),
+      shippedAt: row.shipped_at?.toISOString(),
+      deliveredAt: row.delivered_at?.toISOString(),
+      cancelledAt: row.cancelled_at?.toISOString(),
+    },
+    shipment: {
+      courierName: row.courier_name ?? undefined,
+      trackingNumber: row.tracking_number ?? undefined,
+      trackingUrl: row.tracking_url ?? undefined,
+      deliveryPerson: row.delivery_person ?? undefined,
+      deliveryPhone: row.delivery_phone ?? undefined,
+    },
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };
@@ -159,7 +187,28 @@ const ORDER_COLUMNS = `
   subtotal, product_savings, coupon_code, coupon_discount, payment_discount, shipping, cod_fee,
   total, gst_amount, gst_rate, place_of_supply, buyer_gstin, seller_gstin,
   payment_method, is_test, idempotency_key, gateway_order_id,
+  paid_at, confirmed_at, packed_at, shipped_at, delivered_at, cancelled_at,
+  courier_name, tracking_number, tracking_url, delivery_person, delivery_phone,
   created_at, updated_at`;
+
+/**
+ * The column that records when an order first reached a status. Fixed
+ * strings only, never built from input. `pending_payment` has none: that is
+ * `created_at`.
+ */
+const STAGE_COLUMN: Partial<Record<OrderStatus, string>> = {
+  confirmed: 'confirmed_at',
+  packed: 'packed_at',
+  shipped: 'shipped_at',
+  delivered: 'delivered_at',
+  cancelled: 'cancelled_at',
+};
+
+/** `, confirmed_at = COALESCE(confirmed_at, now())`: the first arrival wins. */
+function stampStage(status: OrderStatus): string {
+  const column = STAGE_COLUMN[status];
+  return column ? `, ${column} = COALESCE(${column}, now())` : '';
+}
 
 /**
  * After a transaction that sold stock has committed: let the storefront see
@@ -670,14 +719,39 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
         [inserted.id, order.status],
       );
 
+      // Cash on delivery is created already confirmed: date that stage now.
+      if (order.status === 'confirmed') {
+        await client.query('UPDATE orders SET confirmed_at = now() WHERE id = $1', [inserted.id]);
+        inserted.confirmed_at = new Date();
+      }
+
       // In the same transaction as the order, so a rollback cannot leave a
       // redemption recorded against an order that does not exist. The table
       // has existed since the first migration and nothing ever wrote to it,
       // which is why per-customer coupon limits were unenforceable.
       if (order.amounts.couponCode) {
+        const limits = input.couponLimits;
+        if (limits && (limits.maxTotal !== null || limits.maxPerCustomer !== null)) {
+          // One checkout per code at a time past this point, so two orders
+          // cannot both count 0 of 1 uses and both take it. Released at commit.
+          await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+            `coupon:${order.amounts.couponCode.toUpperCase()}`,
+          ]);
+          const used = await countRedemptions(
+            order.amounts.couponCode,
+            { userId: limits.userId, phone: order.contact.phone },
+            client,
+          );
+          if (
+            (limits.maxTotal !== null && used.total >= limits.maxTotal) ||
+            (limits.maxPerCustomer !== null && used.customer >= limits.maxPerCustomer)
+          ) {
+            throw new CouponLimitReached();
+          }
+        }
         await client.query(
-          `INSERT INTO coupon_redemptions (order_id, code, phone) VALUES ($1, $2, $3)`,
-          [inserted.id, order.amounts.couponCode, order.contact.phone],
+          `INSERT INTO coupon_redemptions (order_id, code, phone, user_id) VALUES ($1, $2, $3, $4)`,
+          [inserted.id, order.amounts.couponCode, order.contact.phone, input.couponLimits?.userId ?? null],
         );
       }
 
@@ -693,6 +767,10 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
           return { ok: true, order: existing, reused: true } satisfies CreateOrderResult;
         }
         throw error;
+      }
+
+      if (error instanceof CouponLimitReached) {
+        return { ok: false, reason: 'coupon_limit' } satisfies CreateOrderResult;
       }
 
       if (error instanceof InsufficientStock) {
@@ -905,8 +983,11 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
 
       const nextOrderStatus = orderStatusForPayment(status, row.status);
 
+      const stamps =
+        (status === 'paid' ? ', paid_at = COALESCE(paid_at, now())' : '') +
+        (nextOrderStatus !== row.status ? stampStage(nextOrderStatus) : '');
       const updated = await client.query<OrderRow>(
-        `UPDATE orders SET payment_status = $2, status = $3 WHERE id = $1
+        `UPDATE orders SET payment_status = $2, status = $3${stamps} WHERE id = $1
          RETURNING ${ORDER_COLUMNS}`,
         [orderId, status, nextOrderStatus],
       );
@@ -947,6 +1028,7 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
     to: OrderStatus,
     actor: string,
     note?: string,
+    options: { customerVisible?: boolean; shipment?: Shipment } = {},
   ): Promise<Order | null> {
     // Acted on after the commit, as in `applyPaymentStatus`.
     let restock = { stockChanged: false, transitionRecorded: false };
@@ -970,15 +1052,20 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
       }
 
       const updated = await client.query<OrderRow>(
-        `UPDATE orders SET status = $2 WHERE id = $1 RETURNING ${ORDER_COLUMNS}`,
+        `UPDATE orders SET status = $2${stampStage(to)} WHERE id = $1 RETURNING ${ORDER_COLUMNS}`,
         [orderId, to],
       );
 
       await client.query(
-        `INSERT INTO order_events (order_id, from_status, to_status, actor, note)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [orderId, row.status, to, actor, note ?? null],
+        `INSERT INTO order_events (order_id, from_status, to_status, actor, note, customer_visible)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [orderId, row.status, to, actor, note ?? null, options.customerVisible ?? true],
       );
+
+      if (options.shipment) {
+        const withShipment = await this.writeShipmentWithin(client, orderId, options.shipment);
+        if (withShipment) updated.rows[0] = withShipment;
+      }
 
       if (to === 'cancelled') {
         // Units held for an unpaid order go back to the pool; units already
@@ -1000,12 +1087,58 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
    * a customer told about a delay, say. Stored as an event from a status to
    * the same status, so the order history shows it in sequence with the rest.
    */
-  async addOrderNote(orderId: number, actor: string, note: string): Promise<void> {
+  async addOrderNote(
+    orderId: number,
+    actor: string,
+    note: string,
+    customerVisible = true,
+  ): Promise<void> {
     await query(
-      `INSERT INTO order_events (order_id, from_status, to_status, actor, note)
-       SELECT id, status, status, $2, $3 FROM orders WHERE id = $1`,
-      [orderId, actor, note],
+      `INSERT INTO order_events (order_id, from_status, to_status, actor, note, customer_visible)
+       SELECT id, status, status, $2, $3, $4 FROM orders WHERE id = $1`,
+      [orderId, actor, note, customerVisible],
     );
+  }
+
+  /**
+   * Courier and delivery details. Blank fields clear. Recorded in the history
+   * so the customer's tracking page shows when they were added.
+   */
+  async updateShipment(orderId: number, shipment: Shipment, actor: string): Promise<Order | null> {
+    return transaction(async (client) => {
+      const row = await this.writeShipmentWithin(client, orderId, shipment);
+      if (!row) return null;
+      await client.query(
+        `INSERT INTO order_events (order_id, from_status, to_status, actor, note)
+         VALUES ($1, $2, $2, $3, 'Shipping details updated')`,
+        [orderId, row.status, actor],
+      );
+      const [hydrated] = await this.hydrateWithin(client, [row]);
+      return hydrated ?? null;
+    });
+  }
+
+  private async writeShipmentWithin(
+    client: PoolClient,
+    orderId: number,
+    shipment: Shipment,
+  ): Promise<OrderRow | null> {
+    const result = await client.query<OrderRow>(
+      `UPDATE orders
+          SET courier_name = $2, tracking_number = $3, tracking_url = $4,
+              delivery_person = $5, delivery_phone = $6
+        WHERE id = $1
+        RETURNING ${ORDER_COLUMNS}`,
+      [
+        orderId,
+        shipment.courierName ?? null,
+        shipment.trackingNumber ?? null,
+        shipment.trackingUrl ?? null,
+        shipment.deliveryPerson ?? null,
+        shipment.deliveryPhone ?? null,
+      ],
+    );
+    return result.rows[0] ?? null;
   }
 
   async listEvents(orderId: number): Promise<OrderEvent[]> {
@@ -1016,6 +1149,7 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
       to_status: string;
       actor: string;
       note: string | null;
+      customer_visible: boolean;
       created_at: Date;
     }>(`SELECT * FROM order_events WHERE order_id = $1 ORDER BY created_at, id`, [orderId]);
 
@@ -1026,6 +1160,7 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
       toStatus: row.to_status,
       actor: row.actor,
       note: row.note ?? undefined,
+      customerVisible: row.customer_visible,
       createdAt: row.created_at.toISOString(),
     }));
   }
@@ -1605,6 +1740,13 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
 }
 
 /* ------------------------------------------------------------- helpers */
+
+class CouponLimitReached extends Error {
+  constructor() {
+    super('Coupon usage limit reached');
+    this.name = 'CouponLimitReached';
+  }
+}
 
 class InsufficientStock extends Error {
   constructor(

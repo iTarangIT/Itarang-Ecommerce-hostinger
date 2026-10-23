@@ -41,10 +41,30 @@ export const SUBCATEGORY_NAMES: Record<string, string> = {
   'ev-chargers': 'EV Battery Chargers',
 };
 
+/**
+ * Names for categories added from the admin panel (`catalog_categories`).
+ *
+ * The maps above are the built-in taxonomy and stay free of database imports
+ * so this module can ship to the browser. `category-store.ts` registers the
+ * database names here on the server as it loads them, so facet labels and
+ * search suggestions show "Inverters" rather than the bare slug.
+ */
+const REGISTERED = new Map<string, string>();
+
+export function registerCategoryNames(rows: readonly { slug: string; name: string }[]): void {
+  for (const row of rows) REGISTERED.set(row.slug, row.name);
+}
+
+/** `two-wheeler-batteries` → `Two wheeler batteries`: never a blank label. */
+function readable(slug: string): string {
+  const words = slug.replace(/[-_]+/g, ' ').trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : slug;
+}
+
 export function categoryName(slug: string): string {
-  return CATEGORY_NAMES[slug as CategorySlug] ?? slug;
+  return REGISTERED.get(slug) ?? CATEGORY_NAMES[slug as CategorySlug] ?? readable(slug);
 }
 
 export function subcategoryName(slug: string): string {
-  return SUBCATEGORY_NAMES[slug] ?? slug;
+  return REGISTERED.get(slug) ?? SUBCATEGORY_NAMES[slug] ?? readable(slug);
 }

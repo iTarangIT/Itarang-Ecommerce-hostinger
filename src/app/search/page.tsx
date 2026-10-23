@@ -2,7 +2,6 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { catalog } from '@/lib/commerce';
 import { parseProductQuery, type SearchParamsInput } from '@/lib/catalog/query';
-import { CATEGORIES } from '@/lib/commerce/mock/categories';
 import { Breadcrumbs } from '@/components/ui/breadcrumbs';
 import { Listing } from '@/components/catalog/listing';
 import { SearchAgainField } from '@/components/catalog/search-again-field';
@@ -33,7 +32,10 @@ export default async function SearchPage({
 }) {
   const resolved = await searchParams;
   const query = parseProductQuery(resolved);
-  const result = await catalog().listProducts(query);
+  const [result, categories] = await Promise.all([
+    catalog().listProducts(query),
+    catalog().listCategories(),
+  ]);
   const term = query.search ?? '';
 
   return (
@@ -89,7 +91,7 @@ export default async function SearchPage({
           <section className="mt-10">
             <h2 className="heading-3">Or browse by category</h2>
             <ul className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {CATEGORIES.map((category) => (
+              {categories.map((category) => (
                 <li key={category.slug}>
                   <Link
                     href={categoryPath(category.slug)}

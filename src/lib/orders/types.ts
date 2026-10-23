@@ -94,8 +94,31 @@ export interface Order {
   sellerGstin?: string;
   idempotencyKey?: string;
   gatewayOrderId?: string;
+  /** When the order first reached each stage (migration 0027). */
+  stages: OrderStages;
+  /** Courier and delivery details, entered by the admin at dispatch. */
+  shipment: Shipment;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface OrderStages {
+  /** Payment received. */
+  paidAt?: string;
+  confirmedAt?: string;
+  packedAt?: string;
+  shippedAt?: string;
+  deliveredAt?: string;
+  cancelledAt?: string;
+}
+
+export interface Shipment {
+  courierName?: string;
+  trackingNumber?: string;
+  /** http(s) only — checked by the admin action and the column. */
+  trackingUrl?: string;
+  deliveryPerson?: string;
+  deliveryPhone?: string;
 }
 
 export interface OrderEvent {
@@ -105,6 +128,8 @@ export interface OrderEvent {
   toStatus: string;
   actor: string;
   note?: string;
+  /** False for an internal admin note, never shown to the customer. */
+  customerVisible: boolean;
   createdAt: string;
 }
 

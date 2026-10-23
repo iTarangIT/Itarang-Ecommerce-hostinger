@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { CATEGORIES } from '@/lib/commerce/mock/categories';
-import { CATEGORY_NAMES, SUBCATEGORY_NAMES, categoryName, subcategoryName } from './category-names';
+import {
+  CATEGORY_NAMES,
+  SUBCATEGORY_NAMES,
+  categoryName,
+  registerCategoryNames,
+  subcategoryName,
+} from './category-names';
 
 /**
  * `category-names.ts` duplicates the display names on purpose, so that the
@@ -35,9 +41,15 @@ describe('category names stay in step with the taxonomy', () => {
     expect(Object.keys(SUBCATEGORY_NAMES).sort()).toEqual([...subSlugs].sort());
   });
 
-  it('falls back to the slug for anything unknown', () => {
+  it('falls back to a readable form of the slug for anything unknown', () => {
     // A product filed under a slug with no entry must still render something.
-    expect(categoryName('not-a-category')).toBe('not-a-category');
-    expect(subcategoryName('not-a-subcategory')).toBe('not-a-subcategory');
+    expect(categoryName('not-a-category')).toBe('Not a category');
+    expect(subcategoryName('not-a-subcategory')).toBe('Not a subcategory');
+  });
+
+  it('prefers names registered from the categories table', () => {
+    registerCategoryNames([{ slug: 'inverters-test', name: 'Home Inverters' }]);
+    expect(categoryName('inverters-test')).toBe('Home Inverters');
+    expect(subcategoryName('inverters-test')).toBe('Home Inverters');
   });
 });
