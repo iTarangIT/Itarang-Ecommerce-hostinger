@@ -9,6 +9,7 @@ import { invalidateCatalogueSnapshot } from '@/lib/commerce/health';
 import { resolveCatalogueAlert, syncCatalogue } from '@/lib/commerce/catalogue-sync';
 import { drainInventoryQueue } from '@/lib/orders/inventory-push';
 import { canTransitionOrder } from '@/lib/orders/state-machine';
+import { hasShipmentDetails, parseShipment } from '@/lib/orders/shipment';
 import type { OrderStatus } from '@/lib/orders/types';
 import { sendMail } from '@/lib/email/mailer';
 import { stockDelayMessage } from '@/lib/email/templates';
@@ -43,20 +44,54 @@ export async function updateOrderStatusAction(formData: FormData): Promise<void>
 
   const orderNumber = String(formData.get('orderNumber') ?? '');
   const to = String(formData.get('status') ?? '') as OrderStatus;
-  const note = String(formData.get('note') ?? '').trim() || undefined;
+  const note = String(formData.get('note') ?? '').trim().slice(0, 1000) || undefined;
+  // Unticked "Show to customer" keeps the note on the admin page only.
+  const customerVisible = formData.get('customerVisible') === 'on';
+  const back = `/admin/orders/${orderNumber}`;
 
   const repository = orders();
   const order = await repository.findByOrderNumber(orderNumber);
   if (!order) return;
 
-  if (!canTransitionOrder(order.status, to)) return;
+  // Said, not silently ignored: a stale tab can offer a move that is no
+  // longer possible (the payment arrived, another admin shipped it).
+  if (!canTransitionOrder(order.status, to)) {
+    redirect(`${back}?notice=${encodeURIComponent(`This order is ${order.status.replace(/_/g, ' ')} and cannot move to ${to.replace(/_/g, ' ')}. The page has been refreshed.`)}`);
+  }
+
+  // Courier details are saved with the move to Shipped, in one transaction.
+  let shipment;
+  if (to === 'shipped') {
+    const parsed = parseShipment(formData);
+    if (!parsed.ok) redirect(`${back}?notice=${encodeURIComponent(parsed.error)}`);
+    if (hasShipmentDetails(parsed.shipment)) shipment = parsed.shipment;
+  }
 
   // The actor is the admin's email rather than the literal string 'admin', so
   // the order history answers *who* changed it, not just that somebody did.
-  await repository.transitionOrderStatus(order.id, to, actor, note);
+  await repository.transitionOrderStatus(order.id, to, actor, note, { customerVisible, shipment });
 
   revalidatePath('/admin');
-  revalidatePath(`/admin/orders/${orderNumber}`);
+  revalidatePath(back);
+  redirect(`${back}?notice=${encodeURIComponent(`Order moved to ${to.replace(/_/g, ' ')}.`)}`);
+}
+
+/** Courier and delivery details for a shipped order, entered or corrected later. */
+export async function updateShipmentAction(formData: FormData): Promise<void> {
+  const actor = await requireAdminActor();
+  const orderNumber = String(formData.get('orderNumber') ?? '');
+  const back = `/admin/orders/${orderNumber}`;
+
+  const repository = orders();
+  const order = await repository.findByOrderNumber(orderNumber);
+  if (!order) return;
+
+  const parsed = parseShipment(formData);
+  if (!parsed.ok) redirect(`${back}?notice=${encodeURIComponent(parsed.error)}`);
+
+  await repository.updateShipment(order.id, parsed.shipment, actor);
+  revalidatePath(back);
+  redirect(`${back}?notice=${encodeURIComponent('Delivery details saved.')}`);
 }
 
 /**

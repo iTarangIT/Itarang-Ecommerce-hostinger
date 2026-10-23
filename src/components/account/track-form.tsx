@@ -5,11 +5,12 @@ import Link from 'next/link';
 import { AlertCircle, ChevronDown, FlaskConical, Loader2, MapPin, Package, Search } from 'lucide-react';
 import { formatPrice } from '@/lib/catalog/pricing';
 import { trackView } from '@/lib/orders/tracking';
-import type { OrderStatus } from '@/lib/orders/types';
+import type { OrderStages, OrderStatus, Shipment } from '@/lib/orders/types';
 import { formatDate } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Field, Input } from '@/components/ui/field';
 import { OrderProgress } from '@/components/account/order-progress';
+import { ShipmentDetails } from '@/components/account/shipment-details';
 
 /**
  * The order tracker on /track, in one of two modes.
@@ -35,6 +36,8 @@ interface TrackedOrder {
   items: Array<{ title: string; variantTitle?: string; quantity: number; lineTotal: number }>;
   shippingAddress: { city: string; state: string; pincode: string };
   contactName: string;
+  stages?: OrderStages;
+  shipment?: Shipment;
 }
 
 interface TrackedTimeline {
@@ -197,7 +200,7 @@ const OrderResult = React.forwardRef<
   { result: Result; onReset: () => void; mode: 'owner' | 'staff' }
 >(function OrderResult({ result, onReset, mode }, ref) {
   const { order, timeline } = result;
-  const view = trackView(order.status, order.placedAt, timeline);
+  const view = trackView(order.status, order.placedAt, timeline, order.stages);
   const itemCount = order.items.reduce((sum, item) => sum + item.quantity, 0);
 
   return (
@@ -227,6 +230,10 @@ const OrderResult = React.forwardRef<
 
       <div className="mt-5">
         <OrderProgress view={view} />
+      </div>
+
+      <div className="mt-5">
+        <ShipmentDetails shipment={order.shipment} />
       </div>
 
       <dl className="mt-6 grid gap-4 border-t border-border pt-5 sm:grid-cols-3">
@@ -273,8 +280,11 @@ const OrderResult = React.forwardRef<
         </ul>
       </details>
 
+      {/* Open by default: these are the notes the team wrote with each status
+          change (courier, delay, delivery slot), and they are the answer to
+          "where is my order" more often than the progress bar is. */}
       {timeline.some((entry) => entry.note) ? (
-        <details className="group mt-3 rounded-lg border border-border bg-surface">
+        <details open className="group mt-3 rounded-lg border border-border bg-surface">
           <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-sm font-semibold text-foreground">
             Updates from our team
             <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />

@@ -41,6 +41,8 @@ function orderFixture(overrides: Partial<Order> = {}): Order {
     isTest: true,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    stages: {},
+    shipment: {},
     ...overrides,
   };
 }

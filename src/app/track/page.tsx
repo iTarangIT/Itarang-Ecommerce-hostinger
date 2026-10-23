@@ -44,7 +44,7 @@ export default async function TrackPage({
         total: order.amounts.total,
         itemCount: order.items.reduce((sum, item) => sum + item.quantity, 0),
         firstItem: order.items[0]?.title ?? 'Order',
-        view: trackView(order.status, order.createdAt),
+        view: trackView(order.status, order.createdAt, [], order.stages),
       }))
     : [];
 

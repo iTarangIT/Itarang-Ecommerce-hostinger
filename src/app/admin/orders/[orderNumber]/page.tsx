@@ -2,14 +2,15 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ArrowLeft, FlaskConical } from 'lucide-react';
-import { notifyStockDelayAction, updateOrderStatusAction } from '@/lib/admin/actions';
+import { notifyStockDelayAction } from '@/lib/admin/actions';
 import { orders } from '@/lib/orders/postgres-repository';
-import { nextOrderStatuses } from '@/lib/orders/state-machine';
+import { eventLabel } from '@/lib/orders/tracking';
 import { normaliseOrderNumber } from '@/lib/orders/numbering';
 import { formatPrice } from '@/lib/catalog/pricing';
 import { formatDate } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { StatusPill } from '@/components/admin/status-pill';
+import { OrderStatusPanel } from '@/components/admin/order-status-panel';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,8 +37,6 @@ export default async function AdminOrderDetailPage({
     repository.listPayments(order.id),
     repository.listReservations(order.id),
   ]);
-
-  const transitions = nextOrderStatuses(order.status);
 
   return (
     <div className="container py-8">
@@ -66,6 +65,9 @@ export default async function AdminOrderDetailPage({
           {notice}
         </p>
       ) : null}
+
+      {/* First on every screen size: the next step, stage dates and what they mean. */}
+      <OrderStatusPanel order={order} />
 
       <div className="mt-6 grid gap-6 lg:grid-cols-12">
         <div className="space-y-6 lg:col-span-8">
@@ -160,10 +162,14 @@ export default async function AdminOrderDetailPage({
               {events.map((event) => (
                 <li key={event.id} className="flex flex-wrap gap-2 px-4 py-2.5">
                   <span className="font-medium text-foreground">
-                    {event.fromStatus ? `${event.fromStatus} → ` : ''}
-                    {event.toStatus}
+                    {eventLabel(event.fromStatus, event.toStatus)}
                   </span>
                   <span className="text-xs text-muted-foreground">by {event.actor}</span>
+                  {!event.customerVisible ? (
+                    <span className="rounded-sm bg-secondary px-1.5 py-0.5 text-2xs font-semibold uppercase text-muted-foreground">
+                      Internal
+                    </span>
+                  ) : null}
                   {event.note ? (
                     <span className="text-xs text-muted-foreground">— {event.note}</span>
                   ) : null}
@@ -177,38 +183,6 @@ export default async function AdminOrderDetailPage({
         </div>
 
         <aside className="space-y-6 lg:col-span-4">
-          {/* Fulfilment */}
-          <section className="rounded-lg border border-border bg-card p-4">
-            <h2 className="font-display text-sm font-semibold">Move this order on</h2>
-            {transitions.length === 0 ? (
-              <p className="mt-2 text-sm text-muted-foreground">
-                This order is in a final state.
-              </p>
-            ) : (
-              <form action={updateOrderStatusAction} className="mt-3 space-y-3">
-                <input type="hidden" name="orderNumber" value={order.orderNumber} />
-                <select
-                  name="status"
-                  className="h-11 w-full rounded-md border border-input bg-card px-3 text-sm"
-                >
-                  {transitions.map((status) => (
-                    <option key={status} value={status}>
-                      {status === 'shipped' ? 'packed & shipped' : status.replace(/_/g, ' ')}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  name="note"
-                  placeholder="Note (optional)"
-                  className="h-11 w-full rounded-md border border-input bg-card px-3 text-sm"
-                />
-                <Button type="submit" variant="primary" fullWidth>
-                  Update status
-                </Button>
-              </form>
-            )}
-          </section>
-
           {/* The apology the business asked for when stock runs out. */}
           {order.status === 'confirmed' || order.status === 'packed' ? (
             <section className="rounded-lg border border-border bg-card p-4">
