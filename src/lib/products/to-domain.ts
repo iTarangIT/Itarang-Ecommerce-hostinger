@@ -213,6 +213,8 @@ export function toDomainProduct(record: ProductRecord): Product {
     ...(record.warrantyCycles !== null ? { warrantyCycles: record.warrantyCycles } : {}),
     ...(record.warrantyText ? { warrantyText: record.warrantyText } : {}),
     installationIncluded: record.installationIncluded,
+    ...(record.seoTitle?.trim() ? { seoTitle: record.seoTitle.trim() } : {}),
+    ...(record.seoDescription?.trim() ? { seoDescription: record.seoDescription.trim() } : {}),
     // Set only when true, so a product that does not carry the offer has no
     // `emiEnabled` key at all rather than an explicit false. Absent is the
     // shape every other unstated claim on this type takes.

@@ -226,6 +226,13 @@ export interface Product {
   title: string;
   subtitle: string;
   /**
+   * Search-engine title and description from the admin "SEO & URL" tab. Used
+   * only in the page's <title> and meta description; absent = derived from
+   * the title, subtitle and price.
+   */
+  seoTitle?: string;
+  seoDescription?: string;
+  /**
    * Catalogue identity as the manufacturer states it.
    *
    * Optional because the two older providers cannot supply it: the mock

@@ -78,6 +78,18 @@ function record(overrides: Partial<ProductRecord> = {}): ProductRecord {
 }
 
 describe('toDomainProduct', () => {
+  it('carries the admin SEO title and description, and omits blank ones', () => {
+    const product = toDomainProduct(
+      record({ seoTitle: ' Trontek 51V Battery for E-Rickshaw ', seoDescription: 'Buy online with warranty.' }),
+    );
+    expect(product.seoTitle).toBe('Trontek 51V Battery for E-Rickshaw');
+    expect(product.seoDescription).toBe('Buy online with warranty.');
+
+    const plain = toDomainProduct(record({ seoTitle: '   ', seoDescription: null }));
+    expect(plain).not.toHaveProperty('seoTitle');
+    expect(plain).not.toHaveProperty('seoDescription');
+  });
+
   it('never carries the cost price to the storefront', () => {
     const base = record();
     const product = toDomainProduct(

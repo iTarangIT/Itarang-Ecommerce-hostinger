@@ -994,15 +994,15 @@ export function SeoPanel({ product }: { product: ProductRecord }) {
         <Field
           label="SEO title"
           htmlFor="seoTitle"
-          hint="Left blank, the product title is used."
+          hint="Left blank, the product title is used. “| iTarang Products” is added automatically — do not type it. Aim for under 60 characters."
         >
-          <Input id="seoTitle" name="seoTitle" placeholder="e.g. Trontek 51 V 45 Ah Lithium EV Battery | iTarang" defaultValue={product.seoTitle ?? ''} />
+          <Input id="seoTitle" name="seoTitle" placeholder="e.g. Trontek 51 V 45 Ah Lithium EV Battery" defaultValue={product.seoTitle ?? ''} />
         </Field>
 
         <Field
           label="SEO description"
           htmlFor="seoDescription"
-          hint="Left blank, the subtitle and price are used."
+          hint="Left blank, the subtitle and price are used. Shown under the title in Google; aim for 120–160 characters."
         >
           <Textarea
             id="seoDescription"
