@@ -1,11 +1,12 @@
 import Link from 'next/link';
 import { Compass } from 'lucide-react';
-import { CATEGORIES } from '@/lib/commerce/mock/categories';
+import { catalog } from '@/lib/commerce';
 import { ButtonLink } from '@/components/ui/button';
 import { StateBlock } from '@/components/ui/states';
 import { categoryPath } from '@/lib/routes';
 
-export default function NotFound() {
+export default async function NotFound() {
+  const categories = await catalog().listCategories();
   return (
     <div className="container py-16 lg:py-24">
       <StateBlock
@@ -26,7 +27,7 @@ export default function NotFound() {
 
       <nav aria-label="Categories" className="mx-auto mt-8 max-w-3xl">
         <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {CATEGORIES.map((category) => (
+          {categories.map((category) => (
             <li key={category.slug}>
               <Link
                 href={categoryPath(category.slug)}

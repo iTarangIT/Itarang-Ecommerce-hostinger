@@ -12,7 +12,8 @@ import type {
   Review,
   SearchSuggestion,
 } from '../types';
-import { CATEGORIES, CATEGORY_BY_SLUG } from '../mock/categories';
+import { CATEGORY_BY_SLUG } from '../mock/categories';
+import { loadCategories } from '@/lib/catalog/category-store';
 import { CatalogEngine, SEARCH_FACET_IDS, buildSuggestions } from '@/lib/catalog/engine';
 import { productRepository } from '@/lib/products/postgres-repository';
 import { toDomainProduct } from '@/lib/products/to-domain';
@@ -46,8 +47,9 @@ import { toDomainProduct } from '@/lib/products/to-domain';
  *   and the UPI discount are applied at checkout, not listed here. Neither ever
  *   borrows the development fixtures.
  *
- * Categories stay local, as they do for both other providers: they are
- * editorial copy with SEO passages, not backend data.
+ * Categories come from `catalog_categories` so the business can add a section
+ * without a deploy; the editorial passages for the built-in ones stay in code
+ * (`lib/catalog/category-store.ts`).
  */
 
 interface Snapshot {
@@ -126,12 +128,14 @@ export class DbCatalogProvider implements CatalogProvider {
     return requestSnapshot();
   }
 
+  /** From `catalog_categories`, edited at /admin/categories (see `category-store.ts`). */
   async listCategories(): Promise<Category[]> {
-    return CATEGORIES;
+    return loadCategories();
   }
 
   async getCategory(slug: string): Promise<Category | null> {
-    return CATEGORY_BY_SLUG.get(slug as never) ?? null;
+    const categories = await loadCategories();
+    return categories.find((category) => category.slug === slug) ?? null;
   }
 
   async listProducts(query: ProductQuery): Promise<ProductListResult> {
@@ -157,7 +161,7 @@ export class DbCatalogProvider implements CatalogProvider {
 
   async suggest(term: string): Promise<SearchSuggestion[]> {
     const { engine } = await this.load();
-    return buildSuggestions(term, engine.productSuggestions(term), CATEGORIES);
+    return buildSuggestions(term, engine.productSuggestions(term), await loadCategories());
   }
 
   /**

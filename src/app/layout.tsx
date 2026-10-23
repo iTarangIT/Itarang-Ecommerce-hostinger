@@ -146,7 +146,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <main id="main" className="flex-1 pb-safe-nav lg:pb-0">
             {children}
           </main>
-          <Footer />
+          <Footer categories={categories} />
           <SiteChromeBottom categories={categories} />
         </Providers>
       </body>

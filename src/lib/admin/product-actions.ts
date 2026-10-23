@@ -12,6 +12,7 @@ import { productRepository } from '@/lib/products/postgres-repository';
 import { UNTRACKED_STOCK } from '@/lib/products/to-domain';
 import { dispatchStockAlertsInBackground } from '@/lib/stock/alerts';
 import { slugify } from '@/lib/utils';
+import { categoryPairError, loadCategoryOptions } from '@/lib/catalog/category-store';
 import {
   ALLOWED_MEDIA_TYPES,
   MAX_MEDIA_BYTES,
@@ -152,7 +153,9 @@ const productKeySchema = z
   .max(120)
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'Use lower-case words separated by single hyphens.');
 
-const categorySchema = z.enum(['inverters', 'batteries', 'ups', 'combos']);
+// Checked against `catalog_categories` after parsing (see `checkCategory`), not
+// a fixed list: categories are added from the admin panel.
+const categorySchema = text(60).min(1, 'Choose a category.');
 const artSchema = z.enum(['inverter', 'battery', 'ups', 'combo']);
 
 /** Rupees in the form, paise in the database. One conversion, in one place. */
@@ -234,6 +237,9 @@ export async function createProductAction(formData: FormData): Promise<void> {
     );
   }
 
+  const categoryError = await checkCategory(parsed.data.category, parsed.data.subcategory);
+  if (categoryError) redirect('/admin/products/new?error=' + encodeURIComponent(categoryError));
+
   const base = baseSlugFor(parsed.data.title, parsed.data.modelName);
 
   for (let attempt = 1; attempt <= MAX_SLUG_ATTEMPTS; attempt++) {
@@ -260,6 +266,10 @@ export async function createProductAction(formData: FormData): Promise<void> {
 }
 
 const MAX_SLUG_ATTEMPTS = 20;
+
+async function checkCategory(category: string, subcategory: string): Promise<string | null> {
+  return categoryPairError(await loadCategoryOptions(), category, subcategory);
+}
 
 function baseSlugFor(title: string, modelName: string | null): string {
   let base = slugify(title);
@@ -301,6 +311,8 @@ export async function updateProductInformationAction(formData: FormData): Promis
   }
 
   const { productKey, ...patch } = parsed.data;
+  const categoryError = await checkCategory(patch.category, patch.subcategory);
+  if (categoryError) backTo(productKey, 'information', { error: categoryError });
   settle(productKey, 'information', await productRepository().updateProduct(productKey, patch, actor));
 }
 

@@ -10,7 +10,11 @@
 
 export type Paise = number;
 
-export type CategorySlug = 'inverters' | 'batteries' | 'ups' | 'combos' | 'chargers';
+/**
+ * A category slug. Plain `string` since categories became editable from the
+ * admin panel (`catalog_categories`): a new section must not need a type change.
+ */
+export type CategorySlug = string;
 
 export interface Category {
   slug: CategorySlug;

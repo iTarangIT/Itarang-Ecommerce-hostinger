@@ -10,8 +10,7 @@ import {
   updateProductSpecsAction,
   updateProductWarrantyAction,
 } from '@/lib/admin/product-actions';
-import { CATEGORIES } from '@/lib/commerce/mock/categories';
-import type { ProductSection } from '@/lib/commerce/types';
+import type { Category, ProductSection } from '@/lib/commerce/types';
 import type { Manufacturer, ProductRecord, Seller } from '@/lib/products/types';
 import {
   formatFaqs,
@@ -130,16 +129,25 @@ function SaveRow({ label = 'Save' }: { label?: string }) {
 }
 
 /** Every subcategory in the taxonomy, labelled by its parent. */
-const SUBCATEGORY_OPTIONS = CATEGORIES.flatMap((category) =>
-  category.subcategories.map((sub) => ({
-    value: sub.slug,
-    label: `${category.name} · ${sub.name}`,
-  })),
-);
+function subcategoryOptions(categories: readonly Category[]) {
+  return categories.flatMap((category) =>
+    category.subcategories.map((sub) => ({
+      value: sub.slug,
+      label: `${category.name} · ${sub.name}`,
+    })),
+  );
+}
 
 /* --------------------------------------------------------------- information */
 
-export function InformationPanel({ product }: { product: ProductRecord }) {
+/** `categories` comes from `catalog_categories` (hidden ones included). */
+export function InformationPanel({
+  product,
+  categories,
+}: {
+  product: ProductRecord;
+  categories: Category[];
+}) {
   return (
     <form action={updateProductInformationAction}>
       <KeyField productKey={product.productKey} />
@@ -200,7 +208,7 @@ export function InformationPanel({ product }: { product: ProductRecord }) {
         <div className="grid gap-5 sm:grid-cols-2">
           <Field label="Category" htmlFor="category" required>
             <Select id="category" name="category" defaultValue={product.category} required>
-              {CATEGORIES.map((category) => (
+              {categories.map((category) => (
                 <option key={category.slug} value={category.slug}>
                   {category.name}
                 </option>
@@ -209,7 +217,7 @@ export function InformationPanel({ product }: { product: ProductRecord }) {
           </Field>
           <Field label="Type" htmlFor="subcategory" required>
             <Select id="subcategory" name="subcategory" defaultValue={product.subcategory} required>
-              {SUBCATEGORY_OPTIONS.map((option) => (
+              {subcategoryOptions(categories).map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>

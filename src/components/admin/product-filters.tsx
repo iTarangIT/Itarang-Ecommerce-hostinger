@@ -18,12 +18,17 @@ export interface ProductFilterState {
   category?: string;
 }
 
-const CATEGORIES = ['inverters', 'batteries', 'ups', 'combos'] as const;
-
 const FIELD = 'h-11 rounded-md border border-input bg-card px-3 text-sm';
 const LABEL = 'text-xs font-medium text-muted-foreground';
 
-export function ProductFilters({ current }: { current: ProductFilterState }) {
+export function ProductFilters({
+  current,
+  categories,
+}: {
+  current: ProductFilterState;
+  /** From `catalog_categories`, so a new category can be filtered on. */
+  categories: { slug: string; name: string }[];
+}) {
   const hasFilters = Boolean(current.q || current.status || current.category);
 
   return (
@@ -67,10 +72,9 @@ export function ProductFilters({ current }: { current: ProductFilterState }) {
           className={FIELD}
         >
           <option value="">Any</option>
-          {CATEGORIES.map((value) => (
-            <option key={value} value={value}>
-              {value[0]?.toUpperCase()}
-              {value.slice(1)}
+          {categories.map((category) => (
+            <option key={category.slug} value={category.slug}>
+              {category.name}
             </option>
           ))}
         </select>
