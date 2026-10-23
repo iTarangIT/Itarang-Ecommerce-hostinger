@@ -12,6 +12,7 @@ import { productRepository } from '@/lib/products/postgres-repository';
 import { UNTRACKED_STOCK } from '@/lib/products/to-domain';
 import { dispatchStockAlertsInBackground } from '@/lib/stock/alerts';
 import { slugify } from '@/lib/utils';
+import { SKU_RULE, isValidSku, repeatedVariantField } from '@/lib/products/sku-rules';
 import { categoryPairError, loadCategoryOptions } from '@/lib/catalog/category-store';
 import {
   ALLOWED_MEDIA_TYPES,
@@ -115,7 +116,12 @@ function settle(productKey: string, tab: string, result: ProductWriteResult<unkn
       redirect('/admin/products?error=' + encodeURIComponent('That product no longer exists.'));
     case 'duplicate':
       backTo(productKey, tab, {
-        error: `That ${result.field.replace('_', ' ')} is already used by another product: ${result.value}`,
+        error:
+          result.field === 'variant_key'
+            ? `Two rows have the same variant key (${result.value}). Each variant of a product needs its own key.`
+            : result.field === 'sku'
+              ? `SKU ${result.value} is already used by another product (SKUs are unique, ignoring capitals).`
+              : `That ${result.field.replace('_', ' ')} is already used by another product: ${result.value}`,
       });
     case 'invalid_transition':
       backTo(productKey, tab, {
@@ -556,6 +562,12 @@ export async function updateProductPricingAction(formData: FormData): Promise<vo
       });
     }
 
+    if (!isValidSku(sku)) {
+      backTo(productKey, 'pricing', {
+        error: `Row ${index + 1}: "${sku}" is not a valid SKU. ${SKU_RULE} Nothing was saved.`,
+      });
+    }
+
     const mrp = rupeesToPaise.safeParse(String(formData.get(`mrp-${index}`) ?? ''));
     const selling = rupeesToPaise.safeParse(String(formData.get(`selling-${index}`) ?? ''));
     const cost = rupeesToPaise.safeParse(String(formData.get(`cost-${index}`) ?? ''));
@@ -584,6 +596,10 @@ export async function updateProductPricingAction(formData: FormData): Promise<vo
           : null,
     });
   }
+
+  // Caught here, not by the database, so the message can name both rows.
+  const repeated = repeatedVariantField(variants);
+  if (repeated) backTo(productKey, 'pricing', { error: `${repeated} Nothing was saved.` });
 
   // One transaction for both halves. These were two calls, so a duplicate SKU
   // could fail the variant write *after* the tax fields had committed —

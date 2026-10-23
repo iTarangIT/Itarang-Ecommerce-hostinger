@@ -324,12 +324,21 @@ export function PricingPanel({ product }: { product: ProductRecord }) {
         {rows.map((variant, index) => (
           <div key={variant.variantKey || index} className="rounded-lg border border-border p-4">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="SKU" htmlFor={`sku-${index}`} required>
+              <Field
+                label="SKU"
+                htmlFor={`sku-${index}`}
+                required
+                hint="Unique across the whole catalogue (capitals ignored). Letters, digits and - _ / . only."
+              >
                 <Input
                   id={`sku-${index}`}
                   name={`sku-${index}`} placeholder="e.g. TK-LiFe-5145-01"
                   defaultValue={variant.sku}
                   autoComplete="off"
+                  required
+                  maxLength={64}
+                  pattern="[A-Za-z0-9][A-Za-z0-9._\/\-]{0,63}"
+                  title="Letters, digits and - _ / . only, no spaces"
                 />
               </Field>
               <Field

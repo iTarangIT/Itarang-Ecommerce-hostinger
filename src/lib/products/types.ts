@@ -370,6 +370,6 @@ export interface ProductListFilters {
 export type ProductWriteResult<T = void> =
   | { ok: true; value: T }
   | { ok: false; code: 'not_found' }
-  | { ok: false; code: 'duplicate'; field: 'slug' | 'product_key' | 'sku'; value: string }
+  | { ok: false; code: 'duplicate'; field: 'slug' | 'product_key' | 'sku' | 'variant_key'; value: string }
   | { ok: false; code: 'invalid_transition'; from: ProductStatus; to: ProductStatus }
   | { ok: false; code: 'incomplete'; missing: string[] };

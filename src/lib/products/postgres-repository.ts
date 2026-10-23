@@ -222,14 +222,30 @@ function iso(value: Date | null): string | null {
  * the only way to know which of three unique columns collided is the
  * constraint name Postgres reports.
  */
-function duplicateField(error: unknown): 'slug' | 'product_key' | 'sku' | null {
+function duplicateField(error: unknown): 'slug' | 'product_key' | 'sku' | 'variant_key' | null {
   if (typeof error !== 'object' || error === null) return null;
   const candidate = error as { code?: string; constraint?: string };
   if (candidate.code !== '23505') return null;
+  // First: `product_variants_product_id_variant_key_key` (two variants of one
+  // product with the same key) used to match nothing and surface as a 500.
+  if (candidate.constraint?.includes('variant_key')) return 'variant_key';
   if (candidate.constraint?.includes('slug')) return 'slug';
   if (candidate.constraint?.includes('product_key')) return 'product_key';
   if (candidate.constraint?.includes('sku')) return 'sku';
   return null;
+}
+
+/**
+ * The value that clashed, from Postgres's own message —
+ * `Key (sku)=(TK-51100)` or `Key (upper(sku))=(TK-51100)` — so the admin is
+ * told which SKU is taken rather than the first one on the form.
+ */
+function duplicateValue(error: unknown): string | null {
+  const detail = (error as { detail?: string } | null)?.detail ?? '';
+  const match = /\)=\((.*)\) already exists/.exec(detail);
+  if (!match?.[1]) return null;
+  // A composite key reads "(42, default)"; the last part is the one typed in.
+  return match[1].split(', ').at(-1) ?? null;
 }
 
 function toManufacturer(row: ManufacturerRow): Manufacturer {
@@ -1045,9 +1061,9 @@ class PostgresProductRepository implements ProductRepository {
       });
     } catch (error) {
       const field = duplicateField(error);
-      if (field === 'sku') {
-        const sku = variants.find((variant) => variant.sku)?.sku ?? '';
-        return { ok: false, code: 'duplicate', field: 'sku', value: sku };
+      if (field === 'sku' || field === 'variant_key') {
+        const fallback = variants.find((variant) => variant.sku)?.sku ?? '';
+        return { ok: false, code: 'duplicate', field, value: duplicateValue(error) ?? fallback };
       }
       if (field) return { ok: false, code: 'duplicate', field, value: productKey };
       throw error;
@@ -1226,9 +1242,9 @@ class PostgresProductRepository implements ProductRepository {
       });
     } catch (error) {
       const field = duplicateField(error);
-      if (field === 'sku') {
-        const sku = variants.find((variant) => variant.sku)?.sku ?? '';
-        return { ok: false, code: 'duplicate', field: 'sku', value: sku };
+      if (field === 'sku' || field === 'variant_key') {
+        const fallback = variants.find((variant) => variant.sku)?.sku ?? '';
+        return { ok: false, code: 'duplicate', field, value: duplicateValue(error) ?? fallback };
       }
       throw error;
     }
