@@ -46,7 +46,6 @@ export interface NavGroup {
  */
 export const UTILITY_LINKS: NavChild[] = [
   { label: 'Track order', href: '/track' },
-  { label: 'Find a dealer', href: '/support/dealers' },
   { label: 'Check price', href: '/pricing' },
   { label: 'Support', href: '/support' },
 ];

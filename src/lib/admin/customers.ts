@@ -1,5 +1,7 @@
 import { query, queryOne } from '@/lib/db/pool';
 import { stateCode } from '@/lib/checkout/validation';
+import { csvCell } from '@/lib/orders/admin-tracking';
+import type { GeographyRow } from '@/lib/admin/analytics';
 
 /**
  * Customer profiles by place, and what each of them bought.
@@ -89,12 +91,58 @@ export interface CustomerProfile {
   products: OrderedProduct[];
 }
 
+export type CustomerKind = 'account' | 'guest';
+export type BuyerFrequency = 'repeat' | 'single';
+export type CustomerSort = 'spend' | 'orders' | 'recent' | 'name';
+
+export const CUSTOMER_SORTS: ReadonlyArray<[CustomerSort, string]> = [
+  ['spend', 'Highest spend'],
+  ['orders', 'Most orders'],
+  ['recent', 'Most recent order'],
+  ['name', 'Name, A to Z'],
+];
+
 export interface CustomerProfileFilters {
   /** Exact match against the folded, title-cased state name. */
   state?: string;
   city?: string;
   /** Substring against name, email and phone. */
   search?: string;
+  /** Signed-in customers only, or guests only. */
+  kind?: CustomerKind;
+  /**
+   * Customers who bought this SKU in the window. Their row still lists
+   * everything they bought — the filter picks people, not order lines.
+   */
+  sku?: string;
+  /** Two or more paid orders in the window, or exactly one. */
+  buyers?: BuyerFrequency;
+  sort?: CustomerSort;
+}
+
+/**
+ * The filters as they arrive in a query string, narrowed to values the query
+ * understands. Shared by the page and the CSV route so the download is always
+ * the list on screen.
+ */
+export function parseCustomerFilters(
+  params: Partial<Record<'state' | 'city' | 'q' | 'kind' | 'sku' | 'buyers' | 'sort', string>>,
+): CustomerProfileFilters {
+  const kind = params.kind === 'account' || params.kind === 'guest' ? params.kind : undefined;
+  const buyers =
+    params.buyers === 'repeat' || params.buyers === 'single' ? params.buyers : undefined;
+  const sort = CUSTOMER_SORTS.some(([key]) => key === params.sort)
+    ? (params.sort as CustomerSort)
+    : undefined;
+  return {
+    state: params.state?.trim() || undefined,
+    city: params.city?.trim() || undefined,
+    search: params.q?.trim() || undefined,
+    kind,
+    sku: params.sku?.trim() || undefined,
+    buyers,
+    sort,
+  };
 }
 
 export interface CustomerProfilePage {
@@ -133,7 +181,8 @@ const CUSTOMER_KEY = `COALESCE(
  * the end of a filtered list.
  *
  * Parameters are positional and fixed: $1 from, $2 to, $3 state, $4 city,
- * $5 search. Nulls mean "no filter", which is why each predicate is written as
+ * $5 search, $6 kind, $7 sku, $8 buyers (the last two are used by `TOTALS`).
+ * Nulls mean "no filter", which is why each predicate is written as
  * `$n IS NULL OR …` rather than being assembled by string concatenation.
  */
 const PAID_ORDERS = `
@@ -157,7 +206,38 @@ const PAID_ORDERS = `
      AND ($5::text IS NULL OR
           o.customer_name  ILIKE '%' || $5 || '%' OR
           o.customer_email ILIKE '%' || $5 || '%' OR
-          o.customer_phone ILIKE '%' || $5 || '%')`;
+          o.customer_phone ILIKE '%' || $5 || '%')
+     AND ($6::text IS NULL OR ($6::text = 'account') = (o.user_id IS NOT NULL))`;
+
+/**
+ * One row per customer, with the customer-level filters applied.
+ *
+ * Product and repeat-buyer filters describe a person, not an order, so they
+ * sit in `HAVING`: filtering orders by SKU first would drop the customer's
+ * other orders from their totals and their "Bought" list.
+ */
+const TOTALS = `
+  SELECT p.customer_key,
+         count(*)::int AS orders,
+         COALESCE(sum(p.total), 0)::bigint AS gross,
+         min(p.captured_at) AS first_order_at,
+         max(p.captured_at) AS last_order_at
+    FROM paid p
+   GROUP BY p.customer_key
+  HAVING ($8::text IS NULL OR ($8::text = 'repeat') = (count(*) > 1))
+     AND ($7::text IS NULL OR bool_or(EXISTS (
+           SELECT 1 FROM order_items i
+            WHERE i.order_id = p.id AND lower(i.sku) = lower($7::text))))`;
+
+const NAME = `COALESCE(NULLIF(btrim(u.full_name), ''), l.customer_name)`;
+
+/** Whitelisted, so a hand-edited `sort` can never reach the SQL. */
+const ORDER_BY: Record<CustomerSort, string> = {
+  spend: 't.gross DESC, t.last_order_at DESC',
+  orders: 't.orders DESC, t.gross DESC',
+  recent: 't.last_order_at DESC',
+  name: `lower(${NAME}) ASC NULLS LAST, t.gross DESC`,
+};
 
 function params(from: Date, to: Date, filters: CustomerProfileFilters) {
   return [
@@ -166,6 +246,9 @@ function params(from: Date, to: Date, filters: CustomerProfileFilters) {
     filters.state?.trim() || null,
     filters.city?.trim() || null,
     filters.search?.trim() || null,
+    filters.kind ?? null,
+    filters.sku?.trim() || null,
+    filters.buyers ?? null,
   ];
 }
 
@@ -213,15 +296,7 @@ export async function customerProfiles(
         | null;
     }>(
       `WITH paid AS (${PAID_ORDERS}),
-       totals AS (
-         SELECT customer_key,
-                count(*)::int AS orders,
-                COALESCE(sum(total), 0)::bigint AS gross,
-                min(captured_at) AS first_order_at,
-                max(captured_at) AS last_order_at
-           FROM paid
-          GROUP BY customer_key
-       ),
+       totals AS (${TOTALS}),
        latest AS (
          -- The identity and the place both come from the most recent paid
          -- order, so a customer who has moved is listed where their goods
@@ -262,7 +337,7 @@ export async function customerProfiles(
               -- The account's name where there is one, because a customer can
               -- correct it; the order's otherwise, because a guest has no
               -- account to correct.
-              COALESCE(NULLIF(btrim(u.full_name), ''), l.customer_name) AS name,
+              ${NAME} AS name,
               COALESCE(u.email, l.order_email) AS email,
               l.customer_phone AS phone,
               l.city,
@@ -276,13 +351,14 @@ export async function customerProfiles(
          JOIN latest l ON l.customer_key = t.customer_key
          LEFT JOIN users u ON u.id = l.user_id
          LEFT JOIN bought b ON b.customer_key = t.customer_key
-        ORDER BY t.gross DESC, t.last_order_at DESC
+        ORDER BY ${ORDER_BY[filters.sort ?? 'spend']}
         LIMIT ${capped} OFFSET ${skip}`,
       params(from, to, filters),
     ),
     queryOne<{ total: number }>(
-      `WITH paid AS (${PAID_ORDERS})
-       SELECT count(DISTINCT customer_key)::int AS total FROM paid`,
+      `WITH paid AS (${PAID_ORDERS}),
+       totals AS (${TOTALS})
+       SELECT count(*)::int AS total FROM totals`,
       params(from, to, filters),
     ),
   ]);
@@ -348,6 +424,101 @@ export async function customerPlaces(from: Date, to: Date): Promise<PlaceOption[
   }
 
   return [...byState.entries()].map(([state, cities]) => ({ state, cities }));
+}
+
+/**
+ * Every product bought in the window, for the product filter. Like
+ * `customerPlaces()`, only what has actually sold, so the list stays short.
+ */
+export interface ProductOption {
+  sku: string;
+  title: string;
+}
+
+export async function customerProductOptions(from: Date, to: Date): Promise<ProductOption[]> {
+  return query<ProductOption>(
+    `SELECT DISTINCT ON (lower(i.sku)) i.sku, i.title
+       FROM orders o
+       JOIN order_items i ON i.order_id = o.id
+      WHERE o.payment_status = 'paid'
+        AND ${EXCLUDE_COD}
+        AND ${CAPTURED_AT} >= $1
+        AND ${CAPTURED_AT} <  $2
+      ORDER BY lower(i.sku), i.title`,
+    [from, to],
+  ).then((rows) => rows.sort((a, b) => a.title.localeCompare(b.title)));
+}
+
+/* -------------------------------------------------------------------- csv */
+
+/** Paise → `49248.00`: a number a spreadsheet can add up, no currency symbol. */
+function rupees(paise: number): string {
+  return (paise / 100).toFixed(2);
+}
+
+function istDate(iso: string): string {
+  // en-CA formats as YYYY-MM-DD, which sorts and parses in any spreadsheet.
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(iso));
+}
+
+/** BOM so Excel reads UTF-8; CRLF per RFC 4180 — the same shape as `ordersCsv`. */
+function toCsv<T>(
+  columns: Array<[string, (row: T) => string | number | null | undefined]>,
+  rows: readonly T[],
+): string {
+  const lines = [
+    columns.map(([header]) => csvCell(header)).join(','),
+    ...rows.map((row) => columns.map(([, cell]) => csvCell(cell(row))).join(',')),
+  ];
+  return `﻿${lines.join('\r\n')}\r\n`;
+}
+
+export function customersCsv(rows: readonly CustomerProfile[]): string {
+  return toCsv<CustomerProfile>(
+    [
+      ['Customer', (r) => r.name],
+      ['Account', (r) => (r.userId !== null ? `#${r.userId}` : 'Guest')],
+      ['Email', (r) => r.email],
+      ['Phone', (r) => r.phone],
+      ['City', (r) => r.city],
+      ['State', (r) => r.state],
+      ['GST state code', (r) => r.stateCode],
+      ['Orders', (r) => r.orders],
+      ['Spend', (r) => rupees(r.gross)],
+      ['First order (IST)', (r) => istDate(r.firstOrderAt)],
+      ['Last order (IST)', (r) => istDate(r.lastOrderAt)],
+      ['Units', (r) => r.products.reduce((sum, p) => sum + p.quantity, 0)],
+      [
+        'Products',
+        (r) =>
+          r.products
+            .map((p) => `${p.title}${p.variantTitle ? ` (${p.variantTitle})` : ''} x${p.quantity}`)
+            .join('; '),
+      ],
+      ['SKUs', (r) => r.products.map((p) => p.sku).join('; ')],
+    ],
+    rows,
+  );
+}
+
+export function statesCsv(rows: readonly GeographyRow[]): string {
+  return toCsv<GeographyRow>(
+    [
+      ['State', (r) => r.state],
+      ['GST state code', (r) => r.stateCode],
+      ['Orders', (r) => r.orders],
+      // Same caveat as the on-screen column: summed across cities, so not a headcount.
+      ['Deliveries', (r) => r.customers],
+      ['Revenue', (r) => rupees(r.gross)],
+      ['Cities', (r) => r.cities.map((c) => `${c.city || '—'} (${c.orders})`).join('; ')],
+    ],
+    rows,
+  );
 }
 
 /**

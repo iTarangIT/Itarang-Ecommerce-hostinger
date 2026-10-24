@@ -2,8 +2,15 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { ArrowLeft, ShieldOff, UserSearch } from 'lucide-react';
 import { availableMonths, isRangeKey, resolveRange } from '@/lib/admin/analytics';
-import { anonymousVisitors, shortVisitor } from '@/lib/admin/funnel';
+import {
+  DETAIL_EXPORT_LIMIT,
+  DETAIL_PAGE_SIZE,
+  anonymousCohort,
+  parseCohortFilters,
+} from '@/lib/admin/funnel-detail';
 import { RangeFilter } from '@/components/admin/range-filter';
+import { CohortFilterForm, CohortTable } from '@/components/admin/cohort-table';
+import { DownloadLink, Pager, pageNumber, reportHref } from '@/components/admin/table-tools';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,23 +29,17 @@ export const metadata: Metadata = {
  * PRIVACY. Everyone listed here has told us nothing about themselves, and this
  * screen must not become a way of accumulating a profile regardless. It shows
  * behaviour and nothing else — no e-mail, no name, no IP, no user-agent, because
- * `funnel_events` stores none of them and `anonymousVisitors()` joins nothing
- * that does. Even the visitor id is truncated to four characters: enough to tell
- * two rows apart, far too little to correlate a screenshot back to a live cookie.
+ * `funnel_events` stores none of them. Even the visitor id is truncated to four
+ * characters: enough to tell two rows apart, far too little to correlate a
+ * screenshot back to a live cookie. The one identity shown is the account a
+ * visitor later chose to sign in to — the same attribution the customer table
+ * already makes.
  */
-
-const IST_DATETIME = new Intl.DateTimeFormat('en-IN', {
-  day: 'numeric',
-  month: 'short',
-  hour: 'numeric',
-  minute: '2-digit',
-  timeZone: 'Asia/Kolkata',
-});
 
 export default async function AnonymousVisitorsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ range?: string; month?: string; from?: string; to?: string; prev?: string }>;
+  searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const params = await searchParams;
   const requested = isRangeKey(params.range) ? params.range : 'this_month';
@@ -47,16 +48,38 @@ export default async function AnonymousVisitorsPage({
     to: params.to,
     prev: params.prev,
   });
+  const filters = parseCohortFilters(params);
+  const page = pageNumber(params.page);
 
   const [visitors, months] = await Promise.all([
-    anonymousVisitors(range.from, range.to, 100),
+    anonymousCohort(
+      range.from,
+      range.to,
+      'visitors',
+      filters,
+      DETAIL_PAGE_SIZE,
+      (page - 1) * DETAIL_PAGE_SIZE,
+    ),
     availableMonths(),
   ]);
+
+  const state: Record<string, string | undefined> = {
+    q: filters.q,
+    wall: filters.wall,
+    registered: filters.registered,
+    purchased: filters.purchased,
+    sort: filters.sort,
+  };
+  const carry = Object.fromEntries(
+    Object.entries(state).filter((entry): entry is [string, string] => Boolean(entry[1])),
+  );
+  const filtered = Object.keys(carry).length > 0;
+  const base = '/admin/funnel/visitors';
 
   return (
     <div className="container py-8">
       <Link
-        href="/admin/funnel"
+        href={reportHref('/admin/funnel', range)}
         className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="h-4 w-4" />
@@ -69,15 +92,16 @@ export default async function AnonymousVisitorsPage({
       </h1>
       <p className="mt-1.5 max-w-3xl text-sm text-muted-foreground">
         Visitors who browsed without being signed in. Ordered by how far they got — anyone who
-        reached the login wall first, then by cart activity.
+        paid or registered first, then the login wall, then by cart activity. Click a row for the
+        visitor&apos;s full timeline.
       </p>
 
       <p className="mt-4 flex items-start gap-2 rounded-lg border border-border bg-surface p-3 text-sm text-muted-foreground">
         <ShieldOff className="mt-0.5 h-4 w-4 shrink-0" />
         <span>
           Behaviour only. No e-mail, name, IP address or device is recorded for an unregistered
-          visitor, and the visitor id is shown truncated. Once someone signs in, their history moves
-          to their customer page.
+          visitor, and the visitor id is shown truncated. Once someone signs in, the account they
+          signed in to is shown and their history moves to their customer page.
         </span>
       </p>
 
@@ -88,66 +112,48 @@ export default async function AnonymousVisitorsPage({
         customFrom={range.requestedFrom}
         customTo={range.requestedTo}
         error={range.error}
-        basePath="/admin/funnel/visitors"
+        basePath={base}
+        carry={carry}
       />
 
-      <p className="mt-4 text-sm font-medium text-foreground">{range.label}</p>
+      <div className="mt-4 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium text-foreground">{range.label}</p>
+          <p className="tabular mt-1 text-sm text-muted-foreground">
+            {visitors.total} visitor{visitors.total === 1 ? '' : 's'}
+            {filtered ? ' matching these filters' : ''}
+          </p>
+        </div>
+        {visitors.total > 0 ? (
+          <DownloadLink
+            href={reportHref('/admin/funnel/export', range, {
+              ...state,
+              table: 'anonymous',
+              metric: 'visitors',
+            })}
+            title={`Every matching visitor (up to ${DETAIL_EXPORT_LIMIT.toLocaleString('en-IN')})`}
+          />
+        ) : null}
+      </div>
 
-      {visitors.length === 0 ? (
+      <CohortFilterForm action={base} range={range} filters={filters} filtered={filtered} />
+
+      {visitors.rows.length === 0 ? (
         <p className="mt-3 rounded-lg border border-border bg-surface p-4 text-sm text-muted-foreground">
-          No anonymous browsing in this period.
+          {filtered
+            ? 'No anonymous visitor matches these filters in this period.'
+            : 'No anonymous browsing in this period.'}
         </p>
       ) : (
-        <div className="mt-3 overflow-x-auto rounded-lg border border-border">
-          <table className="w-full min-w-[44rem] text-left text-sm">
-            <thead className="bg-surface text-xs uppercase tracking-wide text-muted-foreground">
-              <tr>
-                <th scope="col" className="px-4 py-3 font-semibold">Visitor</th>
-                <th scope="col" className="px-4 py-3 text-right font-semibold">Sessions</th>
-                <th scope="col" className="px-4 py-3 text-right font-semibold">Views</th>
-                <th scope="col" className="px-4 py-3 text-right font-semibold">Cart adds</th>
-                <th scope="col" className="px-4 py-3 font-semibold">Login wall</th>
-                <th scope="col" className="px-4 py-3 font-semibold">Registered</th>
-                <th scope="col" className="px-4 py-3 font-semibold">Last seen</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border bg-card">
-              {visitors.map((row) => (
-                <tr key={row.visitorId} className="transition-colors hover:bg-surface">
-                  <td className="px-4 py-3">
-                    <Link
-                      href={`/admin/funnel/visitors/${row.visitorId}`}
-                      className="font-semibold text-primary hover:text-accent-600 hover:underline"
-                    >
-                      Visitor {shortVisitor(row.visitorId)}…
-                    </Link>
-                  </td>
-                  <td className="tabular px-4 py-3 text-right">{row.sessions}</td>
-                  <td className="tabular px-4 py-3 text-right">{row.views}</td>
-                  <td className="tabular px-4 py-3 text-right">{row.cartAdds}</td>
-                  <td className="px-4 py-3 text-xs">
-                    {row.reachedWall ? (
-                      <span className="font-medium text-warning">Reached</span>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-xs">
-                    {row.converted ? (
-                      <span className="font-medium text-success">Yes</span>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground">
-                    {IST_DATETIME.format(new Date(row.lastSeen))}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <CohortTable rows={visitors.rows} />
       )}
+
+      <Pager
+        page={page}
+        pageSize={DETAIL_PAGE_SIZE}
+        total={visitors.total}
+        href={(n) => reportHref(base, range, { ...state, page: n === 1 ? undefined : n })}
+      />
     </div>
   );
 }

@@ -35,14 +35,14 @@ import { query } from '@/lib/db/pool';
  */
 
 /** COD is out of scope for this phase — see the note above. */
-const EXCLUDE_COD = `o.payment_method <> 'cod'`;
+export const EXCLUDE_COD = `o.payment_method <> 'cod'`;
 
 /**
  * A captured payment. `signature_verified` is part of the predicate for the
  * same reason it is in `analytics.ts`: an unverified row is not evidence that
  * money moved.
  */
-const CAPTURED = `p.status = 'paid' AND p.signature_verified`;
+export const CAPTURED = `p.status = 'paid' AND p.signature_verified`;
 
 export const FUNNEL_STAGES = [
   'visit',
@@ -58,6 +58,10 @@ export const FUNNEL_STAGES = [
 ] as const;
 
 export type FunnelStage = (typeof FUNNEL_STAGES)[number];
+
+export function isFunnelStage(value: unknown): value is FunnelStage {
+  return typeof value === 'string' && (FUNNEL_STAGES as readonly string[]).includes(value);
+}
 
 export const STAGE_LABELS: Record<FunnelStage, string> = {
   visit: 'Visitors',
@@ -718,6 +722,43 @@ export interface CustomerActivityRow {
   lastSeen: string | null;
 }
 
+export type CustomerActivitySort = 'paid' | 'views' | 'value' | 'recent';
+
+export const CUSTOMER_ACTIVITY_SORTS: ReadonlyArray<[CustomerActivitySort, string]> = [
+  ['paid', 'Most paid orders'],
+  ['value', 'Highest value'],
+  ['views', 'Most views'],
+  ['recent', 'Last seen'],
+];
+
+export interface CustomerActivityFilters {
+  /** Name, e-mail or phone, matched anywhere. */
+  q?: string;
+  /** Only customers with (`yes`) or without (`no`) a paid order in the window. */
+  paid?: 'yes' | 'no';
+  sort?: CustomerActivitySort;
+}
+
+/** Fixed fragments, keyed by a closed union, so nothing from a URL reaches the SQL. */
+const ACTIVITY_ORDER: Record<CustomerActivitySort, string> = {
+  paid: 'COALESCE(g.paid_orders, 0) DESC, COALESCE(b.views, 0) DESC, u.id',
+  views: 'COALESCE(b.views, 0) DESC, COALESCE(g.paid_orders, 0) DESC, u.id',
+  value: 'COALESCE(g.paid_value, 0) DESC, COALESCE(g.paid_orders, 0) DESC, u.id',
+  recent: 'b.last_seen DESC NULLS LAST, u.id',
+};
+
+export function parseCustomerActivityFilters(
+  params: Record<string, string | undefined>,
+): CustomerActivityFilters {
+  const q = params.q?.trim().slice(0, 100);
+  const sort = CUSTOMER_ACTIVITY_SORTS.find(([key]) => key === params.sort)?.[0];
+  return {
+    q: q || undefined,
+    paid: params.paid === 'yes' || params.paid === 'no' ? params.paid : undefined,
+    sort,
+  };
+}
+
 /**
  * Customers with activity in the window, busiest first.
  *
@@ -729,8 +770,25 @@ export async function customerActivity(
   from: Date,
   to: Date,
   limit = 50,
+  filters: CustomerActivityFilters = {},
+  offset = 0,
 ): Promise<CustomerActivityRow[]> {
   const capped = Math.min(Math.max(1, Math.floor(limit)), 200);
+  const skip = Math.max(0, Math.floor(offset));
+
+  // With no filters the WHERE and ORDER BY below are exactly what shipped.
+  const params: unknown[] = [from, to];
+  const where = ['(b.user_id IS NOT NULL OR g.user_id IS NOT NULL)'];
+  if (filters.q) {
+    params.push(filters.q);
+    const n = params.length;
+    where.push(
+      `(u.email ILIKE '%' || $${n} || '%' OR u.full_name ILIKE '%' || $${n} || '%' OR u.phone ILIKE '%' || $${n} || '%')`,
+    );
+  }
+  if (filters.paid === 'yes') where.push('COALESCE(g.paid_orders, 0) > 0');
+  if (filters.paid === 'no') where.push('COALESCE(g.paid_orders, 0) = 0');
+  const order = ACTIVITY_ORDER[filters.sort ?? 'paid'];
 
   return (
     await query<{
@@ -801,12 +859,10 @@ export async function customerActivity(
          FROM users u
          LEFT JOIN browsing b ON b.user_id = u.id
          LEFT JOIN ordering g ON g.user_id = u.id
-        WHERE b.user_id IS NOT NULL OR g.user_id IS NOT NULL
-        ORDER BY COALESCE(g.paid_orders, 0) DESC,
-                 COALESCE(b.views, 0) DESC,
-                 u.id
-        LIMIT ${capped}`,
-      [from, to],
+        WHERE ${where.join(' AND ')}
+        ORDER BY ${order}
+        LIMIT ${capped} OFFSET ${skip}`,
+      params,
     )
   ).map((row) => ({
     userId: row.user_id,
