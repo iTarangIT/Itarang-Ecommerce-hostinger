@@ -309,12 +309,15 @@ describe.skipIf(!CONFIGURED)('state machine and idempotency under load', () => {
     const skipped = await repository.transitionOrderStatus(order.id, 'delivered', 'test');
     expect(skipped!.status).toBe('confirmed');
 
-    // Packing is part of shipping, so a confirmed order cannot stop at packed.
+    // Packed is a step again; shipped is reachable from it, packed is not from shipped.
     const packed = await repository.transitionOrderStatus(order.id, 'packed', 'test');
-    expect(packed!.status).toBe('confirmed');
+    expect(packed!.status).toBe('packed');
 
     const legal = await repository.transitionOrderStatus(order.id, 'shipped', 'test');
     expect(legal!.status).toBe('shipped');
+
+    const backwards = await repository.transitionOrderStatus(order.id, 'packed', 'test');
+    expect(backwards!.status).toBe('shipped');
   });
 
   it('will not move an order out of a terminal state', async () => {

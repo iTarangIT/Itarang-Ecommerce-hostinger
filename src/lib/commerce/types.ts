@@ -10,7 +10,11 @@
 
 export type Paise = number;
 
-export type CategorySlug = 'inverters' | 'batteries' | 'ups' | 'combos' | 'chargers';
+/**
+ * A category slug. Plain `string` since categories became editable from the
+ * admin panel (`catalog_categories`): a new section must not need a type change.
+ */
+export type CategorySlug = string;
 
 export interface Category {
   slug: CategorySlug;
@@ -221,6 +225,13 @@ export interface Product {
   slug: string;
   title: string;
   subtitle: string;
+  /**
+   * Search-engine title and description from the admin "SEO & URL" tab. Used
+   * only in the page's <title> and meta description; absent = derived from
+   * the title, subtitle and price.
+   */
+  seoTitle?: string;
+  seoDescription?: string;
   /**
    * Catalogue identity as the manufacturer states it.
    *

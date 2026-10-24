@@ -10,7 +10,6 @@ import {
   isDemoSlug,
 } from '@/lib/commerce/demo/demo-product';
 import { ProductSections } from '@/components/product/product-sections';
-import { CATEGORY_BY_SLUG } from '@/lib/commerce/mock/categories';
 import { allProducts, productsByIds } from '@/lib/catalog/collections';
 import { toProductSummary, type ProductSummary } from '@/lib/commerce/summary';
 import type { Product, Review } from '@/lib/commerce/types';
@@ -120,13 +119,20 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     product.installationIncluded ? 'installation included' : null,
   ].filter(Boolean);
 
+  // The admin's SEO title and description win when set (Admin → product →
+  // SEO & URL); otherwise both are derived as before.
+  const title = product.seoTitle ?? product.title;
+  const description =
+    product.seoDescription ??
+    [`${product.subtitle}. ${formatPrice(price.selling)}`, ...claims].join(', ') + '.';
+
   return {
-    title: product.title,
-    description: [`${product.subtitle}. ${formatPrice(price.selling)}`, ...claims].join(', ') + '.',
+    title,
+    description,
     alternates: { canonical: productPath(product.slug) },
     openGraph: {
-      title: `${product.title} | ${SITE.name}`,
-      description: product.subtitle,
+      title: `${title} | ${SITE.name}`,
+      description: product.seoDescription ?? product.subtitle,
       url: productPath(product.slug),
       images: [{ url: product.images[0] }],
     },
@@ -140,7 +146,7 @@ export default async function ProductPage({ params }: PageProps) {
   const product = await loadProduct(slug);
   if (!product) notFound();
 
-  const category = CATEGORY_BY_SLUG.get(product.category);
+  const category = await provider.getCategory(product.category);
 
   // All three depend only on the product, never on one another. The previous
   // shape looked parallel but was not: an array literal evaluates its elements

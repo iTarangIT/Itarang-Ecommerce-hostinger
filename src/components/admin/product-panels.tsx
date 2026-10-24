@@ -10,8 +10,7 @@ import {
   updateProductSpecsAction,
   updateProductWarrantyAction,
 } from '@/lib/admin/product-actions';
-import { CATEGORIES } from '@/lib/commerce/mock/categories';
-import type { ProductSection } from '@/lib/commerce/types';
+import type { Category, ProductSection } from '@/lib/commerce/types';
 import type { Manufacturer, ProductRecord, Seller } from '@/lib/products/types';
 import {
   formatFaqs,
@@ -130,16 +129,25 @@ function SaveRow({ label = 'Save' }: { label?: string }) {
 }
 
 /** Every subcategory in the taxonomy, labelled by its parent. */
-const SUBCATEGORY_OPTIONS = CATEGORIES.flatMap((category) =>
-  category.subcategories.map((sub) => ({
-    value: sub.slug,
-    label: `${category.name} · ${sub.name}`,
-  })),
-);
+function subcategoryOptions(categories: readonly Category[]) {
+  return categories.flatMap((category) =>
+    category.subcategories.map((sub) => ({
+      value: sub.slug,
+      label: `${category.name} · ${sub.name}`,
+    })),
+  );
+}
 
 /* --------------------------------------------------------------- information */
 
-export function InformationPanel({ product }: { product: ProductRecord }) {
+/** `categories` comes from `catalog_categories` (hidden ones included). */
+export function InformationPanel({
+  product,
+  categories,
+}: {
+  product: ProductRecord;
+  categories: Category[];
+}) {
   return (
     <form action={updateProductInformationAction}>
       <KeyField productKey={product.productKey} />
@@ -200,7 +208,7 @@ export function InformationPanel({ product }: { product: ProductRecord }) {
         <div className="grid gap-5 sm:grid-cols-2">
           <Field label="Category" htmlFor="category" required>
             <Select id="category" name="category" defaultValue={product.category} required>
-              {CATEGORIES.map((category) => (
+              {categories.map((category) => (
                 <option key={category.slug} value={category.slug}>
                   {category.name}
                 </option>
@@ -209,7 +217,7 @@ export function InformationPanel({ product }: { product: ProductRecord }) {
           </Field>
           <Field label="Type" htmlFor="subcategory" required>
             <Select id="subcategory" name="subcategory" defaultValue={product.subcategory} required>
-              {SUBCATEGORY_OPTIONS.map((option) => (
+              {subcategoryOptions(categories).map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
@@ -316,12 +324,21 @@ export function PricingPanel({ product }: { product: ProductRecord }) {
         {rows.map((variant, index) => (
           <div key={variant.variantKey || index} className="rounded-lg border border-border p-4">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="SKU" htmlFor={`sku-${index}`} required>
+              <Field
+                label="SKU"
+                htmlFor={`sku-${index}`}
+                required
+                hint="Unique across the whole catalogue (capitals ignored). Letters, digits and - _ / . only."
+              >
                 <Input
                   id={`sku-${index}`}
                   name={`sku-${index}`} placeholder="e.g. TK-LiFe-5145-01"
                   defaultValue={variant.sku}
                   autoComplete="off"
+                  required
+                  maxLength={64}
+                  pattern="[A-Za-z0-9][A-Za-z0-9._\/\-]{0,63}"
+                  title="Letters, digits and - _ / . only, no spaces"
                 />
               </Field>
               <Field
@@ -338,7 +355,7 @@ export function PricingPanel({ product }: { product: ProductRecord }) {
               </Field>
             </div>
 
-            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <Field label="MRP (₹)" htmlFor={`mrp-${index}`}>
                 <Input
                   id={`mrp-${index}`}
@@ -353,6 +370,18 @@ export function PricingPanel({ product }: { product: ProductRecord }) {
                   name={`selling-${index}`} placeholder="e.g. 32000"
                   inputMode="decimal"
                   defaultValue={rupees(variant.selling)}
+                />
+              </Field>
+              <Field
+                label="Cost price (₹)"
+                htmlFor={`cost-${index}`}
+                hint="What one unit costs the business. Never shown to customers."
+              >
+                <Input
+                  id={`cost-${index}`}
+                  name={`cost-${index}`} placeholder="e.g. 26000"
+                  inputMode="decimal"
+                  defaultValue={rupees(variant.costPrice ?? null)}
                 />
               </Field>
               <Field
@@ -965,15 +994,15 @@ export function SeoPanel({ product }: { product: ProductRecord }) {
         <Field
           label="SEO title"
           htmlFor="seoTitle"
-          hint="Left blank, the product title is used."
+          hint="Left blank, the product title is used. “| iTarang Products” is added automatically — do not type it. Aim for under 60 characters."
         >
-          <Input id="seoTitle" name="seoTitle" placeholder="e.g. Trontek 51 V 45 Ah Lithium EV Battery | iTarang" defaultValue={product.seoTitle ?? ''} />
+          <Input id="seoTitle" name="seoTitle" placeholder="e.g. Trontek 51 V 45 Ah Lithium EV Battery" defaultValue={product.seoTitle ?? ''} />
         </Field>
 
         <Field
           label="SEO description"
           htmlFor="seoDescription"
-          hint="Left blank, the subtitle and price are used."
+          hint="Left blank, the subtitle and price are used. Shown under the title in Google; aim for 120–160 characters."
         >
           <Textarea
             id="seoDescription"

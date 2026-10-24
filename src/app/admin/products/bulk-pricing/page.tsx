@@ -35,8 +35,9 @@ export default function BulkPricingPage() {
       <div className="mt-4">
         <h1 className="heading-2">Bulk pricing</h1>
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-          Update MRP and selling price for many products at once from a spreadsheet. SKU is the
-          identifier — each row changes only the product with that SKU.
+          Update MRP, selling price, cost price, stock and availability for many products at once
+          from an Excel sheet. SKU is the identifier — each row changes only the product with that
+          SKU.
         </p>
       </div>
 

@@ -8,7 +8,6 @@
  *   - support hours
  *   - service network coverage claim
  */
-import { categoryPath, subcategoryPath } from '@/lib/routes';
 
 export const SITE = {
   name: 'iTarang Products',
@@ -42,18 +41,18 @@ export interface NavGroup {
 /**
  * Header navigation.
  *
- * Category families are generated from the catalogue taxonomy in
+ * Categories sit under the single "All products" dropdown in
  * `components/layout/mega-menu.tsx`; this covers the non-catalogue entries.
  */
 export const UTILITY_LINKS: NavChild[] = [
   { label: 'Track order', href: '/track' },
-  { label: 'Find a dealer', href: '/support/dealers' },
   { label: 'Check price', href: '/pricing' },
   { label: 'Support', href: '/support' },
 ];
 
+// "All products" is not listed here: it is the category dropdown that opens
+// the header (`components/layout/mega-menu.tsx`).
 export const SECONDARY_NAV: NavChild[] = [
-  { label: 'All products', href: '/products' },
   { label: 'Offers', href: '/offers' },
   // Short labels: this row shares the header with the category menus.
   { label: 'Load calculator', href: '/tools/load-calculator' },
@@ -66,18 +65,9 @@ export const FOOTER_COLUMNS: NavGroup[] = [
     label: 'Shop',
     href: '/search',
     children: [
-      // Inverters, UPS systems and combos are gone from here because they are
-      // gone from the taxonomy — a footer link is still a link, and these four
-      // led to empty category pages. The subcategory links below are what the
-      // business actually sells.
-      {
-        label: '3-wheeler & e-rickshaw batteries',
-        href: subcategoryPath('batteries', 'ev-3-wheeler'),
-      },
-      { label: '2-wheeler EV batteries', href: subcategoryPath('batteries', 'ev-2-wheeler') },
-      { label: 'Home inverter batteries', href: subcategoryPath('batteries', 'home-inverter') },
-      { label: 'ESS', href: subcategoryPath('batteries', 'ess') },
-      { label: 'Chargers', href: categoryPath('chargers') },
+      // The category links above these are added by `Footer` from the live
+      // navigation (`footerCategoryLinks`), so a category added in the admin
+      // panel appears here too, and an empty one never does.
       { label: 'Check price', href: '/pricing' },
       { label: 'Offers', href: '/offers' },
       { label: 'Compare products', href: '/compare' },

@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ArrowLeft, ArrowRight, Check, ExternalLink } from 'lucide-react';
 import { productRepository } from '@/lib/products/postgres-repository';
+import { loadCategoryOptions } from '@/lib/catalog/category-store';
 import type { ProductRecord } from '@/lib/products/types';
 import { cn } from '@/lib/utils';
 import { publishBlockers } from '@/lib/products/state-machine';
@@ -126,6 +127,8 @@ export default async function EditProductPage({
   const repository = productRepository();
   const product = await repository.findByKey(decodeURIComponent(productKey));
   if (!product) notFound();
+
+  const categories = tab === 'information' ? await loadCategoryOptions() : [];
 
   // Only the parties panel needs these, and only to fill two dropdowns.
   const [manufacturers, sellers] =
@@ -283,7 +286,7 @@ export default async function EditProductPage({
       </nav>
 
       <div className="mt-6 rounded-lg border border-border bg-card p-5 lg:p-6">
-        {tab === 'information' ? <InformationPanel product={product} /> : null}
+        {tab === 'information' ? <InformationPanel product={product} categories={categories} /> : null}
         {tab === 'pricing' ? (
           <>
             <PricingPanel product={product} />

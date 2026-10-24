@@ -2,7 +2,6 @@ import { env } from '@/lib/env';
 import { allProducts } from '@/lib/catalog/collections';
 import { CUSTOMER_QUANTITY_CEILING } from '@/lib/commerce/purchase';
 import { paymentProvider, type PaymentIntent } from '@/lib/payments';
-import { couponRule } from '@/lib/offers/coupons';
 import { stateCode } from '@/lib/checkout/validation';
 import type { AddressInput, ContactInput } from '@/lib/checkout/validation';
 import { buildQuote, type QuoteIssue, type QuoteResult } from './quote';
@@ -72,6 +71,13 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
     pincode: input.address.pincode,
     paymentMethod: input.paymentMethod,
     payVia: input.payVia,
+    shopper: {
+      userId: input.userId,
+      phone: input.contact.phone,
+      city: input.address.city,
+      state: input.address.state,
+      final: true,
+    },
   });
 
   if (!quote.placeable) {
@@ -114,43 +120,28 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
     };
   }
 
-  /* ---------------------------------------------------- coupon re-use */
+  /* ------------------------------------------------------ coupon rules */
 
-  // `validateCoupon` cannot check this. It is shared with the cart UI and has
-  // no database access by design, so the only place a per-customer limit can
-  // be enforced is here, on the server, immediately before the order is
-  // written. The matching redemption row is inserted inside the order's own
-  // transaction, so the two cannot disagree.
-  //
-  // Residual race: two orders submitted at the same instant could both pass
-  // this check. `coupon_redemptions` has no unique constraint to lean on —
-  // adding a blanket one would wrongly stop a customer using a *multi*-use
-  // code twice — and the idempotency key already blocks accidental double
-  // submits. Worth tightening if these ever carry real money.
-  if (quote.coupon) {
-    const rule = couponRule(quote.coupon.code);
-    if (rule?.oncePerCustomer) {
-      const alreadyUsed = await repository.hasRedeemedCoupon(
-        quote.coupon.code,
-        input.contact.phone,
-      );
-      if (alreadyUsed) {
-        return {
-          ok: false,
-          code: 'invalid_quote',
-          quote,
-          issues: [
-            ...quote.issues,
-            {
-              code: 'coupon_invalid',
-              message:
-                `${quote.coupon.code} has already been used on a previous order. ` +
-                'Remove it to continue.',
-            },
-          ],
-        };
-      }
-    }
+  // The quote above ran every campaign rule with the full picture — this
+  // account, the contact phone, the delivery city and state — and dropped the
+  // coupon if any failed. Placing the order without it would charge more than
+  // the shopper agreed to, so the order is refused with the reason instead.
+  // Usage limits are checked once more inside the order's own transaction
+  // (`createOrder`), which is what stops two simultaneous orders both using
+  // the last redemption.
+  const couponRefusal = input.couponCode
+    ? quote.issues.find((issue) => issue.code === 'coupon_invalid')
+    : undefined;
+  if (couponRefusal) {
+    return {
+      ok: false,
+      code: 'invalid_quote',
+      quote,
+      issues: [
+        ...quote.issues.filter((issue) => issue !== couponRefusal),
+        { ...couponRefusal, message: `${couponRefusal.message} Remove it to continue.` },
+      ],
+    };
   }
 
   /* ------------------------------------------------------- COD limits */
@@ -238,7 +229,29 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
     reservations: quote.items.map((item) => ({ variantId: item.id, quantity: item.quantity })),
     availableByVariant,
     reservationTtlMinutes: config.RESERVATION_TTL_MINUTES,
+    couponLimits: quote.campaign
+      ? {
+          userId: input.userId,
+          maxTotal: quote.campaign.maxRedemptionsTotal,
+          maxPerCustomer: quote.campaign.maxPerCustomer,
+        }
+      : undefined,
   });
+
+  if (!created.ok && created.reason === 'coupon_limit') {
+    return {
+      ok: false,
+      code: 'invalid_quote',
+      quote,
+      issues: [
+        ...quote.issues,
+        {
+          code: 'coupon_invalid',
+          message: `${quote.coupon?.code ?? 'This code'} has just reached its usage limit. Remove it to continue.`,
+        },
+      ],
+    };
+  }
 
   if (!created.ok) {
     // This result is sent to the browser as-is, so the count is capped the way

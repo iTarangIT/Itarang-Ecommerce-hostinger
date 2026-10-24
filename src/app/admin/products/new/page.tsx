@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import { createProductAction } from '@/lib/admin/product-actions';
-import { CATEGORIES } from '@/lib/commerce/mock/categories';
+import { loadCategoryOptions } from '@/lib/catalog/category-store';
 import { Button } from '@/components/ui/button';
 import { Field, Input, Select } from '@/components/ui/field';
 
@@ -31,8 +31,9 @@ export default async function NewProductPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const { error } = await searchParams;
+  const categories = await loadCategoryOptions();
 
-  const subcategories = CATEGORIES.flatMap((category) =>
+  const subcategories = categories.flatMap((category) =>
     category.subcategories.map((sub) => ({
       value: sub.slug,
       label: `${category.name} · ${sub.name}`,
@@ -107,8 +108,8 @@ export default async function NewProductPage({
 
         <div className="grid gap-5 sm:grid-cols-2">
           <Field label="Category" htmlFor="category" required>
-            <Select id="category" name="category" defaultValue="batteries" required>
-              {CATEGORIES.map((category) => (
+            <Select id="category" name="category" defaultValue={categories[0]?.slug} required>
+              {categories.map((category) => (
                 <option key={category.slug} value={category.slug}>
                   {category.name}
                 </option>
@@ -122,7 +123,7 @@ export default async function NewProductPage({
             required
             hint="Must belong to the category chosen on the left."
           >
-            <Select id="subcategory" name="subcategory" defaultValue="ev-3-wheeler" required>
+            <Select id="subcategory" name="subcategory" defaultValue={subcategories[0]?.value} required>
               {subcategories.map((sub) => (
                 <option key={sub.value} value={sub.value}>
                   {sub.label}

@@ -1,5 +1,6 @@
 import type { ProductFaq, ProductSection, SpecGroup } from '@/lib/commerce/types';
 import type {
+  BulkVariantUpdate,
   CataloguePriceRow,
   CreateProductInput,
   Manufacturer,
@@ -117,14 +118,15 @@ export interface ProductRepository {
    * and reinserts them from the input, which is right for a form that submits
    * every field and catastrophic for a price list: stock, availability, option
    * values and variant titles are absent from the spreadsheet and would be
-   * erased by omission. This writes two columns and touches nothing else.
+   * erased by omission. This writes the two prices, plus cost price, stock
+   * and availability only on rows that carry them, and touches nothing else.
    *
    * One transaction for the whole file. A price list applied halfway leaves the
    * catalogue mixing two sets of prices with no way to tell which row came from
    * where, so either all of it lands or none of it does.
    */
   updateVariantPricesBySku(
-    rows: ReadonlyArray<{ sku: string; mrp: number; selling: number }>,
+    rows: ReadonlyArray<BulkVariantUpdate>,
     actor: string,
   ): Promise<{ ok: true; updated: number } | { ok: false; code: 'not_found'; sku: string }>;
   replaceSpecGroups(

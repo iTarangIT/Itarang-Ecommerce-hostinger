@@ -14,7 +14,8 @@ import {
 } from 'lucide-react';
 import { Accordion } from '@/components/ui/accordion';
 import { formatPrice } from '@/lib/catalog/pricing';
-import { COUPONS, COUPONS_ENABLED, UPI_DISCOUNT } from '@/lib/offers/coupons';
+import { COUPONS_ENABLED, UPI_DISCOUNT } from '@/lib/offers/coupons';
+import type { SiteCoupon } from '@/lib/offers/campaign-store';
 import type { FaqEntry } from '@/lib/support/faqs';
 
 /**
@@ -28,11 +29,12 @@ import type { FaqEntry } from '@/lib/support/faqs';
 
 /* ------------------------------------------------------------------ offers */
 
-export function WelcomeOffers() {
+/** `coupons`: the campaigns marked "show on site" in /admin/campaigns, live now. */
+export function WelcomeOffers({ coupons }: { coupons: SiteCoupon[] }) {
   if (!COUPONS_ENABLED) return null;
 
   const offers = [
-    ...COUPONS.map((coupon) => ({
+    ...coupons.slice(0, 2).map((coupon) => ({
       key: coupon.code,
       icon: Tag,
       title: coupon.label,

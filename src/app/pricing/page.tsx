@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { allProducts } from '@/lib/catalog/collections';
-import { CATEGORIES } from '@/lib/commerce/mock/categories';
+import { catalog } from '@/lib/commerce';
 import { toProductSummary } from '@/lib/commerce/summary';
 import { formatPrice } from '@/lib/catalog/pricing';
 import { productPath } from '@/lib/routes';
@@ -27,9 +27,6 @@ export const metadata: Metadata = {
  * the catalogue serves nothing else — so an unpriced draft cannot show here.
  */
 
-const GROUPS = CATEGORIES.flatMap((category) =>
-  category.subcategories.map((sub) => ({ slug: sub.slug, name: sub.name })),
-);
 
 function energyKwh(product: Product): string | null {
   const { batteryAh, voltage } = product.facets;
@@ -49,7 +46,11 @@ export default async function PricingPage({
   searchParams: Promise<{ type?: string }>;
 }) {
   const { type } = await searchParams;
-  const products = await allProducts();
+  const [products, categories] = await Promise.all([allProducts(), catalog().listCategories()]);
+  // Subcategories in the admin panel's order, so a new one gets its own group.
+  const GROUPS = categories.flatMap((category) =>
+    category.subcategories.map((sub) => ({ slug: sub.slug, name: sub.name })),
+  );
   const selected = GROUPS.find((group) => group.slug === type)?.slug;
 
   const groups = GROUPS.map((group) => ({

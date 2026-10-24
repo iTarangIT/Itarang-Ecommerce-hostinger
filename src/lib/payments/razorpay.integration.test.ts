@@ -55,6 +55,8 @@ function orderFixture(total: number, suffix: string): Order {
     isTest: true,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    stages: {},
+    shipment: {},
   };
 }
 

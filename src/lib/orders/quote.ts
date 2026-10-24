@@ -3,6 +3,8 @@ import { allProducts } from '@/lib/catalog/collections';
 import { calculateTotals, type CartTotals } from '@/lib/store/totals';
 import type { AppliedCoupon, CartItem } from '@/lib/store/types';
 import { COUPONS_ENABLED, UPI_DISCOUNT, validateCoupon } from '@/lib/offers/coupons';
+import { campaignIneligibility, type Campaign } from '@/lib/offers/campaigns';
+import { eligibilityContext, findCampaign } from '@/lib/offers/campaign-store';
 import { activeProviderName } from '@/lib/commerce';
 import {
   PURCHASABLE_PROVIDER,
@@ -62,6 +64,18 @@ export interface QuoteRequest {
    * window for such an order is opened on UPI alone.
    */
   payVia?: 'upi';
+  /**
+   * Who is asking, for the campaign rules (first order, customer type, usage
+   * limits, delivery area). Set by the server from the session, never read
+   * from the request body. `final` (order placement) makes every rule count.
+   */
+  shopper?: {
+    userId?: number;
+    phone?: string;
+    city?: string;
+    state?: string;
+    final?: boolean;
+  };
 }
 
 export type QuoteIssueCode =
@@ -87,6 +101,8 @@ export interface QuoteResult {
   orderItems: OrderItem[];
   totals: CartTotals;
   coupon: AppliedCoupon | null;
+  /** The campaign behind `coupon`, for the limits re-checked at placement. */
+  campaign: Campaign | null;
   issues: QuoteIssue[];
   serviceability: ServiceabilityResult | null;
   /**
@@ -249,29 +265,6 @@ export async function buildQuote(request: QuoteRequest): Promise<QuoteResult> {
     orderItems.push(toOrderItem(item, product));
   }
 
-  /* ----------------------------------------------------------- coupon */
-
-  /**
-   * A code sent while coupons are switched off is *dropped*, not reported.
-   *
-   * `validateCoupon` refuses it either way, so no discount can be applied — the
-   * only question is whether the customer is told. A cart saved in
-   * `localStorage` before the switch was thrown still carries its code, and
-   * telling that customer their coupon is invalid at checkout blames them for a
-   * feature we turned off. The cart field clears the stored code on sight; this
-   * is the second half of the same decision, for the shopper who reaches
-   * checkout without opening the cart page.
-   */
-  let coupon: AppliedCoupon | null = null;
-  if (request.couponCode && COUPONS_ENABLED) {
-    const result = validateCoupon(request.couponCode, items);
-    if (result.ok) {
-      coupon = result.coupon;
-    } else {
-      issues.push({ code: 'coupon_invalid', message: result.reason });
-    }
-  }
-
   /* --------------------------------------------------- serviceability */
 
   let serviceability: ServiceabilityResult | null = null;
@@ -286,6 +279,50 @@ export async function buildQuote(request: QuoteRequest): Promise<QuoteResult> {
       }
     }
   }
+
+  /* ----------------------------------------------------------- coupon */
+
+  /**
+   * A code sent while coupons are switched off is *dropped*, not reported.
+   *
+   * `validateCoupon` refuses it either way, so no discount can be applied — the
+   * only question is whether the customer is told. A cart saved in
+   * `localStorage` before the switch was thrown still carries its code, and
+   * telling that customer their coupon is invalid at checkout blames them for a
+   * feature we turned off. The cart field clears the stored code on sight; this
+   * is the second half of the same decision, for the shopper who reaches
+   * checkout without opening the cart page.
+   */
+  let coupon: AppliedCoupon | null = null;
+  let campaign: Campaign | null = null;
+  if (request.couponCode && COUPONS_ENABLED) {
+    // Read fresh from `campaigns` (admin-configured) on every quote, so a
+    // paused or expired code stops working at once.
+    const found = await findCampaign(request.couponCode);
+    const result = validateCoupon(request.couponCode, items, found ? [found] : []);
+    if (!result.ok) {
+      issues.push({ code: 'coupon_invalid', message: result.reason });
+    } else if (found) {
+      // Who may use it: dates, limits, first order, customer, delivery area.
+      // The delivery city/state come from the address at placement, or from
+      // the pincode's coverage row while the shopper is still in checkout.
+      const shopper = request.shopper ?? {};
+      const context = await eligibilityContext(found, {
+        ...shopper,
+        city: shopper.city ?? serviceability?.city,
+        state: shopper.state ?? serviceability?.state,
+      });
+      const refusal = campaignIneligibility(found, context);
+      if (refusal) {
+        issues.push({ code: 'coupon_invalid', message: refusal });
+      } else {
+        coupon = result.coupon;
+        campaign = found;
+      }
+    }
+  }
+
+
 
   /* -------------------------------------------------------------- COD */
 
@@ -343,6 +380,7 @@ export async function buildQuote(request: QuoteRequest): Promise<QuoteResult> {
     orderItems,
     totals,
     coupon,
+    campaign,
     issues,
     serviceability,
     codEnabled,

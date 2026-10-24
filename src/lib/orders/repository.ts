@@ -3,6 +3,7 @@ import type {
   NewOrder,
   Order,
   OrderEvent,
+  Shipment,
   OrderStatus,
   PaymentMethod,
   PaymentRecord,
@@ -29,11 +30,22 @@ export interface CreateOrderInput {
   /** Live stock read from the catalogue at placement, for the oversell check. */
   availableByVariant: Record<string, number>;
   reservationTtlMinutes: number;
+  /**
+   * The applied campaign's usage limits, re-counted under a lock inside the
+   * order transaction so two simultaneous orders cannot both take the last
+   * redemption. Absent when no coupon is applied.
+   */
+  couponLimits?: {
+    userId: number | null;
+    maxTotal: number | null;
+    maxPerCustomer: number | null;
+  };
 }
 
 export type CreateOrderResult =
   | { ok: true; order: Order; reused: boolean }
-  | { ok: false; reason: 'insufficient_stock'; variantId: string; available: number };
+  | { ok: false; reason: 'insufficient_stock'; variantId: string; available: number }
+  | { ok: false; reason: 'coupon_limit' };
 
 /** Columns the order list can be sorted by. Mapped to SQL by a whitelist. */
 export type OrderSort = 'placed' | 'updated' | 'total' | 'customer';
@@ -118,15 +130,24 @@ export interface OrderRepository {
     note?: string,
   ): Promise<Order | null>;
 
+  /**
+   * Move an order on. Stamps the stage's date the first time it is reached.
+   * `customerVisible: false` keeps the note off the customer's pages;
+   * `shipment` saves courier details in the same transaction.
+   */
   transitionOrderStatus(
     orderId: number,
     to: OrderStatus,
     actor: string,
     note?: string,
+    options?: { customerVisible?: boolean; shipment?: Shipment },
   ): Promise<Order | null>;
 
   /** Record an event in the history without changing the status. */
-  addOrderNote(orderId: number, actor: string, note: string): Promise<void>;
+  addOrderNote(orderId: number, actor: string, note: string, customerVisible?: boolean): Promise<void>;
+
+  /** Courier and delivery details for an order; blank fields clear. */
+  updateShipment(orderId: number, shipment: Shipment, actor: string): Promise<Order | null>;
 
   listEvents(orderId: number): Promise<OrderEvent[]>;
 

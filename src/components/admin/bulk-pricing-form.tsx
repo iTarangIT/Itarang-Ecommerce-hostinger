@@ -44,12 +44,15 @@ export function BulkPricingForm() {
           1. Download the current price list
         </h2>
         <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">
-          The file lists every SKU in the catalogue with the MRP and selling price it carries right
-          now. Change the cells you want to update and leave the rest alone. The selling price
-          cannot be higher than the MRP, and both are required on every row.
+          The file lists every SKU with its current MRP, selling price, cost price, stock and
+          availability. Change the cells you want to update and leave the rest alone. The selling
+          price cannot be higher than the MRP; give both or neither. Cost price, stock and
+          availability are optional — an empty cell leaves them as they are.
         </p>
         <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">
-          Download it again after an upload and it comes back with your new prices in it.
+          To mark a product out of stock, set its Stock to 0. Availability decides only for a
+          product whose stock is not counted.
+          Download the list again after an upload and it comes back with your changes in it.
         </p>
         {/* `download` keeps this out of the client router. As a soft
             navigation, the router records the route handler's URL as the
@@ -74,12 +77,13 @@ export function BulkPricingForm() {
           2. Upload the filled-in file
         </h2>
         <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">
-          Only MRP and selling price are changed. Stock, availability, titles and every other
-          field are left exactly as they are. If any row is wrong, nothing at all is updated.
+          Only MRP, selling price, cost price, stock and availability are changed. Titles,
+          descriptions and every other field are left exactly as they are. If any row is wrong,
+          nothing at all is updated.
         </p>
         <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">
           Rows you did not edit are recognised as unchanged and skipped, so re-uploading the whole
-          list only ever writes the prices you actually altered.
+          list only ever writes the values you actually altered.
         </p>
 
         <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -210,8 +214,19 @@ export function BulkPricingForm() {
                       checking after a bulk upload is whether a price moved the
                       way they meant it to. */}
                   <td className="tabular px-4 py-2.5">
-                    MRP <PriceChange from={row.previousMrp} to={row.mrp} /> · Selling{' '}
-                    <PriceChange from={row.previousSelling} to={row.selling} />
+                    {row.mrp !== row.previousMrp || row.selling !== row.previousSelling ? (
+                      <>
+                        MRP <PriceChange from={row.previousMrp} to={row.mrp} /> · Selling{' '}
+                        <PriceChange from={row.previousSelling} to={row.selling} />
+                      </>
+                    ) : null}
+                    {row.costPrice !== undefined ? (
+                      <span className="block">Cost {formatPrice(row.costPrice)}</span>
+                    ) : null}
+                    {row.stock !== undefined ? <span className="block">Stock {row.stock}</span> : null}
+                    {row.availability !== undefined ? (
+                      <span className="block">Availability {row.availability}</span>
+                    ) : null}
                   </td>
                 </tr>
               ))}
@@ -230,12 +245,12 @@ export function BulkPricingForm() {
  * "₹0.00" — the column is nullable precisely so a draft can exist before its
  * commercial terms do, and zero rupees is a different and much worse claim.
  */
-function PriceChange({ from, to }: { from: number | null; to: number }) {
+function PriceChange({ from, to }: { from: number | null; to: number | null }) {
   return (
     <>
       <span className="text-muted-foreground">{from === null ? 'not set' : formatPrice(from)}</span>
       <span className="mx-1 text-muted-foreground">→</span>
-      <span className="font-semibold text-foreground">{formatPrice(to)}</span>
+      <span className="font-semibold text-foreground">{to === null ? 'not set' : formatPrice(to)}</span>
     </>
   );
 }

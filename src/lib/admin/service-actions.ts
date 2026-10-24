@@ -11,7 +11,9 @@ import {
   replyToReview,
   type ReviewStatus,
 } from '@/lib/reviews/reviews';
-import { createDealer, setDealerActive } from '@/lib/support/dealers';
+import { DealerSheetError, planDealerImport, summariseDealerImport } from '@/lib/support/dealer-import';
+import { MAX_DEALER_FILE_BYTES, readDealerFile } from '@/lib/support/dealer-workbook';
+import { createDealer, createDealers, listDealerKeys, setDealerActive } from '@/lib/support/dealers';
 import { updateSupportRequest, type SupportRequestStatus } from '@/lib/support/requests';
 import { parseCoverageCsv, upsertCoverage } from '@/lib/support/serviceability-server';
 
@@ -157,6 +159,31 @@ export async function createDealerAction(formData: FormData): Promise<void> {
   await createDealer(input, actor);
   revalidatePath('/support/dealers');
   done('/admin/dealers', `${input.name} added.`);
+}
+
+/**
+ * Bulk upload from an Excel or CSV sheet. Duplicates — against the dealers on
+ * file and within the sheet — are skipped and listed, never overwritten; the
+ * rest are added in one transaction. See `dealer-import.ts` for the rules.
+ */
+export async function importDealersAction(formData: FormData): Promise<void> {
+  const actor = await requireAdminActor('/admin/dealers');
+  const file = formData.get('file');
+  if (!(file instanceof File) || file.size === 0) done('/admin/dealers', 'Choose an Excel or CSV file to upload.');
+  if (file.size > MAX_DEALER_FILE_BYTES) done('/admin/dealers', 'That file is too large (limit 5 MB).');
+
+  let summary: string;
+  try {
+    const rows = await readDealerFile(await file.arrayBuffer(), file.name);
+    const plan = planDealerImport(rows, await listDealerKeys());
+    await createDealers(plan.toAdd, actor);
+    summary = summariseDealerImport(plan);
+  } catch (error) {
+    if (error instanceof DealerSheetError) done('/admin/dealers', error.message);
+    throw error;
+  }
+  revalidatePath('/support/dealers');
+  done('/admin/dealers', summary);
 }
 
 export async function toggleDealerAction(formData: FormData): Promise<void> {

@@ -1,21 +1,39 @@
 import type { Metadata } from 'next';
+import type { ReactNode } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, FlaskConical, MapPin, Package, Search, UserRound, X } from 'lucide-react';
+import {
+  ArrowDown,
+  ArrowLeft,
+  ArrowUp,
+  ArrowUpDown,
+  Download,
+  FlaskConical,
+  MapPin,
+  Package,
+  Search,
+  UserRound,
+  X,
+} from 'lucide-react';
 import {
   availableMonths,
   geography,
   isRangeKey,
   resolveRange,
+  type GeographyRow,
   type ResolvedRange,
 } from '@/lib/admin/analytics';
 import {
+  CUSTOMER_SORTS,
   customerPlaces,
+  customerProductOptions,
   customerProfiles,
+  parseCustomerFilters,
   type CustomerProfile,
 } from '@/lib/admin/customers';
+import { EXPORT_ROW_LIMIT } from '@/lib/orders/admin-tracking';
 import { formatPrice } from '@/lib/catalog/pricing';
 import { RangeFilter } from '@/components/admin/range-filter';
-import { Input } from '@/components/ui/field';
+import { Input, Select } from '@/components/ui/field';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
@@ -65,42 +83,84 @@ interface PageParams {
   state?: string;
   city?: string;
   q?: string;
+  kind?: string;
+  sku?: string;
+  buyers?: string;
+  sort?: string;
+  ssort?: string;
   offset?: string;
+}
+
+/** Every filter this screen carries in its URL, in the order it writes them. */
+const FILTER_KEYS = ['state', 'city', 'q', 'kind', 'sku', 'buyers', 'sort', 'ssort'] as const;
+type FilterKey = (typeof FILTER_KEYS)[number];
+type Current = Partial<Record<FilterKey, string>>;
+
+/** How the state table can be ordered. Revenue first, as before. */
+type StateSort = 'revenue' | 'orders' | 'deliveries' | 'state';
+const STATE_SORTS: readonly StateSort[] = ['revenue', 'orders', 'deliveries', 'state'];
+
+/** The range as query parameters, custom dates included. */
+function rangeSearch(range: ResolvedRange): URLSearchParams {
+  const search = new URLSearchParams();
+  if (range.key !== 'this_month') search.set('range', range.key);
+  if (range.month) search.set('month', range.month);
+  if (range.key === 'custom' && range.customFrom && range.customTo) {
+    search.set('from', range.customFrom);
+    search.set('to', range.customTo);
+  }
+  return search;
 }
 
 /**
  * A link that keeps the range and changes one filter.
  *
  * Written once because getting it wrong in one place is how a screen ends up
- * silently resetting the month when somebody picks a city.
+ * silently resetting the month when somebody picks a city. Any change goes
+ * back to the first page, unless it names an offset.
  */
 function filterHref(
   range: ResolvedRange,
-  current: { state?: string; city?: string; q?: string },
-  change: { state?: string | null; city?: string | null; q?: string | null; offset?: number },
+  current: Current,
+  change: Partial<Record<FilterKey, string | null>> & { offset?: number },
+  path = '/admin/customers',
 ): string {
-  const search = new URLSearchParams();
-  if (range.key !== 'this_month') search.set('range', range.key);
-  if (range.month) search.set('month', range.month);
-
-  const state = change.state === undefined ? current.state : (change.state ?? undefined);
+  const search = rangeSearch(range);
+  const next: Current = { ...current };
+  for (const key of FILTER_KEYS) {
+    if (change[key] !== undefined) next[key] = change[key] ?? undefined;
+  }
   // Changing state clears the city: a city from another state would match
   // nothing and would read as an empty result rather than an impossible filter.
-  const city =
-    change.state !== undefined
-      ? (change.city ?? undefined)
-      : change.city === undefined
-        ? current.city
-        : (change.city ?? undefined);
-  const q = change.q === undefined ? current.q : (change.q ?? undefined);
+  if (change.state !== undefined && change.city === undefined) next.city = undefined;
 
-  if (state) search.set('state', state);
-  if (city) search.set('city', city);
-  if (q) search.set('q', q);
+  for (const key of FILTER_KEYS) {
+    const value = next[key];
+    if (value) search.set(key, value);
+  }
   if (change.offset && change.offset > 0) search.set('offset', String(change.offset));
 
   const query = search.toString();
-  return query ? `/admin/customers?${query}` : '/admin/customers';
+  return query ? `${path}?${query}` : path;
+}
+
+function exportHref(range: ResolvedRange, current: Current, table: 'customers' | 'states') {
+  const href = filterHref(range, current, {}, '/admin/customers/export');
+  return `${href}${href.includes('?') ? '&' : '?'}table=${table}`;
+}
+
+function sortStates(rows: GeographyRow[], sort: StateSort): GeographyRow[] {
+  const sorted = [...rows];
+  switch (sort) {
+    case 'orders':
+      return sorted.sort((a, b) => b.orders - a.orders || b.gross - a.gross);
+    case 'deliveries':
+      return sorted.sort((a, b) => b.customers - a.customers || b.gross - a.gross);
+    case 'state':
+      return sorted.sort((a, b) => a.state.localeCompare(b.state));
+    default:
+      return sorted.sort((a, b) => b.gross - a.gross);
+  }
 }
 
 export default async function AdminCustomersPage({
@@ -116,25 +176,40 @@ export default async function AdminCustomersPage({
     prev: params.prev,
   });
 
-  const state = params.state?.trim() || undefined;
-  const city = params.city?.trim() || undefined;
-  const q = params.q?.trim() || undefined;
+  const filters = parseCustomerFilters(params);
+  const { state, city, search: q, kind, sku, buyers } = filters;
+  const ssort: StateSort = STATE_SORTS.includes(params.ssort as StateSort)
+    ? (params.ssort as StateSort)
+    : 'revenue';
 
   // Clamped, not trusted: a hand-edited offset must not become an unbounded
   // scan or a negative OFFSET.
   const parsedOffset = Number.parseInt(params.offset ?? '0', 10);
   const offset = Number.isFinite(parsedOffset) ? Math.max(0, parsedOffset) : 0;
 
-  const [page, places, months, byState] = await Promise.all([
-    customerProfiles(range.from, range.to, { state, city, search: q }, PAGE_SIZE, offset),
+  const [page, places, products, months, geo] = await Promise.all([
+    customerProfiles(range.from, range.to, filters, PAGE_SIZE, offset),
     customerPlaces(range.from, range.to),
+    customerProductOptions(range.from, range.to),
     availableMonths(),
     geography(range.from, range.to),
   ]);
+  const byState = sortStates(geo, ssort);
 
-  const current = { state, city, q };
+  // Defaults are left out of the URL, so a shared link stays short.
+  const current: Current = {
+    state,
+    city,
+    q,
+    kind,
+    sku,
+    buyers,
+    sort: filters.sort && filters.sort !== 'spend' ? filters.sort : undefined,
+    ssort: ssort !== 'revenue' ? ssort : undefined,
+  };
   const selectedState = places.find((option) => option.state === state);
-  const filtered = Boolean(state || city || q);
+  const filtered = Boolean(state || city || q || kind || sku || buyers);
+  const skuTitle = products.find((p) => p.sku.toLowerCase() === sku?.toLowerCase())?.title;
 
   return (
     <div className="container py-8">
@@ -172,11 +247,9 @@ export default async function AdminCustomersPage({
           currentMonth={range.month}
           months={months}
           basePath="/admin/customers"
-          carry={{
-            ...(state ? { state } : {}),
-            ...(city ? { city } : {}),
-            ...(q ? { q } : {}),
-          }}
+          carry={Object.fromEntries(
+            Object.entries(current).filter((entry): entry is [string, string] => Boolean(entry[1])),
+          )}
           customFrom={params.from ?? null}
           customTo={params.to ?? null}
           error={range.error}
@@ -185,10 +258,15 @@ export default async function AdminCustomersPage({
 
       {/* Where the customers are */}
       <section aria-labelledby="places-heading" className="mt-8">
-        <h2 id="places-heading" className="flex items-center gap-2 heading-3">
-          <MapPin className="h-4.5 w-4.5 text-accent-600" />
-          Where they are
-        </h2>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 id="places-heading" className="flex items-center gap-2 heading-3">
+            <MapPin className="h-4.5 w-4.5 text-accent-600" />
+            Where they are
+          </h2>
+          {byState.length > 0 ? (
+            <DownloadLink href={exportHref(range, current, 'states')} title="Every state in this period" />
+          ) : null}
+        </div>
         <p className="mt-1.5 max-w-3xl text-sm text-muted-foreground">
           From the delivery address recorded on each paid order, so a customer who moves house does
           not move their past orders with them. Pick a state, then a city, to narrow the list
@@ -205,10 +283,43 @@ export default async function AdminCustomersPage({
               <table className="w-full min-w-[40rem] text-left text-sm">
                 <thead className="bg-surface text-xs uppercase tracking-wide text-muted-foreground">
                   <tr>
-                    <th scope="col" className="px-4 py-3 font-semibold">State</th>
-                    <th scope="col" className="px-4 py-3 text-right font-semibold">Orders</th>
-                    <th scope="col" className="px-4 py-3 text-right font-semibold">Deliveries</th>
-                    <th scope="col" className="px-4 py-3 text-right font-semibold">Revenue</th>
+                    {(
+                      [
+                        ['state', 'State', false],
+                        ['orders', 'Orders', true],
+                        ['deliveries', 'Deliveries', true],
+                        ['revenue', 'Revenue', true],
+                      ] as const
+                    ).map(([key, label, numeric]) => (
+                      <th
+                        key={key}
+                        scope="col"
+                        aria-sort={ssort === key ? (key === 'state' ? 'ascending' : 'descending') : undefined}
+                        className={cn('px-4 py-3 font-semibold', numeric && 'text-right')}
+                      >
+                        <Link
+                          href={filterHref(range, current, {
+                            ssort: key === 'revenue' ? null : key,
+                            offset,
+                          })}
+                          className={cn(
+                            'inline-flex items-center gap-1 hover:text-foreground',
+                            ssort === key && 'text-foreground',
+                          )}
+                        >
+                          {label}
+                          {ssort === key ? (
+                            key === 'state' ? (
+                              <ArrowUp className="h-3 w-3" />
+                            ) : (
+                              <ArrowDown className="h-3 w-3" />
+                            )
+                          ) : (
+                            <ArrowUpDown className="h-3 w-3 opacity-40" />
+                          )}
+                        </Link>
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border bg-card">
@@ -289,15 +400,28 @@ export default async function AdminCustomersPage({
             </p>
           </div>
 
-          {/* A plain GET form, so the search lands in the URL like every other
-              filter on this screen and needs no client JavaScript. */}
-          <form action="/admin/customers" className="flex flex-wrap items-center gap-2">
-            {range.key !== 'this_month' ? (
-              <input type="hidden" name="range" value={range.key} />
-            ) : null}
-            {range.month ? <input type="hidden" name="month" value={range.month} /> : null}
-            {state ? <input type="hidden" name="state" value={state} /> : null}
-            {city ? <input type="hidden" name="city" value={city} /> : null}
+          {page.total > 0 ? (
+            <DownloadLink
+              href={exportHref(range, current, 'customers')}
+              title={`Every matching customer, all pages (up to ${EXPORT_ROW_LIMIT.toLocaleString('en-IN')})`}
+            />
+          ) : null}
+        </div>
+
+        {/* A plain GET form, so the filters land in the URL like every other
+            filter on this screen and need no client JavaScript. */}
+        <form
+          action="/admin/customers"
+          className="mt-4 flex flex-wrap items-end gap-2 rounded-lg border border-border bg-surface p-3"
+        >
+          {[...rangeSearch(range).entries()].map(([name, value]) => (
+            <input key={name} type="hidden" name={name} value={value} />
+          ))}
+          {state ? <input type="hidden" name="state" value={state} /> : null}
+          {city ? <input type="hidden" name="city" value={city} /> : null}
+          {current.ssort ? <input type="hidden" name="ssort" value={current.ssort} /> : null}
+
+          <FilterField label="Search">
             <Input
               name="q"
               defaultValue={q ?? ''}
@@ -305,12 +429,53 @@ export default async function AdminCustomersPage({
               aria-label="Search customers"
               className="h-9 w-56"
             />
-            <Button type="submit" variant="outline" size="sm">
-              <Search className="h-4 w-4" />
-              Search
-            </Button>
-          </form>
-        </div>
+          </FilterField>
+          <FilterField label="Customer type">
+            <Select name="kind" defaultValue={kind ?? ''} className="h-9 w-36">
+              <option value="">All</option>
+              <option value="account">With account</option>
+              <option value="guest">Guest</option>
+            </Select>
+          </FilterField>
+          <FilterField label="Product bought">
+            <Select name="sku" defaultValue={sku ?? ''} className="h-9 w-60">
+              <option value="">Any product</option>
+              {products.map((product) => (
+                <option key={product.sku} value={product.sku}>
+                  {product.title} · {product.sku}
+                </option>
+              ))}
+            </Select>
+          </FilterField>
+          <FilterField label="Orders">
+            <Select name="buyers" defaultValue={buyers ?? ''} className="h-9 w-40">
+              <option value="">Any</option>
+              <option value="repeat">Repeat (2 or more)</option>
+              <option value="single">One order</option>
+            </Select>
+          </FilterField>
+          <FilterField label="Sort by">
+            <Select name="sort" defaultValue={filters.sort ?? 'spend'} className="h-9 w-44">
+              {CUSTOMER_SORTS.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </Select>
+          </FilterField>
+          <Button type="submit" variant="outline" size="sm" className="h-9">
+            <Search className="h-4 w-4" />
+            Apply
+          </Button>
+          {filtered || current.sort ? (
+            <Link
+              href={filterHref(range, {}, { ssort: current.ssort ?? null })}
+              className="inline-flex h-9 items-center px-2 text-sm font-medium text-muted-foreground hover:text-foreground"
+            >
+              Clear all
+            </Link>
+          ) : null}
+        </form>
 
         {filtered ? (
           <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -325,6 +490,24 @@ export default async function AdminCustomersPage({
             ) : null}
             {q ? (
               <FilterChip label={`Search: ${q}`} href={filterHref(range, current, { q: null })} />
+            ) : null}
+            {kind ? (
+              <FilterChip
+                label={kind === 'guest' ? 'Guests only' : 'With account only'}
+                href={filterHref(range, current, { kind: null })}
+              />
+            ) : null}
+            {sku ? (
+              <FilterChip
+                label={`Bought: ${skuTitle ? `${skuTitle} · ` : ''}${sku}`}
+                href={filterHref(range, current, { sku: null })}
+              />
+            ) : null}
+            {buyers ? (
+              <FilterChip
+                label={buyers === 'repeat' ? 'Repeat buyers' : 'One-time buyers'}
+                href={filterHref(range, current, { buyers: null })}
+              />
             ) : null}
           </div>
         ) : null}
@@ -380,6 +563,32 @@ function rowKey(row: CustomerProfile): string {
   return row.userId !== null
     ? `user:${row.userId}`
     : `guest:${row.email ?? ''}:${row.phone ?? ''}:${row.gross}`;
+}
+
+function FilterField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {label}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+/** A plain link, so the browser downloads the file without any client code. */
+function DownloadLink({ href, title }: { href: string; title: string }) {
+  return (
+    <a
+      href={href}
+      download
+      title={title}
+      className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3.5 text-sm font-medium text-primary-foreground shadow-card transition-colors hover:bg-primary-600"
+    >
+      <Download className="h-4 w-4" />
+      Download CSV
+    </a>
+  );
 }
 
 function FilterChip({ label, href }: { label: string; href: string }) {
@@ -474,7 +683,7 @@ function Pager({
   total: number;
   offset: number;
   range: ResolvedRange;
-  current: { state?: string; city?: string; q?: string };
+  current: Current;
 }) {
   if (total <= PAGE_SIZE) return null;
 

@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import Image from 'next/image';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { CheckCircle2, Clock, FlaskConical, MapPin, Package, Truck } from 'lucide-react';
+import { CheckCircle2, Clock, FlaskConical } from 'lucide-react';
 import { orders } from '@/lib/orders/postgres-repository';
 import { hasOrderAccess } from '@/lib/orders/access';
 import { normaliseOrderNumber } from '@/lib/orders/numbering';
@@ -12,7 +12,9 @@ import { Breadcrumbs } from '@/components/ui/breadcrumbs';
 import { ButtonLink } from '@/components/ui/button';
 import { StateBlock } from '@/components/ui/states';
 import { ReviewForm } from '@/components/product/review-form';
-import type { OrderStatus } from '@/lib/orders/types';
+import { OrderProgress } from '@/components/account/order-progress';
+import { ShipmentDetails } from '@/components/account/shipment-details';
+import { eventLabel, trackView } from '@/lib/orders/tracking';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,13 +23,6 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-// Packing is part of shipping, so an order still in the old `packed` status
-// shows as confirmed until it ships.
-const TIMELINE: Array<{ status: OrderStatus; label: string; icon: typeof Package }> = [
-  { status: 'confirmed', label: 'Confirmed', icon: CheckCircle2 },
-  { status: 'shipped', label: 'Packed & shipped', icon: Truck },
-  { status: 'delivered', label: 'Delivered', icon: MapPin },
-];
 
 export default async function OrderPage({
   params,
@@ -66,9 +61,14 @@ export default async function OrderPage({
   const order = await repository.findByOrderNumber(orderNumber);
   if (!order) notFound();
 
-  const events = await repository.listEvents(order.id);
-  const timelineStatus = order.status === 'packed' ? 'confirmed' : order.status;
-  const currentIndex = TIMELINE.findIndex((entry) => entry.status === timelineStatus);
+  // Internal admin notes are never shown to the customer.
+  const events = (await repository.listEvents(order.id)).filter((event) => event.customerVisible);
+  const view = trackView(
+    order.status,
+    order.createdAt,
+    events.map((event) => ({ status: event.toStatus, at: event.createdAt })),
+    order.stages,
+  );
   const awaitingPayment = order.status === 'pending_payment';
   // Reviews open once the battery has arrived; the review action still checks
   // the signed-in customer bought it.
@@ -207,41 +207,14 @@ export default async function OrderPage({
         {/* Status + address */}
         <aside className="lg:col-span-5">
           <h2 className="heading-3">Progress</h2>
-          <ol className="mt-4 rounded-lg border border-border bg-card p-5">
-            {TIMELINE.map((entry, index) => {
-              const reached = currentIndex >= index && currentIndex !== -1;
-              return (
-                <li key={entry.status} className="relative flex gap-4 pb-6 last:pb-0">
-                  {index < TIMELINE.length - 1 ? (
-                    <span
-                      aria-hidden="true"
-                      className={`absolute left-[0.9375rem] top-8 h-full w-px ${
-                        currentIndex > index ? 'bg-success' : 'bg-border'
-                      }`}
-                    />
-                  ) : null}
-                  <span
-                    className={`relative z-10 grid h-8 w-8 shrink-0 place-items-center rounded-full border-2 ${
-                      reached
-                        ? 'border-success bg-success text-success-foreground'
-                        : 'border-border bg-card text-muted-foreground'
-                    }`}
-                  >
-                    <entry.icon className="h-4 w-4" />
-                  </span>
-                  <span className="pt-1">
-                    <span
-                      className={`block text-sm font-semibold ${
-                        reached ? 'text-foreground' : 'text-muted-foreground'
-                      }`}
-                    >
-                      {entry.label}
-                    </span>
-                  </span>
-                </li>
-              );
-            })}
-          </ol>
+          {/* The same five steps, with dates, as /track. */}
+          <div className="mt-4 rounded-lg border border-border bg-card p-5">
+            <OrderProgress view={view} />
+          </div>
+
+          <div className="mt-4">
+            <ShipmentDetails shipment={order.shipment} />
+          </div>
 
           <h2 className="heading-3 mt-6">Delivery address</h2>
           <address className="mt-3 rounded-lg border border-border bg-card p-4 text-sm not-italic text-muted-foreground">
@@ -262,7 +235,7 @@ export default async function OrderPage({
           </address>
 
           {events.length > 0 ? (
-            <details className="mt-4 rounded-lg border border-border bg-surface p-4">
+            <details open className="mt-4 rounded-lg border border-border bg-surface p-4">
               <summary className="cursor-pointer text-sm font-semibold text-foreground">
                 Order history
               </summary>
@@ -270,7 +243,9 @@ export default async function OrderPage({
                 {events.map((event) => (
                   <li key={event.id} className="flex justify-between gap-3">
                     <span>
-                      {event.toStatus}
+                      <span className="font-medium text-foreground">
+                        {eventLabel(event.fromStatus, event.toStatus)}
+                      </span>
                       {event.note ? ` — ${event.note}` : ''}
                     </span>
                     <span className="tabular shrink-0">{formatDate(event.createdAt)}</span>

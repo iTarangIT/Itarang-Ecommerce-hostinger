@@ -13,8 +13,8 @@ import { categoryPath, productPath, subcategoryPath } from '@/lib/routes';
  * catalogue, so mega-menu counts and the featured product always reflect what
  * the shopper will actually find on the category page.
  *
- * Categories themselves stay local: they are editorial content, and the
- * Hostinger store reports no collections.
+ * Categories come from the active provider — the database provider reads
+ * `catalog_categories`, which the business edits at /admin/categories.
  */
 export interface NavFeatured {
   title: string;
@@ -59,7 +59,7 @@ export const buildNavigation = cache(async (): Promise<NavCategory[]> => {
     allProducts(),
   ]);
 
-  return categories.map((category) => {
+  const nav = categories.map((category) => {
     const inCategory = products.filter((p) => p.category === category.slug);
 
     /**
@@ -115,7 +115,13 @@ export const buildNavigation = cache(async (): Promise<NavCategory[]> => {
       total: inCategory.length,
     };
   });
+
+  // A category with nothing published is left out of the menu for the same
+  // reason as an empty subcategory: a section added in the admin panel shows
+  // up on its own once its first product is published.
+  return nav.filter((category) => category.total > 0);
 });
 
 /** Static category list, for surfaces that need names without product counts. */
 export const NAV_CATEGORIES = CATEGORIES;
+

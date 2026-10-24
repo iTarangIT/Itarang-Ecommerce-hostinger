@@ -67,6 +67,26 @@ describe('reading an uploaded workbook', () => {
     expect(rows[0]).toMatchObject({ sku: 'TK12100-01', mrp: '45000', selling: '39999' });
   });
 
+  it('reads the optional Cost Price, Stock and Availability columns', async () => {
+    const rows = await readPricingWorkbook(
+      await workbookOf([
+        ['SKU', 'MRP', 'Selling Price', 'Cost Price', 'Stock', 'Availability'],
+        ['A-1', 45000, 39999, 30000, 0, 'out-of-stock'],
+        ['B-2', null, null, null, 12, null],
+      ]),
+    );
+    expect(rows).toEqual([
+      { rowNumber: 2, sku: 'A-1', mrp: '45000', selling: '39999', cost: '30000', stock: '0', availability: 'out-of-stock' },
+      { rowNumber: 3, sku: 'B-2', mrp: '', selling: '', cost: '', stock: '12', availability: '' },
+    ]);
+  });
+
+  it('leaves the optional fields out when the sheet has no such columns', async () => {
+    const rows = await readPricingWorkbook(await workbookOf([HEADER, ['A-1', 45000, 39999]]));
+    expect(rows[0]).not.toHaveProperty('stock');
+    expect(rows[0]).not.toHaveProperty('cost');
+  });
+
   it('refuses a sheet whose header is missing a column', async () => {
     await expect(readPricingWorkbook(await workbookOf([['SKU', 'MRP']]))).rejects.toBeInstanceOf(
       WorkbookError,
@@ -231,7 +251,7 @@ describe('the price-list template', () => {
     const sheet = (await openTemplate(CATALOGUE)).worksheets[0];
     const header = (sheet.getRow(1).values as unknown[]).slice(1);
 
-    expect(header).toEqual(['SKU', 'Product', 'MRP', 'Selling Price']);
+    expect(header).toEqual(['SKU', 'Product', 'MRP', 'Selling Price', 'Cost Price', 'Stock', 'Availability']);
   });
 
   it('includes the Variant column once a variant has a title to show', async () => {
@@ -244,13 +264,26 @@ describe('the price-list template', () => {
     ).worksheets[0];
     const header = (sheet.getRow(1).values as unknown[]).slice(1);
 
-    expect(header).toEqual(['SKU', 'Product', 'Variant', 'MRP', 'Selling Price']);
+    expect(header).toEqual(['SKU', 'Product', 'Variant', 'MRP', 'Selling Price', 'Cost Price', 'Stock', 'Availability']);
     expect(sheet.getRow(2).getCell(3).value).toBe('12V 100Ah');
   });
 
   it('still produces a usable sheet when the catalogue is empty', async () => {
     const workbook = await openTemplate([]);
     expect(workbook.worksheets[0].getRow(2).getCell(1).value).toBe('YOUR-SKU-HERE');
+  });
+
+  it('pre-fills cost, stock and availability and reads them back', async () => {
+    const bytes = await buildPricingTemplate([
+      {
+        ...CATALOGUE[0]!,
+        costPrice: 3000000,
+        stock: 7,
+        availability: 'in-stock',
+      },
+    ]);
+    const rows = await readPricingWorkbook(bytes as unknown as ArrayBuffer);
+    expect(rows[0]).toMatchObject({ cost: '30000', stock: '7', availability: 'in-stock' });
   });
 
   it('ships an instructions sheet', async () => {

@@ -11,9 +11,9 @@ import type { OrderStatus, PaymentStatus } from './types';
 
 const ORDER_TRANSITIONS: Record<OrderStatus, readonly OrderStatus[]> = {
   pending_payment: ['confirmed', 'cancelled'],
-  // Packing and shipping are one step: the admin moves a confirmed order
-  // straight to `shipped`. `packed` stays only for orders already in it.
-  confirmed: ['shipped', 'cancelled'],
+  // Packed is its own step again (it has its own date), but optional: a
+  // confirmed order may still go straight to `shipped`.
+  confirmed: ['packed', 'shipped', 'cancelled'],
   packed: ['shipped', 'cancelled'],
   shipped: ['delivered'],
   // Terminal.

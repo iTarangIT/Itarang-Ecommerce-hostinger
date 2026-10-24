@@ -1,17 +1,7 @@
 import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import Link from 'next/link';
-import {
-  AlertTriangle,
-  BarChart3,
-  Filter,
-  FlaskConical,
-  Package,
-  LifeBuoy,
-  RefreshCw,
-  Truck,
-  UserRound,
-} from 'lucide-react';
+import { AlertTriangle, BarChart3, Filter, FlaskConical, LifeBuoy, Package, RefreshCw, TicketPercent, Truck, UserRound } from 'lucide-react';
 import {
   pushInventoryToHostingerAction,
   resolveCatalogueAlertAction,
@@ -99,7 +89,7 @@ export default async function AdminOrdersPage({
             {filtered ? ' matching these filters' : ''}
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <Link
             href="/track"
             className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
@@ -113,6 +103,13 @@ export default async function AdminOrdersPage({
           >
             <Package className="h-4 w-4" />
             Products
+          </Link>
+          <Link
+            href="/admin/campaigns"
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+          >
+            <TicketPercent className="h-4 w-4" />
+            Campaigns
           </Link>
           <Link
             href="/admin/customers"

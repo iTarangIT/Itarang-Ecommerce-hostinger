@@ -5,6 +5,10 @@ import { ArrowLeft, Package, UserRound } from 'lucide-react';
 import { customerDetail } from '@/lib/admin/funnel';
 import { customerPurchases } from '@/lib/admin/customers';
 import { formatPrice } from '@/lib/catalog/pricing';
+import { setCustomerTypeAction } from '@/lib/admin/campaign-actions';
+import { CUSTOMER_TYPES } from '@/lib/offers/campaigns';
+import { customerProfile } from '@/lib/offers/campaign-store';
+import { Button } from '@/components/ui/button';
 
 export const dynamic = 'force-dynamic';
 
@@ -74,19 +78,22 @@ function Row({ label, value }: { label: string; value: string }) {
 
 export default async function CustomerActivityPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ userId: string }>;
+  searchParams: Promise<{ notice?: string }>;
 }) {
-  const { userId } = await params;
+  const [{ userId }, { notice }] = await Promise.all([params, searchParams]);
 
   // Clamped, not trusted: a hand-edited id must not reach the query as
   // something that could overflow or scan.
   const parsed = Number.parseInt(userId, 10);
   if (!Number.isSafeInteger(parsed) || parsed <= 0) notFound();
 
-  const [customer, purchases] = await Promise.all([
+  const [customer, purchases, profile] = await Promise.all([
     customerDetail(parsed),
     customerPurchases(parsed),
+    customerProfile(parsed),
   ]);
   if (!customer) notFound();
 
@@ -138,6 +145,34 @@ export default async function CustomerActivityPage({
         <Row label="Account since" value={IST_DATETIME.format(new Date(customer.createdAt))} />
         <Row label="Events" value={String(customer.timeline.length)} />
       </dl>
+
+      {/* Campaigns can be limited to a customer type (dealer-only, fleet-only…). */}
+      <form
+        action={setCustomerTypeAction}
+        className="mt-3 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card p-4"
+      >
+        <input type="hidden" name="userId" value={parsed} />
+        <label className="flex flex-col gap-1.5 text-sm">
+          <span className="text-xs uppercase tracking-wide text-muted-foreground">Customer type</span>
+          <select
+            name="customerType"
+            defaultValue={profile.customerType ?? ''}
+            className="h-10 rounded-md border border-input bg-card px-3 text-sm capitalize"
+          >
+            <option value="">Not set</option>
+            {CUSTOMER_TYPES.map((type) => (
+              <option key={type} value={type}>
+                {type}
+              </option>
+            ))}
+          </select>
+        </label>
+        <Button type="submit" size="sm" variant="outline">
+          Save type
+        </Button>
+        <span className="text-xs text-muted-foreground">Used by campaigns limited to a customer type.</span>
+        {notice ? <span className="text-xs font-medium text-success">{notice}</span> : null}
+      </form>
 
       {/* What they have actually bought.
           Placed above the activity timeline on purpose: browsing is a long

@@ -270,7 +270,7 @@ export function OrderTrackingTable({
             </thead>
             <tbody className="divide-y divide-border bg-card">
               {list.map((order) => {
-                const view = trackView(order.status, order.createdAt);
+                const view = trackView(order.status, order.createdAt, [], order.stages);
                 const units = order.items.reduce((sum, item) => sum + item.quantity, 0);
                 return (
                   <tr key={order.id} className="align-top transition-colors hover:bg-surface">

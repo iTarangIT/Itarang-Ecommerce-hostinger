@@ -4,6 +4,7 @@ import * as React from 'react';
 import Link from 'next/link';
 import { Mail, MapPin, MessageCircle, Phone } from 'lucide-react';
 import { FOOTER_COLUMNS, POLICY_LINKS, SITE } from '@/lib/site';
+import type { NavCategory } from '@/lib/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/field';
 import { useUI } from '@/lib/store/ui-provider';
@@ -23,7 +24,20 @@ import { Logo } from './logo';
  */
 const PAYMENT_METHODS = ['UPI', 'Visa', 'Mastercard', 'RuPay', 'Net banking'];
 
-export function Footer() {
+/**
+ * Footer "Shop" links from the live navigation: each stocked subcategory, or
+ * the category itself when it has at most one, so a single-type section such
+ * as Chargers reads "Chargers" rather than "EV Battery Chargers".
+ */
+function footerCategoryLinks(categories: readonly NavCategory[]): { label: string; href: string }[] {
+  return categories.flatMap((category) =>
+    category.subcategories.length > 1
+      ? category.subcategories.map((sub) => ({ label: sub.name, href: sub.href }))
+      : [{ label: category.name, href: category.href }],
+  );
+}
+
+export function Footer({ categories }: { categories: NavCategory[] }) {
   const { toast } = useUI();
   const [email, setEmail] = React.useState('');
 
@@ -115,13 +129,17 @@ export function Footer() {
         </div>
 
         <div className="grid gap-8 sm:grid-cols-3 lg:col-span-8">
-          {FOOTER_COLUMNS.map((column) => (
+          {FOOTER_COLUMNS.map((column, index) => (
+            // The first column is "Shop": the live categories lead it.
             <nav key={column.label} aria-label={column.label}>
               <h2 className="font-display text-sm font-semibold uppercase tracking-widest text-primary-300">
                 {column.label}
               </h2>
               <ul className="mt-4 space-y-2.5">
-                {column.children.map((child) => (
+                {(index === 0
+                  ? [...footerCategoryLinks(categories), ...column.children]
+                  : column.children
+                ).map((child) => (
                   <li key={child.href}>
                     <Link
                       href={child.href}

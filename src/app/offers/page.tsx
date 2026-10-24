@@ -1,7 +1,8 @@
 import type { Metadata } from 'next';
 import { catalog } from '@/lib/commerce';
 import { biggestDiscounts } from '@/lib/catalog/collections';
-import { COUPONS, COUPONS_ENABLED } from '@/lib/offers/coupons';
+import { COUPONS_ENABLED } from '@/lib/offers/coupons';
+import { listSiteCoupons } from '@/lib/offers/campaign-store';
 import { Breadcrumbs } from '@/components/ui/breadcrumbs';
 import { SectionHeader } from '@/components/ui/section';
 import { ProductRail } from '@/components/merch/product-rail';
@@ -11,7 +12,7 @@ import { CouponCard } from '@/components/merch/coupon-card';
 export const metadata: Metadata = {
   title: 'Offers',
   description:
-    'WELCOME1000 and WELCOME2000 coupon codes, ₹200 off on UPI payments and free delivery on iTarang lithium batteries.',
+    'Current coupon codes, ₹200 off on UPI payments and free delivery on iTarang lithium batteries.',
   alternates: { canonical: '/offers' },
 };
 
@@ -32,7 +33,9 @@ const TERMS = [
   {
     id: 'coupons',
     title: 'Coupon codes',
-    body: 'WELCOME1000 takes ₹1,000 off when your cart includes a home inverter battery. WELCOME2000 takes ₹2,000 off when your cart includes a 3-wheeler or e-rickshaw battery. One coupon per order, and each code can be used once per customer.',
+    // Each code's own terms are printed on its card above; these are the rules
+    // every code shares.
+    body: 'Each code above states what it applies to and who can use it. One coupon per order; it can be combined with the UPI discount. A code may be limited to a first order, to particular customers or delivery areas, or to a number of uses, and stops working when its campaign ends.',
   },
   {
     id: 'emi',
@@ -46,8 +49,15 @@ const TERMS = [
   },
 ].filter((term) => COUPONS_ENABLED || term.id !== 'coupons');
 
+// Campaigns have start and end dates; re-render at least every five minutes.
+export const revalidate = 300;
+
 export default async function OffersPage() {
-  const [offers, deals] = await Promise.all([catalog().listOffers(), biggestDiscounts(8)]);
+  const [offers, deals, coupons] = await Promise.all([
+    catalog().listOffers(),
+    biggestDiscounts(8),
+    COUPONS_ENABLED ? listSiteCoupons() : Promise.resolve([]),
+  ]);
 
   return (
     <>
@@ -68,7 +78,7 @@ export default async function OffersPage() {
       {/* Codes are only advertised while they can actually be redeemed.
           `COUPONS_ENABLED` is off, so printing four codes the cart would refuse
           would be an offer we do not honour — worse than showing none. */}
-      {COUPONS_ENABLED ? (
+      {coupons.length > 0 ? (
         <div className="container section">
           <SectionHeader
             eyebrow="Coupon codes"
@@ -76,7 +86,7 @@ export default async function OffersPage() {
             description="Enter the code in your cart before checkout. One coupon per order."
           />
           <ul className="grid gap-3 sm:grid-cols-2">
-            {COUPONS.map((coupon) => (
+            {coupons.map((coupon) => (
               <li key={coupon.code}>
                 <CouponCard coupon={coupon} />
               </li>

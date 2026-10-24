@@ -12,6 +12,8 @@ import { productRepository } from '@/lib/products/postgres-repository';
 import { UNTRACKED_STOCK } from '@/lib/products/to-domain';
 import { dispatchStockAlertsInBackground } from '@/lib/stock/alerts';
 import { slugify } from '@/lib/utils';
+import { SKU_RULE, isValidSku, repeatedVariantField } from '@/lib/products/sku-rules';
+import { categoryPairError, loadCategoryOptions } from '@/lib/catalog/category-store';
 import {
   ALLOWED_MEDIA_TYPES,
   MAX_MEDIA_BYTES,
@@ -114,7 +116,12 @@ function settle(productKey: string, tab: string, result: ProductWriteResult<unkn
       redirect('/admin/products?error=' + encodeURIComponent('That product no longer exists.'));
     case 'duplicate':
       backTo(productKey, tab, {
-        error: `That ${result.field.replace('_', ' ')} is already used by another product: ${result.value}`,
+        error:
+          result.field === 'variant_key'
+            ? `Two rows have the same variant key (${result.value}). Each variant of a product needs its own key.`
+            : result.field === 'sku'
+              ? `SKU ${result.value} is already used by another product (SKUs are unique, ignoring capitals).`
+              : `That ${result.field.replace('_', ' ')} is already used by another product: ${result.value}`,
       });
     case 'invalid_transition':
       backTo(productKey, tab, {
@@ -152,7 +159,9 @@ const productKeySchema = z
   .max(120)
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'Use lower-case words separated by single hyphens.');
 
-const categorySchema = z.enum(['inverters', 'batteries', 'ups', 'combos']);
+// Checked against `catalog_categories` after parsing (see `checkCategory`), not
+// a fixed list: categories are added from the admin panel.
+const categorySchema = text(60).min(1, 'Choose a category.');
 const artSchema = z.enum(['inverter', 'battery', 'ups', 'combo']);
 
 /** Rupees in the form, paise in the database. One conversion, in one place. */
@@ -234,6 +243,9 @@ export async function createProductAction(formData: FormData): Promise<void> {
     );
   }
 
+  const categoryError = await checkCategory(parsed.data.category, parsed.data.subcategory);
+  if (categoryError) redirect('/admin/products/new?error=' + encodeURIComponent(categoryError));
+
   const base = baseSlugFor(parsed.data.title, parsed.data.modelName);
 
   for (let attempt = 1; attempt <= MAX_SLUG_ATTEMPTS; attempt++) {
@@ -260,6 +272,10 @@ export async function createProductAction(formData: FormData): Promise<void> {
 }
 
 const MAX_SLUG_ATTEMPTS = 20;
+
+async function checkCategory(category: string, subcategory: string): Promise<string | null> {
+  return categoryPairError(await loadCategoryOptions(), category, subcategory);
+}
 
 function baseSlugFor(title: string, modelName: string | null): string {
   let base = slugify(title);
@@ -301,6 +317,8 @@ export async function updateProductInformationAction(formData: FormData): Promis
   }
 
   const { productKey, ...patch } = parsed.data;
+  const categoryError = await checkCategory(patch.category, patch.subcategory);
+  if (categoryError) backTo(productKey, 'information', { error: categoryError });
   settle(productKey, 'information', await productRepository().updateProduct(productKey, patch, actor));
 }
 
@@ -544,12 +562,19 @@ export async function updateProductPricingAction(formData: FormData): Promise<vo
       });
     }
 
+    if (!isValidSku(sku)) {
+      backTo(productKey, 'pricing', {
+        error: `Row ${index + 1}: "${sku}" is not a valid SKU. ${SKU_RULE} Nothing was saved.`,
+      });
+    }
+
     const mrp = rupeesToPaise.safeParse(String(formData.get(`mrp-${index}`) ?? ''));
     const selling = rupeesToPaise.safeParse(String(formData.get(`selling-${index}`) ?? ''));
+    const cost = rupeesToPaise.safeParse(String(formData.get(`cost-${index}`) ?? ''));
     const stock = stockSchema.safeParse(String(formData.get(`stock-${index}`) ?? ''));
     const availability = String(formData.get(`availability-${index}`) ?? '').trim();
 
-    if (!mrp.success || !selling.success || !stock.success) {
+    if (!mrp.success || !selling.success || !cost.success || !stock.success) {
       backTo(productKey, 'pricing', { error: `Check the numbers on row ${index + 1}.` });
     }
 
@@ -560,6 +585,7 @@ export async function updateProductPricingAction(formData: FormData): Promise<vo
       optionValues: {},
       mrp: mrp.data,
       selling: selling.data,
+      costPrice: cost.data,
       stock: stock.data,
       availability:
         availability === 'in-stock' ||
@@ -570,6 +596,10 @@ export async function updateProductPricingAction(formData: FormData): Promise<vo
           : null,
     });
   }
+
+  // Caught here, not by the database, so the message can name both rows.
+  const repeated = repeatedVariantField(variants);
+  if (repeated) backTo(productKey, 'pricing', { error: `${repeated} Nothing was saved.` });
 
   // One transaction for both halves. These were two calls, so a duplicate SKU
   // could fail the variant write *after* the tax fields had committed —

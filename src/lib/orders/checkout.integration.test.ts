@@ -179,8 +179,7 @@ describe.skipIf(!CONFIGURED)('checkout against the local database', () => {
     });
 
     expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.reason).toBe('insufficient_stock');
+    if (result.ok || result.reason !== 'insufficient_stock') throw new Error('expected insufficient_stock');
     expect(result.available).toBe(3);
   });
 

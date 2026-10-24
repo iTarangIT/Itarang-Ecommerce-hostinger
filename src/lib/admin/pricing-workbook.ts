@@ -1,6 +1,12 @@
 import ExcelJS from 'exceljs';
 import type { CataloguePriceRow } from '@/lib/products/types';
-import { TEMPLATE_COLUMNS, mapHeader, type RawPriceRow } from './bulk-pricing';
+import {
+  AVAILABILITY_VALUES,
+  OPTIONAL_COLUMNS,
+  TEMPLATE_COLUMNS,
+  mapHeader,
+  type RawPriceRow,
+} from './bulk-pricing';
 
 /**
  * Reading and writing the bulk-pricing spreadsheet.
@@ -94,12 +100,30 @@ export async function readPricingWorkbook(bytes: ArrayBuffer): Promise<RawPriceR
     const sku = cells[columns.sku] ?? '';
     const mrp = cells[columns.mrp] ?? '';
     const selling = cells[columns.selling] ?? '';
+    // Optional columns stay `undefined` when the sheet does not have them.
+    const optional = (index: number | undefined) =>
+      index === undefined ? undefined : (cells[index] ?? '');
+    const extras = {
+      cost: optional(columns.cost),
+      stock: optional(columns.stock),
+      availability: optional(columns.availability),
+    };
 
     // A wholly blank line is spacing, not a mistake. A line with anything in it
     // is a row somebody meant, and is reported even if the SKU is missing.
-    if (sku === '' && mrp === '' && selling === '') continue;
+    if (sku === '' && mrp === '' && selling === '' && !extras.cost && !extras.stock && !extras.availability) {
+      continue;
+    }
 
-    parsed.push({ rowNumber: number, sku, mrp, selling });
+    parsed.push({
+      rowNumber: number,
+      sku,
+      mrp,
+      selling,
+      ...(extras.cost !== undefined ? { cost: extras.cost } : {}),
+      ...(extras.stock !== undefined ? { stock: extras.stock } : {}),
+      ...(extras.availability !== undefined ? { availability: extras.availability } : {}),
+    });
   }
 
   if (parsed.length === 0) throw new WorkbookError('The sheet has a header but no rows.');
@@ -154,6 +178,9 @@ export async function buildPricingTemplate(
     ...(showVariant ? [{ header: 'Variant', key: 'variant', width: 22 }] : []),
     { header: TEMPLATE_COLUMNS[1], key: 'mrp', width: 16 },
     { header: TEMPLATE_COLUMNS[2], key: 'selling', width: 16 },
+    { header: OPTIONAL_COLUMNS[0], key: 'cost', width: 16 },
+    { header: OPTIONAL_COLUMNS[1], key: 'stock', width: 12 },
+    { header: OPTIONAL_COLUMNS[2], key: 'availability', width: 16 },
   ];
   sheet.getRow(1).font = { bold: true };
   sheet.views = [{ state: 'frozen', ySplit: 1 }];
@@ -165,11 +192,21 @@ export async function buildPricingTemplate(
       ...(showVariant ? { variant: variant.variantTitle } : {}),
       mrp: rupees(variant.mrp),
       selling: rupees(variant.selling),
+      cost: rupees(variant.costPrice ?? null),
+      stock: variant.stock ?? '',
+      availability: variant.availability ?? '',
     });
     // Formatted as rupees so the sheet reads like money, and left as a real
     // number so an administrator can type over it without fighting a text cell.
     row.getCell('mrp').numFmt = '#,##0.00';
     row.getCell('selling').numFmt = '#,##0.00';
+    row.getCell('cost').numFmt = '#,##0.00';
+    // A dropdown, so "out of stock" cannot be misspelt.
+    row.getCell('availability').dataValidation = {
+      type: 'list',
+      allowBlank: true,
+      formulae: [`"${AVAILABILITY_VALUES.join(',')}"`],
+    };
     // The identifying columns are reference, not input. Greyed so it is
     // visually obvious which two columns this file is for.
     row.getCell('product').font = { color: { argb: 'FF6B7280' } };
@@ -183,11 +220,18 @@ export async function buildPricingTemplate(
   const notes = workbook.addWorksheet('How to use');
   notes.columns = [{ width: 100 }];
   for (const line of [
-    'Bulk price update — MRP and selling price only.',
+    'Bulk update — MRP, selling price, cost price, stock and availability.',
     '',
-    'The Prices sheet already contains every SKU with the price it currently carries.',
-    'Change the MRP and Selling Price cells you want to update, then upload the file at',
+    'The Prices sheet already contains every SKU with its current figures.',
+    'Change the cells you want to update, then upload the file at',
     'Admin → Products → Bulk pricing.',
+    '',
+    'Cost Price, Stock and Availability are optional. An empty cell leaves that value as it is.',
+    'Stock is a whole number of units; 0 takes the product off sale.',
+    'Availability is one of: in-stock, low-stock, out-of-stock, preorder (pick from the dropdown).',
+    'To mark a product out of stock, set Stock to 0. Availability decides only for a product',
+    'whose stock is not counted (Stock left empty on the product page).',
+    'Cost price is never shown to customers.',
     '',
     'SKU is the identifier. Only the product with that SKU is changed.',
     'Enter amounts in rupees.',
@@ -199,7 +243,7 @@ export async function buildPricingTemplate(
     'Do not list the same SKU twice.',
     'The Product column is there to help you find the row. It is ignored on upload.',
     '',
-    'Nothing else about the product is changed — not stock, not availability, not the title.',
+    'Nothing else about the product is changed — not the title, description or images.',
     'If any row is wrong, the whole file is rejected and nothing is updated.',
     '',
     'Download this template again after an upload and it will show your new prices.',
