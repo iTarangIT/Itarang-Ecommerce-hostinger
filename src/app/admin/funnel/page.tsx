@@ -3,14 +3,17 @@ import Link from 'next/link';
 import {
   ArrowLeft,
   Boxes,
+  ChevronRight,
   Filter,
   FlaskConical,
+  Search,
   TrendingDown,
   UserSearch,
   Users,
 } from 'lucide-react';
 import { availableMonths, isRangeKey, rangeParams, resolveRange } from '@/lib/admin/analytics';
 import {
+  CUSTOMER_ACTIVITY_SORTS,
   FUNNEL_SEGMENTS,
   FUNNEL_STAGES,
   SEGMENT_LABELS,
@@ -24,10 +27,24 @@ import {
   funnelCounts,
   funnelVisitorCounts,
   isFunnelSegment,
+  parseCustomerActivityFilters,
 } from '@/lib/admin/funnel';
 import type { AnonymousConversion } from '@/lib/admin/funnel';
+import type { CohortMetric } from '@/lib/admin/funnel-detail';
 import { formatPrice } from '@/lib/catalog/pricing';
 import { RangeFilter } from '@/components/admin/range-filter';
+import {
+  CountLink,
+  DownloadLink,
+  FilterField,
+  HiddenParams,
+  IN_ROW_LINK,
+  ROW_LINK,
+  reportHref,
+} from '@/components/admin/table-tools';
+import { Input, Select } from '@/components/ui/field';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,7 +67,18 @@ export const metadata: Metadata = {
  *
  * Every number is a count of *sessions*, not events. A shopper who views five
  * products reached the product-view stage once.
+ *
+ * Every number is also a link to the rows behind it — `/admin/funnel/stages/*`
+ * for the stage table and conversion cards, `/admin/funnel/anonymous/*` for the
+ * anonymous tiles — and every table has a CSV through `/admin/funnel/export`.
  */
+
+/** The customer table shows this many; the CSV carries all of them. */
+const CUSTOMER_ROWS = 200;
+
+/** A report card that opens the rows behind its number. */
+const CARD_LINK =
+  'block rounded-lg border border-border bg-card p-4 transition-colors hover:border-primary/50 hover:bg-surface';
 
 const IST_DATETIME = new Intl.DateTimeFormat('en-IN', {
   day: 'numeric',
@@ -72,23 +100,23 @@ function percent(rate: number | null): string {
  */
 function anonymousTiles(
   anonymous: AnonymousConversion,
-): Array<{ label: string; value: number; note: string }> {
+): Array<{ metric: CohortMetric; label: string; value: number; note: string }> {
   const of = anonymous.visitors;
   const share = (value: number): string =>
     of === 0 ? '—' : `${percent(value / of)} of anonymous visitors`;
 
   return [
-    { label: 'Anonymous visitors', value: of, note: 'browsed signed-out in this period' },
-    { label: 'Reached the login wall', value: anonymous.reachedWall, note: share(anonymous.reachedWall) },
-    { label: 'Registered or signed in', value: anonymous.registered, note: share(anonymous.registered) },
-    { label: 'Placed a paid order', value: anonymous.purchased, note: share(anonymous.purchased) },
+    { metric: 'visitors', label: 'Anonymous visitors', value: of, note: 'browsed signed-out in this period' },
+    { metric: 'wall', label: 'Reached the login wall', value: anonymous.reachedWall, note: share(anonymous.reachedWall) },
+    { metric: 'registered', label: 'Registered or signed in', value: anonymous.registered, note: share(anonymous.registered) },
+    { metric: 'purchased', label: 'Placed a paid order', value: anonymous.purchased, note: share(anonymous.purchased) },
   ];
 }
 
 export default async function FunnelPage({
   searchParams,
 }: {
-  searchParams: Promise<{ range?: string; month?: string; segment?: string; from?: string; to?: string; prev?: string }>;
+  searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const params = await searchParams;
   const requested = isRangeKey(params.range) ? params.range : 'this_month';
@@ -101,6 +129,7 @@ export default async function FunnelPage({
   // `all` is the default, and with it every query below is the one that shipped.
   // Choosing a segment narrows the view; it never rewrites the baseline.
   const segment = isFunnelSegment(params.segment) ? params.segment : 'all';
+  const customerFilters = parseCustomerActivityFilters(params);
 
   const [counts, visitorCounts, months, coverage, beacons, anonymous, customers] =
     await Promise.all([
@@ -110,7 +139,7 @@ export default async function FunnelPage({
       attributionCoverage(range.from, range.to),
       beaconCoverage(range.from, range.to),
       anonymousConversion(range.from, range.to),
-      customerActivity(range.from, range.to, 50),
+      customerActivity(range.from, range.to, CUSTOMER_ROWS, customerFilters),
     ]);
 
   const rates = conversions(counts);
@@ -120,6 +149,23 @@ export default async function FunnelPage({
 
   const share = (value: number): string =>
     counts.visit > 0 ? `${Math.round((value / counts.visit) * 100)}%` : '—';
+
+  // The segment travels into every drill-down, so a number opened from the
+  // Registered funnel lists the registered rows that number counted.
+  const segmentParam = segment === 'all' ? undefined : segment;
+  const customerParams = {
+    q: customerFilters.q,
+    paid: customerFilters.paid,
+    sort: customerFilters.sort,
+  };
+  const customersFiltered = Boolean(customerFilters.q || customerFilters.paid);
+  const carry = Object.fromEntries(
+    Object.entries({ segment: segmentParam, ...customerParams }).filter(
+      (entry): entry is [string, string] => Boolean(entry[1]),
+    ),
+  );
+  const stageHref = (stage: string, extra: Record<string, string | undefined> = {}) =>
+    reportHref(`/admin/funnel/stages/${stage}`, range, { segment: segmentParam, ...extra });
 
   return (
     <div className="container py-8">
@@ -177,7 +223,7 @@ export default async function FunnelPage({
         customTo={range.requestedTo}
         error={range.error}
         basePath="/admin/funnel"
-        carry={segment === 'all' ? undefined : { segment }}
+        carry={carry}
       />
 
       {/* ------------------------------------------------------- segment */}
@@ -194,6 +240,9 @@ export default async function FunnelPage({
           // the moment somebody switches segment.
           const query = rangeParams(range);
           if (option !== 'all') query.set('segment', option);
+          for (const [key, value] of Object.entries(customerParams)) {
+            if (value) query.set(key, value);
+          }
           return (
             <Link
               key={option}
@@ -225,10 +274,21 @@ export default async function FunnelPage({
       {/* --------------------------------------------------------- funnel */}
 
       <section aria-labelledby="stages-heading" className="mt-4">
-        <h2 id="stages-heading" className="flex items-center gap-2 heading-3">
-          <Filter className="h-4.5 w-4.5 text-accent-600" />
-          Stages
-        </h2>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 id="stages-heading" className="flex items-center gap-2 heading-3">
+              <Filter className="h-4.5 w-4.5 text-accent-600" />
+              Stages
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Click a stage or a number to see every session or visitor behind it.
+            </p>
+          </div>
+          <DownloadLink
+            href={reportHref('/admin/funnel/export', range, { table: 'stages', segment: segmentParam })}
+            title="The stage table for this period and segment"
+          />
+        </div>
 
         <div className="mt-3 overflow-x-auto rounded-lg border border-border">
           <table className="w-full min-w-[40rem] text-left text-sm">
@@ -245,13 +305,25 @@ export default async function FunnelPage({
               {FUNNEL_STAGES.map((stage) => {
                 const value = counts[stage];
                 return (
-                  <tr key={stage}>
+                  <tr key={stage} className="relative transition-colors hover:bg-surface">
                     <td className="px-4 py-3 font-medium text-foreground">
-                      {STAGE_LABELS[stage]}
+                      <Link
+                        href={stageHref(stage)}
+                        className={cn('inline-flex items-center gap-1 hover:text-primary', ROW_LINK)}
+                      >
+                        {STAGE_LABELS[stage]}
+                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                      </Link>
                     </td>
-                    <td className="tabular px-4 py-3 text-right font-semibold">{value}</td>
-                    <td className="tabular px-4 py-3 text-right text-muted-foreground">
-                      {visitorCounts[stage]}
+                    <td className="px-4 py-3 text-right font-semibold">
+                      <CountLink href={stageHref(stage)} className={IN_ROW_LINK}>
+                        {value}
+                      </CountLink>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <CountLink href={stageHref(stage, { unit: 'visitor' })} className={IN_ROW_LINK}>
+                        {visitorCounts[stage]}
+                      </CountLink>
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
@@ -327,13 +399,20 @@ export default async function FunnelPage({
 
         <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {anonymousTiles(anonymous).map((tile) => (
-            <div key={tile.label} className="rounded-lg border border-border bg-card p-4">
-              <p className="text-xs uppercase tracking-wide text-muted-foreground">{tile.label}</p>
+            <Link
+              key={tile.label}
+              href={reportHref(`/admin/funnel/anonymous/${tile.metric}`, range)}
+              className={CARD_LINK}
+            >
+              <p className="flex items-center justify-between gap-2 text-xs uppercase tracking-wide text-muted-foreground">
+                {tile.label}
+                <ChevronRight className="h-4 w-4 shrink-0" />
+              </p>
               <p className="tabular mt-1.5 font-display text-2xl font-bold text-foreground">
                 {tile.value}
               </p>
               <p className="tabular mt-1 text-xs text-muted-foreground">{tile.note}</p>
-            </div>
+            </Link>
           ))}
         </div>
       </section>
@@ -347,15 +426,22 @@ export default async function FunnelPage({
         </h2>
         <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {rates.map((rate) => (
-            <div key={rate.label} className="rounded-lg border border-border bg-card p-4">
-              <p className="text-xs uppercase tracking-wide text-muted-foreground">{rate.label}</p>
+            <Link
+              key={rate.label}
+              href={stageHref(rate.from, { next: rate.to })}
+              className={CARD_LINK}
+            >
+              <p className="flex items-center justify-between gap-2 text-xs uppercase tracking-wide text-muted-foreground">
+                {rate.label}
+                <ChevronRight className="h-4 w-4 shrink-0" />
+              </p>
               <p className="tabular mt-1.5 font-display text-2xl font-bold text-foreground">
                 {percent(rate.rate)}
               </p>
               <p className="tabular mt-1 text-xs text-muted-foreground">
                 {counts[rate.to]} of {counts[rate.from]}
               </p>
-            </div>
+            </Link>
           ))}
         </div>
       </section>
@@ -363,18 +449,79 @@ export default async function FunnelPage({
       {/* -------------------------------------------------------- customers */}
 
       <section aria-labelledby="customers-heading" className="mt-8">
-        <h2 id="customers-heading" className="flex items-center gap-2 heading-3">
-          <Users className="h-4.5 w-4.5 text-accent-600" />
-          Customers
-        </h2>
-        <p className="mt-1.5 text-sm text-muted-foreground">
-          Anonymous browsing is included from the moment a shopper signs in — the events keep the
-          identity they had at the time, and the link resolves them.
-        </p>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 id="customers-heading" className="flex items-center gap-2 heading-3">
+              <Users className="h-4.5 w-4.5 text-accent-600" />
+              Customers
+            </h2>
+            <p className="mt-1.5 text-sm text-muted-foreground">
+              Anonymous browsing is included from the moment a shopper signs in — the events keep
+              the identity they had at the time, and the link resolves them. Click a row for the
+              customer&apos;s full journey.
+            </p>
+          </div>
+          {customers.length > 0 ? (
+            <DownloadLink
+              href={reportHref('/admin/funnel/export', range, {
+                table: 'customers',
+                ...customerParams,
+              })}
+              title="Every matching customer, not only the rows on screen"
+            />
+          ) : null}
+        </div>
+
+        {/* A plain GET form, so the filters land in the URL like the range does. */}
+        <form
+          action="/admin/funnel"
+          className="mt-3 flex flex-wrap items-end gap-2 rounded-lg border border-border bg-surface p-3"
+        >
+          <HiddenParams range={range} extra={{ segment: segmentParam }} />
+          <FilterField label="Search">
+            <Input
+              name="q"
+              defaultValue={customerFilters.q ?? ''}
+              placeholder="Name, email or phone"
+              aria-label="Search customers"
+              className="h-9 w-56"
+            />
+          </FilterField>
+          <FilterField label="Paid orders">
+            <Select name="paid" defaultValue={customerFilters.paid ?? ''} className="h-9 w-40">
+              <option value="">Any</option>
+              <option value="yes">Paid at least once</option>
+              <option value="no">Never paid</option>
+            </Select>
+          </FilterField>
+          <FilterField label="Sort by">
+            <Select name="sort" defaultValue={customerFilters.sort ?? 'paid'} className="h-9 w-44">
+              {CUSTOMER_ACTIVITY_SORTS.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </Select>
+          </FilterField>
+          <Button type="submit" variant="outline" size="sm" className="h-9">
+            <Search className="h-4 w-4" />
+            Apply
+          </Button>
+          {customersFiltered || customerFilters.sort ? (
+            <Link
+              href={reportHref('/admin/funnel', range, { segment: segmentParam })}
+              className="inline-flex h-9 items-center px-2 text-sm font-medium text-muted-foreground hover:text-foreground"
+            >
+              Clear
+            </Link>
+          ) : null}
+        </form>
 
         {customers.length === 0 ? (
           <p className="mt-3 rounded-lg border border-border bg-surface p-4 text-sm text-muted-foreground">
-            No customer activity in this period.
+            {customersFiltered
+              ? 'No customer matches these filters in this period.'
+              : 'No customer activity in this period.'}
           </p>
         ) : (
           <div className="mt-3 overflow-x-auto rounded-lg border border-border">
@@ -392,11 +539,14 @@ export default async function FunnelPage({
               </thead>
               <tbody className="divide-y divide-border bg-card">
                 {customers.map((row) => (
-                  <tr key={row.userId} className="transition-colors hover:bg-surface">
+                  <tr key={row.userId} className="relative transition-colors hover:bg-surface">
                     <td className="px-4 py-3">
                       <Link
                         href={`/admin/customers/${row.userId}`}
-                        className="font-semibold text-primary hover:text-accent-600 hover:underline"
+                        className={cn(
+                          'font-semibold text-primary hover:text-accent-600 hover:underline',
+                          ROW_LINK,
+                        )}
                       >
                         {row.fullName || row.email}
                       </Link>
@@ -420,6 +570,11 @@ export default async function FunnelPage({
             </table>
           </div>
         )}
+        {customers.length === CUSTOMER_ROWS ? (
+          <p className="mt-2 text-xs text-muted-foreground">
+            Showing the first {CUSTOMER_ROWS}. The CSV has every matching customer.
+          </p>
+        ) : null}
       </section>
     </div>
   );
