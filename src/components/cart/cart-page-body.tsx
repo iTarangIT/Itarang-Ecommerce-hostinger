@@ -168,12 +168,6 @@ export function CartPageBody({
                         Your cart is saved on this device and will still be here after you sign in.
                       </p>
                     )}
-
-                    <p className="mt-2 flex items-start gap-1.5 text-xs text-muted-foreground">
-                      <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                      Test mode — checkout runs against a local database with a simulated payment
-                      step. Nothing is charged.
-                    </p>
                   </>
                 ) : (
                   <>
