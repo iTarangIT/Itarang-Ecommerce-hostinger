@@ -33,6 +33,22 @@ export const COUPONS_ENABLED: boolean = true;
  */
 export const UPI_DISCOUNT: Paise = 20000;
 
+/** Whether one cart line counts towards a rule. Scopes add up: any match qualifies. */
+export function qualifies(
+  rule: Pick<CouponRule, 'categories' | 'subcategories' | 'products'>,
+  item: Pick<CartItem, 'category' | 'subcategory' | 'productId'>,
+): boolean {
+  const scoped = Boolean(
+    rule.categories?.length || rule.subcategories?.length || rule.products?.length,
+  );
+  if (!scoped) return true;
+  return Boolean(
+    rule.categories?.includes(item.category) ||
+      (item.subcategory !== undefined && rule.subcategories?.includes(item.subcategory)) ||
+      rule.products?.includes(item.productId),
+  );
+}
+
 /** What a shopper is told where the coupon field would be. */
 export const COUPONS_DISABLED_NOTE = 'Coupon codes are not active at the moment.';
 export interface CouponRule {
@@ -44,8 +60,14 @@ export interface CouponRule {
   maxDiscount?: Paise;
   minCart?: Paise;
   categories?: CategorySlug[];
-  /** Narrower than `categories`: the code applies only to these subcategories. */
+  /** The code applies to products in these subcategories. */
   subcategories?: string[];
+  /**
+   * Single products (product keys — `CartItem.productId`). An item qualifies
+   * when it is in a listed category, **or** a listed subcategory, **or** is a
+   * listed product; with none of the three set, every item qualifies.
+   */
+  products?: string[];
   description: string;
   /**
    * One redemption per customer, ever.
@@ -119,18 +141,15 @@ export function validateCoupon(
 
   if (items.length === 0) return { ok: false, reason: 'Add something to your cart first.' };
 
-  const qualifying = items.filter(
-    (i) =>
-      (!rule.categories || rule.categories.includes(i.category)) &&
-      (!rule.subcategories || (i.subcategory !== undefined && rule.subcategories.includes(i.subcategory))),
-  );
+  const qualifying = items.filter((i) => qualifies(rule, i));
 
   if (qualifying.length === 0) {
-    const scope = rule.subcategories
-      ? rule.subcategories.map((slug) => subcategoryName(slug).toLowerCase()).join(' or ')
-      : rule.categories
-        ? rule.categories.map((slug) => categoryName(slug).toLowerCase()).join(', ')
-        : 'eligible products';
+    const named = [
+      ...(rule.categories ?? []).map((slug) => categoryName(slug).toLowerCase()),
+      ...(rule.subcategories ?? []).map((slug) => subcategoryName(slug).toLowerCase()),
+    ];
+    const scope =
+      named.length > 0 && !rule.products?.length ? named.join(' or ') : 'selected products';
     return { ok: false, reason: `${normalised} applies only to ${scope}.` };
   }
 

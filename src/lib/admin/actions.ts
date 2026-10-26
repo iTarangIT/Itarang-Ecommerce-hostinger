@@ -34,6 +34,27 @@ async function requireAdminActor(): Promise<string> {
 }
 
 /**
+ * Where a status or delivery form returns to: the order page, or — for the
+ * Action button on the orders list — the list, with its filters kept. Only the
+ * list's own filter names are carried, so the field cannot redirect elsewhere.
+ */
+function returnPath(formData: FormData, orderNumber: string): string {
+  if (formData.get('returnTo') !== 'list') return `/admin/orders/${orderNumber}`;
+  const given = new URLSearchParams(String(formData.get('listQuery') ?? ''));
+  const keep = new URLSearchParams();
+  for (const key of ['q', 'status', 'payment', 'offset']) {
+    const value = given.get(key);
+    if (value) keep.set(key, value);
+  }
+  const query = keep.toString();
+  return query ? `/admin?${query}` : '/admin';
+}
+
+function withNotice(path: string, notice: string): string {
+  return `${path}${path.includes('?') ? '&' : '?'}notice=${encodeURIComponent(notice)}`;
+}
+
+/**
  * Move an order to its next fulfilment state.
  *
  * The transition is validated against the state machine, so the console cannot
@@ -47,7 +68,7 @@ export async function updateOrderStatusAction(formData: FormData): Promise<void>
   const note = String(formData.get('note') ?? '').trim().slice(0, 1000) || undefined;
   // Unticked "Show to customer" keeps the note on the admin page only.
   const customerVisible = formData.get('customerVisible') === 'on';
-  const back = `/admin/orders/${orderNumber}`;
+  const back = returnPath(formData, orderNumber);
 
   const repository = orders();
   const order = await repository.findByOrderNumber(orderNumber);
@@ -56,14 +77,14 @@ export async function updateOrderStatusAction(formData: FormData): Promise<void>
   // Said, not silently ignored: a stale tab can offer a move that is no
   // longer possible (the payment arrived, another admin shipped it).
   if (!canTransitionOrder(order.status, to)) {
-    redirect(`${back}?notice=${encodeURIComponent(`This order is ${order.status.replace(/_/g, ' ')} and cannot move to ${to.replace(/_/g, ' ')}. The page has been refreshed.`)}`);
+    redirect(withNotice(back, `This order is ${order.status.replace(/_/g, ' ')} and cannot move to ${to.replace(/_/g, ' ')}. The page has been refreshed.`));
   }
 
   // Courier details are saved with the move to Shipped, in one transaction.
   let shipment;
   if (to === 'shipped') {
     const parsed = parseShipment(formData);
-    if (!parsed.ok) redirect(`${back}?notice=${encodeURIComponent(parsed.error)}`);
+    if (!parsed.ok) redirect(withNotice(back, parsed.error));
     if (hasShipmentDetails(parsed.shipment)) shipment = parsed.shipment;
   }
 
@@ -72,26 +93,27 @@ export async function updateOrderStatusAction(formData: FormData): Promise<void>
   await repository.transitionOrderStatus(order.id, to, actor, note, { customerVisible, shipment });
 
   revalidatePath('/admin');
-  revalidatePath(back);
-  redirect(`${back}?notice=${encodeURIComponent(`Order moved to ${to.replace(/_/g, ' ')}.`)}`);
+  revalidatePath(`/admin/orders/${orderNumber}`);
+  redirect(withNotice(back, `${orderNumber} moved to ${to.replace(/_/g, ' ')}.`));
 }
 
 /** Courier and delivery details for a shipped order, entered or corrected later. */
 export async function updateShipmentAction(formData: FormData): Promise<void> {
   const actor = await requireAdminActor();
   const orderNumber = String(formData.get('orderNumber') ?? '');
-  const back = `/admin/orders/${orderNumber}`;
+  const back = returnPath(formData, orderNumber);
 
   const repository = orders();
   const order = await repository.findByOrderNumber(orderNumber);
   if (!order) return;
 
   const parsed = parseShipment(formData);
-  if (!parsed.ok) redirect(`${back}?notice=${encodeURIComponent(parsed.error)}`);
+  if (!parsed.ok) redirect(withNotice(back, parsed.error));
 
   await repository.updateShipment(order.id, parsed.shipment, actor);
-  revalidatePath(back);
-  redirect(`${back}?notice=${encodeURIComponent('Delivery details saved.')}`);
+  revalidatePath('/admin');
+  revalidatePath(`/admin/orders/${orderNumber}`);
+  redirect(withNotice(back, `Delivery details saved for ${orderNumber}.`));
 }
 
 /**

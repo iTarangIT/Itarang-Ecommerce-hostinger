@@ -27,6 +27,7 @@ interface CampaignRow {
   min_cart: number | null;
   categories: string[];
   subcategories: string[];
+  product_ids: string[];
   starts_at: Date | null;
   ends_at: Date | null;
   is_active: boolean;
@@ -41,7 +42,7 @@ interface CampaignRow {
 }
 
 const COLUMNS = `id, code, name, label, description, kind, value, max_discount, min_cart,
-  categories, subcategories, starts_at, ends_at, is_active, show_on_site,
+  categories, subcategories, product_ids, starts_at, ends_at, is_active, show_on_site,
   max_redemptions_total, max_per_customer, first_order_only, cities, states,
   customer_phones, customer_types`;
 
@@ -59,6 +60,7 @@ export function toCampaign(row: CampaignRow): Campaign {
     minCart: row.min_cart ?? undefined,
     categories: row.categories.length ? row.categories : undefined,
     subcategories: row.subcategories.length ? row.subcategories : undefined,
+    products: row.product_ids.length ? row.product_ids : undefined,
     oncePerCustomer: row.max_per_customer === 1,
     startsAt: row.starts_at,
     endsAt: row.ends_at,
@@ -247,15 +249,19 @@ export async function eligibilityContext(
 
 /* -------------------------------------------------------------- admin writes */
 
+/**
+ * Several values: an array (each ticked box or picked item, as `getAll` gives
+ * them — kept whole, so a name with a comma in it is never split), or typed
+ * text, one per line or comma-separated.
+ */
 const list = z
-  .string()
+  .union([z.array(z.string()), z.string()])
   .optional()
   .default('')
   .transform((value) =>
-    value
-      .split(/[\n,]+/)
-      .map((item) => item.trim())
-      .filter(Boolean),
+    [...new Set((Array.isArray(value) ? value : value.split(/[\n,]+/)).map((item) => item.trim()))].filter(
+      Boolean,
+    ),
   );
 
 const rupees = z
@@ -300,6 +306,7 @@ export const campaignInputSchema = z
     minCart: rupees,
     categories: list,
     subcategories: list,
+    productIds: list,
     startsAt: istDate,
     endsAt: istDate,
     isActive: z.boolean(),
@@ -362,6 +369,7 @@ function params(input: CampaignInput, actor: string): unknown[] {
     input.customerPhones,
     input.customerTypes,
     actor,
+    input.productIds,
   ];
 }
 
@@ -379,9 +387,9 @@ export async function createCampaign(input: CampaignInput, actor: string): Promi
          (code, name, label, description, kind, value, max_discount, min_cart, categories,
           subcategories, starts_at, ends_at, is_active, show_on_site, max_redemptions_total,
           max_per_customer, first_order_only, cities, states, customer_phones, customer_types,
-          created_by, updated_by)
+          created_by, updated_by, product_ids)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
-               $19, $20, $21, $22, $22)
+               $19, $20, $21, $22, $22, $23)
        RETURNING id`,
       params(input, actor),
     );
@@ -404,8 +412,8 @@ export async function updateCampaign(
               starts_at = $11, ends_at = $12, is_active = $13, show_on_site = $14,
               max_redemptions_total = $15, max_per_customer = $16, first_order_only = $17,
               cities = $18, states = $19, customer_phones = $20, customer_types = $21,
-              updated_by = $22, updated_at = now()
-        WHERE id = $23
+              updated_by = $22, product_ids = $23, updated_at = now()
+        WHERE id = $24
         RETURNING id`,
       [...params(input, actor), id],
     );
@@ -488,6 +496,7 @@ export async function listSiteCoupons(now = new Date()): Promise<SiteCoupon[]> {
       minCart: campaign.minCart,
       categories: campaign.categories,
       subcategories: campaign.subcategories,
+      products: campaign.products,
       description: campaign.description,
       oncePerCustomer: campaign.oncePerCustomer,
     }));

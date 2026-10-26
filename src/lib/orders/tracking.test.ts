@@ -87,4 +87,16 @@ describe('trackView', () => {
   it('lists only statuses an order can reach, Packed included', () => {
     expect(TRACK_STEPS.map((s) => s.key)).toEqual(['placed', 'confirmed', 'packed', 'shipped', 'delivered']);
   });
+
+  it('marks a step the order went past as skipped, not blank', () => {
+    const view = trackView('shipped', placedAt, [], {
+      confirmedAt: '2026-10-20T11:00:00.000Z',
+      shippedAt: '2026-10-21T15:00:00.000Z',
+    });
+    const packed = view.steps.find((step) => step.key === 'packed')!;
+    expect(packed.state).toBe('done');
+    expect(packed.at).toBeUndefined();
+    expect(packed.skipped).toBe(true);
+    expect(view.steps.find((step) => step.key === 'confirmed')!.skipped).toBeUndefined();
+  });
 });

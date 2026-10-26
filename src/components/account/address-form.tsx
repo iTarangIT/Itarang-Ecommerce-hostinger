@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState } from 'react';
+import { useActionState, useState } from 'react';
 import { AlertCircle, Loader2, Save } from 'lucide-react';
 import {
   addAddressAction,
@@ -11,6 +11,7 @@ import type { CustomerAddress } from '@/lib/account/addresses';
 import { STATES } from '@/lib/checkout/validation';
 import { Button } from '@/components/ui/button';
 import { Field, Input, Select } from '@/components/ui/field';
+import { CitySelect } from '@/components/ui/city-select';
 
 /**
  * Add or edit one saved address.
@@ -46,6 +47,9 @@ export function AddressForm({
     },
     null,
   );
+
+  const [placeState, setPlaceState] = useState(address?.state ?? '');
+  const [city, setCity] = useState(address?.city ?? '');
 
   const fieldError = (name: string) =>
     state && !state.ok ? state.fields?.[name] : undefined;
@@ -111,23 +115,17 @@ export function AddressForm({
       </Field>
 
       <div className="grid gap-4 sm:grid-cols-3">
-        <Field label="City" htmlFor="city" required error={fieldError('city')}>
-          <Input
-            id="city"
-            name="city"
-            autoComplete="address-level2"
-            required
-            defaultValue={address?.city ?? ''}
-          />
-        </Field>
-
         <Field label="State" htmlFor="state" required error={fieldError('state')}>
           <Select
             id="state"
             name="state"
             autoComplete="address-level1"
             required
-            defaultValue={address?.state ?? ''}
+            value={placeState}
+            onChange={(event) => {
+              setPlaceState(event.target.value);
+              setCity('');
+            }}
           >
             <option value="" disabled>
               Select a state
@@ -138,6 +136,10 @@ export function AddressForm({
               </option>
             ))}
           </Select>
+        </Field>
+
+        <Field label="City" htmlFor="city" required error={fieldError('city')}>
+          <CitySelect id="city" name="city" state={placeState} value={city} onChange={setCity} required />
         </Field>
 
         <Field label="Pincode" htmlFor="pincode" required error={fieldError('pincode')}>

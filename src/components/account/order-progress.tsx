@@ -1,6 +1,6 @@
 import { Check, CheckCircle2, Clock, CreditCard, MapPin, Package, Truck, XCircle } from 'lucide-react';
-import type { StepKey, TrackView } from '@/lib/orders/tracking';
-import { cn, formatDate } from '@/lib/utils';
+import type { StepKey, TrackStep, TrackView } from '@/lib/orders/tracking';
+import { cn, formatDateTime } from '@/lib/utils';
 
 const ICON: Record<StepKey, typeof Package> = {
   placed: CreditCard,
@@ -45,7 +45,7 @@ export function OrderProgress({ view }: { view: TrackView }) {
                 {step.label}
               </span>
               <span className="mt-0.5 px-1 text-xs text-muted-foreground">
-                {step.at ? formatDate(step.at) : step.state === 'current' ? 'Now' : ' '}
+                {stepWhen(step, ' ')}
               </span>
             </li>
           );
@@ -78,7 +78,7 @@ export function OrderProgress({ view }: { view: TrackView }) {
                   {step.label}
                 </span>
                 <span className="block text-xs text-muted-foreground">
-                  {step.at ? formatDate(step.at) : step.state === 'current' ? 'Now' : step.detail}
+                  {stepWhen(step, step.detail)}
                 </span>
               </span>
             </li>
@@ -87,6 +87,13 @@ export function OrderProgress({ view }: { view: TrackView }) {
       </ol>
     </div>
   );
+}
+
+/** Under each step: when it happened, "Skipped", "Now", or the fallback. */
+function stepWhen(step: TrackStep, fallback: string): string {
+  if (step.at) return formatDateTime(step.at);
+  if (step.skipped) return 'Skipped';
+  return step.state === 'current' ? 'Now' : fallback;
 }
 
 function StepDot({

@@ -17,6 +17,7 @@ import {
 } from './notifications';
 import { setStockNotificationsEnabled, stockNotificationSettingsOf } from './settings';
 import { latestRestock } from './transitions';
+import { logAdminEvent } from '@/lib/admin/audit';
 
 /**
  * Admin actions for stock notifications.
@@ -166,6 +167,15 @@ export async function sendBackInStockAction(
     });
   }
 
+  await logAdminEvent({
+    entityType: 'stock',
+    entityId: parsed.data.productKey,
+    label: product.title,
+    action: 'Sent back-in-stock emails',
+    actor,
+    summary: `${delivered.length} sent, ${skipped} already told, ${failed} failed`,
+  });
+
   revalidatePath(OUT_OF_STOCK);
   revalidatePath(`/admin/products/${parsed.data.productKey}`);
 
@@ -221,7 +231,13 @@ export async function setStockNotificationsAction(formData: FormData): Promise<v
   const actor = await requireAdminActor();
   // A checkbox is absent from the form data when unticked, which is exactly the
   // shape needed: present means on.
-  await setStockNotificationsEnabled(formData.get('enabled') === 'on', actor);
+  const enabled = formData.get('enabled') === 'on';
+  await setStockNotificationsEnabled(enabled, actor);
+  await logAdminEvent({
+    entityType: 'stock',
+    action: enabled ? 'Turned stock emails on' : 'Turned stock emails off',
+    actor,
+  });
   revalidatePath(OUT_OF_STOCK);
   redirect(`${OUT_OF_STOCK}?saved=1`);
 }

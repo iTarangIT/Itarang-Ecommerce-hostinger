@@ -65,6 +65,11 @@ export interface TrackStep {
   state: StepState;
   /** When the order reached this step, if the timeline records it. */
   at?: string;
+  /**
+   * Passed without stopping there — Packed, when the order went straight from
+   * Confirmed to Shipped. Shown as "Skipped" rather than a blank date.
+   */
+  skipped?: boolean;
 }
 
 export interface TrackView {
@@ -164,7 +169,14 @@ export function trackView(
         : index === currentIndex
           ? 'current'
           : 'upcoming';
-    return { ...step, state, at: state === 'upcoming' ? undefined : dateFor(step.key) };
+    const at = state === 'upcoming' ? undefined : dateFor(step.key);
+    // Done, undated, and a later step is dated: the order went past it.
+    const skipped =
+      state === 'done' &&
+      !at &&
+      step.key !== 'placed' &&
+      TRACK_STEPS.slice(index + 1).some((later) => Boolean(dateFor(later.key)));
+    return { ...step, state, at, ...(skipped ? { skipped } : {}) };
   });
 
   const headline = awaitingPayment

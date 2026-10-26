@@ -13,6 +13,7 @@ import {
   updateCategory,
   type CategoryWriteResult,
 } from '@/lib/catalog/category-admin';
+import { logAdminEvent } from './audit';
 
 /**
  * Category management. Each action re-checks the admin role (a Server Action
@@ -47,26 +48,36 @@ function parse(formData: FormData) {
 }
 
 export async function createCategoryAction(formData: FormData): Promise<void> {
-  await requireAdminActor();
+  const actor = await requireAdminActor();
   const parsed = parse(formData);
   if (!parsed.success) {
     redirect(`${PAGE}?error=${encodeURIComponent(parsed.error.issues.map((i) => i.message).join(' '))}`);
   }
-  finish(await createCategory(parsed.data), `Added “${parsed.data.name}”.`);
+  const result = await createCategory(parsed.data);
+  if (result.ok) await logCategory(actor, 'Created category', parsed.data.slug, parsed.data.name);
+  finish(result, `Added “${parsed.data.name}”.`);
 }
 
 export async function updateCategoryAction(formData: FormData): Promise<void> {
-  await requireAdminActor();
+  const actor = await requireAdminActor();
   const parsed = parse(formData);
   if (!parsed.success) {
     redirect(`${PAGE}?error=${encodeURIComponent(parsed.error.issues.map((i) => i.message).join(' '))}`);
   }
-  finish(await updateCategory(parsed.data), `Saved “${parsed.data.name}”.`);
+  const result = await updateCategory(parsed.data);
+  if (result.ok) await logCategory(actor, 'Edited category', parsed.data.slug, parsed.data.name);
+  finish(result, `Saved “${parsed.data.name}”.`);
 }
 
 export async function deleteCategoryAction(formData: FormData): Promise<void> {
-  await requireAdminActor();
+  const actor = await requireAdminActor();
   const slug = String(formData.get('slug') ?? '').trim();
   if (!slug) redirect(PAGE);
-  finish(await deleteCategory(slug), 'Category deleted.');
+  const result = await deleteCategory(slug);
+  if (result.ok) await logCategory(actor, 'Deleted category', slug, slug);
+  finish(result, 'Category deleted.');
+}
+
+async function logCategory(actor: string, action: string, slug: string, name: string): Promise<void> {
+  await logAdminEvent({ entityType: 'category', entityId: slug, label: name, action, actor });
 }

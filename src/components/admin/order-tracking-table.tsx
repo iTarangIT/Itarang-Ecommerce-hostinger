@@ -324,6 +324,22 @@ export function OrderTrackingTable({
                             ? 'Waiting for payment'
                             : TRACK_STEPS[view.currentIndex].label}
                       </span>
+                      {view.steps[view.currentIndex]?.at ? (
+                        <span className="tabular block text-2xs text-muted-foreground">
+                          {istDateTime(view.steps[view.currentIndex].at!)}
+                        </span>
+                      ) : null}
+                      {order.shipment.courierName || order.shipment.trackingNumber ? (
+                        <span className="mt-1 block text-2xs text-muted-foreground">
+                          {[order.shipment.courierName, order.shipment.trackingNumber].filter(Boolean).join(' · ')}
+                        </span>
+                      ) : null}
+                      {order.shipment.deliveryPerson ? (
+                        <span className="block text-2xs text-muted-foreground">
+                          {order.shipment.deliveryPerson}
+                          {order.shipment.deliveryPhone ? ` · ${order.shipment.deliveryPhone}` : ''}
+                        </span>
+                      ) : null}
                     </td>
                     <td className="tabular whitespace-nowrap px-4 py-3 text-muted-foreground">
                       {istDateTime(order.updatedAt)}
