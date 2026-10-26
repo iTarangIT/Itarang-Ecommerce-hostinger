@@ -59,6 +59,13 @@ export async function POST(request: Request, { params }: Params) {
     return backToOrder(order.orderNumber, 'An invoice can be added once the payment is received.');
   }
 
+  // Refused from the declared size before reading: an oversized body is
+  // truncated by Next.js and would otherwise fail as an unreadable upload.
+  const declared = Number(request.headers.get('content-length') ?? 0);
+  if (declared > MAX_INVOICE_BYTES + 64 * 1024) {
+    return backToOrder(order.orderNumber, 'That file is too large (limit 8 MB).');
+  }
+
   let formData: FormData;
   try {
     formData = await request.formData();
@@ -71,7 +78,7 @@ export async function POST(request: Request, { params }: Params) {
     return backToOrder(order.orderNumber, 'Choose the invoice PDF to upload.');
   }
   if (file.size > MAX_INVOICE_BYTES) {
-    return backToOrder(order.orderNumber, 'That file is too large (limit 10 MB).');
+    return backToOrder(order.orderNumber, 'That file is too large (limit 8 MB).');
   }
 
   const content = Buffer.from(await file.arrayBuffer());
