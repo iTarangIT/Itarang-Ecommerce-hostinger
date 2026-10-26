@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
 import { updateCampaignAction } from '@/lib/admin/campaign-actions';
 import { loadCategoryOptions } from '@/lib/catalog/category-store';
+import { campaignProductOptions } from '@/lib/offers/campaign-products';
 import { findCampaignById } from '@/lib/offers/campaign-store';
 import { CampaignForm } from '@/components/admin/campaign-form';
 import { Notice } from '@/components/admin/service-nav';
@@ -26,9 +27,10 @@ export default async function EditCampaignPage({
   const campaignId = Number(id);
   if (!Number.isInteger(campaignId) || campaignId <= 0) notFound();
 
-  const [campaign, categories] = await Promise.all([
+  const [campaign, categories, products] = await Promise.all([
     findCampaignById(campaignId),
     loadCategoryOptions(),
+    campaignProductOptions(),
   ]);
   if (!campaign) notFound();
 
@@ -50,6 +52,7 @@ export default async function EditCampaignPage({
       <CampaignForm
         campaign={campaign}
         categories={categories}
+        products={products}
         action={updateCampaignAction}
         submitLabel="Save campaign"
       />

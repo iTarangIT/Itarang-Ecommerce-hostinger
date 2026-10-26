@@ -14,6 +14,7 @@ import { dispatchStockAlertsInBackground } from '@/lib/stock/alerts';
 import { slugify } from '@/lib/utils';
 import { SKU_RULE, isValidSku, repeatedVariantField } from '@/lib/products/sku-rules';
 import { categoryPairError, loadCategoryOptions } from '@/lib/catalog/category-store';
+import { diffFields, diffVariants, logAdminEvent, type FieldChange } from './audit';
 import {
   ALLOWED_MEDIA_TYPES,
   MAX_MEDIA_BYTES,
@@ -26,6 +27,7 @@ import {
   PRODUCT_MEDIA_ROLES,
   PRODUCT_STATUSES,
   type ProductMediaRole,
+  type ProductRecord,
   type ProductStatus,
   type ProductWriteResult,
   type VariantInput,
@@ -132,6 +134,52 @@ function settle(productKey: string, tab: string, result: ProductWriteResult<unkn
         error: `Not ready to publish. Still missing: ${result.missing.join(', ')}.`,
       });
   }
+}
+
+/**
+ * Record a successful save in Logs → Product log, then hand the result on to
+ * `settle`. A failed save is not logged: nothing changed.
+ */
+async function logged<T extends ProductWriteResult<unknown>>(
+  result: T,
+  entry: {
+    actor: string;
+    productKey: string;
+    action: string;
+    before?: ProductRecord | null;
+    changes?: FieldChange[];
+  },
+): Promise<T> {
+  if (result.ok) {
+    await logAdminEvent({
+      entityType: 'product',
+      entityId: entry.productKey,
+      label: entry.before?.title ?? entry.productKey,
+      action: entry.action,
+      actor: entry.actor,
+      changes: entry.changes ?? [],
+    });
+  }
+  return result;
+}
+
+/** The product as it is before an edit, for the old → new columns of the log. */
+async function snapshot(productKey: string): Promise<ProductRecord | null> {
+  try {
+    return await productRepository().findByKey(productKey);
+  } catch {
+    return null;
+  }
+}
+
+/** A product's top-level fields, flattened so `diffFields` can compare a patch against them. */
+function flat(product: ProductRecord | null): Record<string, unknown> | null {
+  if (!product) return null;
+  return {
+    ...product,
+    manufacturerId: product.manufacturer?.id ?? null,
+    sellerId: product.seller?.id ?? null,
+  };
 }
 
 /* ------------------------------------------------------------------ schemas */
@@ -257,6 +305,14 @@ export async function createProductAction(formData: FormData): Promise<void> {
       actor,
     );
     if (result.ok) {
+      await logAdminEvent({
+        entityType: 'product',
+        entityId: slug,
+        label: parsed.data.title,
+        action: 'Created',
+        actor,
+        summary: `Category ${parsed.data.category} / ${parsed.data.subcategory}`,
+      });
       publishCatalogueChange();
       revalidatePath('/admin/products');
       backTo(slug, 'information', { saved: '1' });
@@ -319,7 +375,18 @@ export async function updateProductInformationAction(formData: FormData): Promis
   const { productKey, ...patch } = parsed.data;
   const categoryError = await checkCategory(patch.category, patch.subcategory);
   if (categoryError) backTo(productKey, 'information', { error: categoryError });
-  settle(productKey, 'information', await productRepository().updateProduct(productKey, patch, actor));
+  const before = await snapshot(productKey);
+  settle(
+    productKey,
+    'information',
+    await logged(await productRepository().updateProduct(productKey, patch, actor), {
+      actor,
+      productKey,
+      action: 'Edited information',
+      before,
+      changes: diffFields(flat(before), patch),
+    }),
+  );
 }
 
 /* ------------------------------------------------------------------ facets */
@@ -372,14 +439,18 @@ export async function updateProductFacetsAction(formData: FormData): Promise<voi
     (BADGE_KINDS as string[]).includes(badge),
   );
 
+  const before = await snapshot(productKey);
+  const facetPatch = { facets, badges: selected, popularityRank };
   settle(
     productKey,
     'facets',
-    await productRepository().updateProduct(
-      productKey,
-      { facets, badges: selected, popularityRank },
+    await logged(await productRepository().updateProduct(productKey, facetPatch, actor), {
       actor,
-    ),
+      productKey,
+      action: 'Edited filters and badges',
+      before,
+      changes: diffFields(flat(before), facetPatch),
+    }),
   );
 }
 
@@ -405,21 +476,28 @@ export async function updateProductContentAction(formData: FormData): Promise<vo
   }
 
   const care = parseLines(parsed.data.careInstructions);
+  const contentPatch = {
+    highlights: parseLines(parsed.data.highlights),
+    description: parseParagraphs(parsed.data.description),
+    boxContents: parseLines(parsed.data.boxContents),
+    // null rather than [], so the PDP renders no care block at all rather
+    // than an empty heading.
+    careInstructions: care.length > 0 ? care : null,
+  };
+  const before = await snapshot(parsed.data.productKey);
 
   settle(
     parsed.data.productKey,
     'content',
-    await productRepository().updateProduct(
-      parsed.data.productKey,
+    await logged(
+      await productRepository().updateProduct(parsed.data.productKey, contentPatch, actor),
       {
-        highlights: parseLines(parsed.data.highlights),
-        description: parseParagraphs(parsed.data.description),
-        boxContents: parseLines(parsed.data.boxContents),
-        // null rather than [], so the PDP renders no care block at all rather
-        // than an empty heading.
-        careInstructions: care.length > 0 ? care : null,
+        actor,
+        productKey: parsed.data.productKey,
+        action: 'Edited content',
+        before,
+        changes: diffFields(flat(before), contentPatch),
       },
-      actor,
     ),
   );
 }
@@ -431,7 +509,24 @@ export async function updateProductSpecsAction(formData: FormData): Promise<void
   const productKey = productKeySchema.parse(formData.get('productKey'));
   const groups = parseSpecGroups(String(formData.get('specs') ?? ''));
 
-  settle(productKey, 'specs', await productRepository().replaceSpecGroups(productKey, groups, actor));
+  const before = await snapshot(productKey);
+  settle(
+    productKey,
+    'specs',
+    await logged(await productRepository().replaceSpecGroups(productKey, groups, actor), {
+      actor,
+      productKey,
+      action: 'Edited specifications',
+      before,
+      changes: [
+        {
+          field: 'Specification groups',
+          from: String(before?.specGroups.length ?? 0),
+          to: String(groups.length),
+        },
+      ],
+    }),
+  );
 }
 
 /* --------------------------------------------------------------------- faq */
@@ -441,7 +536,18 @@ export async function updateProductFaqsAction(formData: FormData): Promise<void>
   const productKey = productKeySchema.parse(formData.get('productKey'));
   const faqs = parseFaqs(String(formData.get('faqs') ?? ''));
 
-  settle(productKey, 'faq', await productRepository().replaceFaqs(productKey, faqs, actor));
+  const before = await snapshot(productKey);
+  settle(
+    productKey,
+    'faq',
+    await logged(await productRepository().replaceFaqs(productKey, faqs, actor), {
+      actor,
+      productKey,
+      action: 'Edited FAQs',
+      before,
+      changes: [{ field: 'FAQs', from: String(before?.faqs.length ?? 0), to: String(faqs.length) }],
+    }),
+  );
 }
 
 /* ---------------------------------------------------------------- sections */
@@ -480,10 +586,20 @@ export async function updateProductSectionsAction(formData: FormData): Promise<v
     if (items.length) sections.push({ kind, items });
   }
 
+  const before = await snapshot(productKey);
   settle(
     productKey,
     'sections',
-    await productRepository().replaceSections(productKey, sections, actor),
+    await logged(await productRepository().replaceSections(productKey, sections, actor), {
+      actor,
+      productKey,
+      action: 'Edited page sections',
+      before,
+      changes: diffFields(
+        { sections: before?.sections.map((section) => section.kind) },
+        { sections: sections.map((section) => section.kind) },
+      ),
+    }),
   );
 }
 
@@ -509,7 +625,18 @@ export async function updateProductWarrantyAction(formData: FormData): Promise<v
   }
 
   const { productKey, ...patch } = parsed.data;
-  settle(productKey, 'warranty', await productRepository().updateProduct(productKey, patch, actor));
+  const before = await snapshot(productKey);
+  settle(
+    productKey,
+    'warranty',
+    await logged(await productRepository().updateProduct(productKey, patch, actor), {
+      actor,
+      productKey,
+      action: 'Edited warranty',
+      before,
+      changes: diffFields(flat(before), patch),
+    }),
+  );
 }
 
 /* ----------------------------------------------------------------- pricing */
@@ -605,6 +732,7 @@ export async function updateProductPricingAction(formData: FormData): Promise<vo
   // could fail the variant write *after* the tax fields had committed —
   // leaving a product taxed at the new rate, priced at the old one, and an
   // error on screen implying nothing had been saved.
+  const before = await snapshot(productKey);
   const result = await productRepository().updatePricing(
     productKey,
     {
@@ -631,7 +759,24 @@ export async function updateProductPricingAction(formData: FormData): Promise<vo
     await syncCheckoutStock(productKey, variants);
   }
 
-  settle(productKey, 'pricing', result);
+  settle(
+    productKey,
+    'pricing',
+    await logged(result, {
+      actor,
+      productKey,
+      action: 'Edited prices and stock',
+      before,
+      changes: [
+        ...diffFields(flat(before), {
+          hsnCode,
+          taxRate: taxRatePercent === null ? null : taxRatePercent / 100,
+          emiEnabled,
+        }),
+        ...diffVariants(before, variants),
+      ],
+    }),
+  );
 }
 
 /**
@@ -684,10 +829,20 @@ export async function updateProductPartiesAction(formData: FormData): Promise<vo
   }
 
   const { productKey, manufacturerId, sellerId } = parsed.data;
+  const before = await snapshot(productKey);
   settle(
     productKey,
     'parties',
-    await productRepository().updateProduct(productKey, { manufacturerId, sellerId }, actor),
+    await logged(
+      await productRepository().updateProduct(productKey, { manufacturerId, sellerId }, actor),
+      {
+        actor,
+        productKey,
+        action: 'Edited manufacturer and seller',
+        before,
+        changes: diffFields(flat(before), { manufacturerId, sellerId }),
+      },
+    ),
   );
 }
 
@@ -712,7 +867,18 @@ export async function updateProductSeoAction(formData: FormData): Promise<void> 
   }
 
   const { productKey, ...patch } = parsed.data;
-  settle(productKey, 'seo', await productRepository().updateProduct(productKey, patch, actor));
+  const before = await snapshot(productKey);
+  settle(
+    productKey,
+    'seo',
+    await logged(await productRepository().updateProduct(productKey, patch, actor), {
+      actor,
+      productKey,
+      action: 'Edited SEO and URL',
+      before,
+      changes: diffFields(flat(before), patch),
+    }),
+  );
 }
 
 /* ------------------------------------------------------------------ status */
@@ -726,7 +892,18 @@ export async function setProductStatusAction(formData: FormData): Promise<void> 
     backTo(productKey, 'information', { error: 'Unknown status.' });
   }
 
-  const result = await productRepository().setStatus(productKey, status as ProductStatus, actor);
+  const before = await snapshot(productKey);
+  const result = await logged(
+    await productRepository().setStatus(productKey, status as ProductStatus, actor),
+    {
+      actor,
+      productKey,
+      action:
+        status === 'published' ? 'Published' : status === 'archived' ? 'Archived' : 'Moved to draft',
+      before,
+      changes: diffFields(flat(before), { status }),
+    },
+  );
 
   if (result.ok) {
     // The storefront's own pages have to be revalidated too: publishing is the
@@ -795,16 +972,25 @@ export async function uploadProductMediaAction(formData: FormData): Promise<void
   settle(
     productKey,
     'media',
-    await productRepository().addMedia(
-      productKey,
+    await logged(
+      await productRepository().addMedia(
+        productKey,
+        {
+          storagePath,
+          altText: String(formData.get('altText') ?? '').trim(),
+          role,
+          mime: file.type,
+          bytes: file.size,
+        },
+        actor,
+      ),
       {
-        storagePath,
-        altText: String(formData.get('altText') ?? '').trim(),
-        role,
-        mime: file.type,
-        bytes: file.size,
+        actor,
+        productKey,
+        action: 'Added image',
+        before: await snapshot(productKey),
+        changes: [{ field: 'Image', from: '—', to: `${file.name} (${role})` }],
       },
-      actor,
     ),
   );
 }
@@ -818,16 +1004,19 @@ export async function updateProductMediaAction(formData: FormData): Promise<void
   settle(
     productKey,
     'media',
-    await productRepository().updateMedia(
-      productKey,
-      mediaId,
-      {
-        altText: String(formData.get('altText') ?? '').trim(),
-        role: (PRODUCT_MEDIA_ROLES as string[]).includes(roleValue)
-          ? (roleValue as ProductMediaRole)
-          : undefined,
-      },
-      actor,
+    await logged(
+      await productRepository().updateMedia(
+        productKey,
+        mediaId,
+        {
+          altText: String(formData.get('altText') ?? '').trim(),
+          role: (PRODUCT_MEDIA_ROLES as string[]).includes(roleValue)
+            ? (roleValue as ProductMediaRole)
+            : undefined,
+        },
+        actor,
+      ),
+      { actor, productKey, action: 'Edited image details', before: await snapshot(productKey) },
     ),
   );
 }
@@ -865,10 +1054,13 @@ export async function moveProductMediaAction(formData: FormData): Promise<void> 
   settle(
     productKey,
     'media',
-    await productRepository().reorderMedia(
-      productKey,
-      ordered.map((media) => media.id),
-      actor,
+    await logged(
+      await productRepository().reorderMedia(
+        productKey,
+        ordered.map((media) => media.id),
+        actor,
+      ),
+      { actor, productKey, action: 'Reordered images', before: product },
     ),
   );
 }
@@ -881,7 +1073,12 @@ export async function setPrimaryProductMediaAction(formData: FormData): Promise<
   settle(
     productKey,
     'media',
-    await productRepository().setPrimaryMedia(productKey, mediaId, actor),
+    await logged(await productRepository().setPrimaryMedia(productKey, mediaId, actor), {
+      actor,
+      productKey,
+      action: 'Changed main image',
+      before: await snapshot(productKey),
+    }),
   );
 }
 
@@ -890,7 +1087,12 @@ export async function deleteProductMediaAction(formData: FormData): Promise<void
   const productKey = productKeySchema.parse(formData.get('productKey'));
   const mediaId = Number(formData.get('mediaId'));
 
-  const result = await productRepository().deleteMedia(productKey, mediaId, actor);
+  const result = await logged(await productRepository().deleteMedia(productKey, mediaId, actor), {
+    actor,
+    productKey,
+    action: 'Deleted image',
+    before: await snapshot(productKey),
+  });
 
   if (result.ok) {
     // Best effort, and deliberately not fatal. The row is already gone, so the

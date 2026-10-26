@@ -33,6 +33,7 @@ import { useCart } from '@/lib/store/hooks';
 import { useUI } from '@/lib/store/ui-provider';
 import { Button, ButtonLink } from '@/components/ui/button';
 import { Checkbox, Field, Input, Select } from '@/components/ui/field';
+import { CitySelect } from '@/components/ui/city-select';
 import { StateBlock } from '@/components/ui/states';
 import { OrderSummaryPanel } from './order-summary-panel';
 import { RazorpayPanel } from './razorpay-panel';
@@ -795,26 +796,12 @@ export function CheckoutFlow({
                 />
               </Field>
 
-              <Field label="City" htmlFor="city" required error={fieldErrors.city}>
-                <Input
-                  id="city"
-                  value={address.city}
-                  onChange={(e) => setAddress({ ...address, city: e.target.value })}
-                  autoComplete="address-level2"
-                />
-              </Field>
-
-              <Field
-                label="State"
-                htmlFor="state"
-                required
-                error={fieldErrors.state}
-                className="sm:col-span-2"
-              >
+              <Field label="State" htmlFor="state" required error={fieldErrors.state}>
                 <Select
                   id="state"
                   value={address.state}
-                  onChange={(e) => setAddress({ ...address, state: e.target.value })}
+                  // A city belongs to its state: changing the state clears it.
+                  onChange={(e) => setAddress({ ...address, state: e.target.value, city: '' })}
                 >
                   <option value="">Select a state…</option>
                   {STATES.map((entry) => (
@@ -823,6 +810,15 @@ export function CheckoutFlow({
                     </option>
                   ))}
                 </Select>
+              </Field>
+
+              <Field label="City" htmlFor="city" required error={fieldErrors.city} className="sm:col-span-2">
+                <CitySelect
+                  id="city"
+                  state={address.state}
+                  value={address.city}
+                  onChange={(city) => setAddress({ ...address, city })}
+                />
               </Field>
             </div>
 

@@ -142,8 +142,56 @@ describe('a campaign prices the cart through validateCoupon', () => {
     expect(validateCoupon('DIWALI10', [item({})], [rule])).toMatchObject({ ok: false });
   });
 
+  it('adds categories, subcategories and single products together', () => {
+    const rule = campaign({ subcategories: ['home-inverter'], products: ['charger-1350'] });
+    const inverter = item({ id: 'inv:default', productId: 'inv', category: 'batteries', subcategory: 'home-inverter' });
+    const charger = item({
+      id: 'charger-1350:default',
+      productId: 'charger-1350',
+      category: 'chargers',
+      subcategory: 'ev-chargers',
+      price: { mrp: 2_000_000, selling: 1_000_000 },
+    });
+    const other = item({ id: 'ev:default', productId: 'ev' });
+    // 10% of the inverter (₹50,000) and the charger (₹10,000); the 3W battery does not count.
+    expect(validateCoupon('DIWALI10', [inverter, charger, other], [rule])).toMatchObject({
+      ok: true,
+      coupon: { discount: 600_000 },
+    });
+  });
+
+  it('counts a whole category even when one of its sub-categories is also ticked', () => {
+    const rule = campaign({ categories: ['batteries'], subcategories: ['home-inverter'] });
+    expect(validateCoupon('DIWALI10', [item({})], [rule])).toMatchObject({ ok: true });
+  });
+
+  it('applies to a single product only', () => {
+    const rule = campaign({ products: ['inv'] });
+    expect(validateCoupon('DIWALI10', [item({})], [rule])).toMatchObject({
+      ok: false,
+      reason: expect.stringMatching(/selected products/),
+    });
+    expect(validateCoupon('DIWALI10', [item({ productId: 'inv' })], [rule])).toMatchObject({ ok: true });
+  });
+
   it('is unknown when the campaign is not passed in', () => {
     expect(validateCoupon('DIWALI10', [item({})], [])).toMatchObject({ ok: false, reason: expect.stringMatching(/not a valid code/) });
+  });
+});
+
+describe('city matching', () => {
+  it('treats a renamed city and its old name as the same place', () => {
+    const gurugram = campaign({ cities: ['Gurugram'] });
+    expect(campaignIneligibility(gurugram, { now: NOW, city: 'gurgaon' })).toBeNull();
+    const fromList = campaign({ cities: ['Gurgaon', 'Bangalore'] });
+    expect(campaignIneligibility(fromList, { now: NOW, city: 'Gurugram ' })).toBeNull();
+    expect(campaignIneligibility(fromList, { now: NOW, city: 'Bengaluru' })).toBeNull();
+    expect(campaignIneligibility(fromList, { now: NOW, city: 'Noida' })).toMatch(/only to deliveries/);
+  });
+
+  it('names at most five places in the refusal', () => {
+    const many = campaign({ cities: ['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7'] });
+    expect(campaignIneligibility(many, { now: NOW, city: 'Z' })).toMatch(/A5 and 2 more\.$/);
   });
 });
 
@@ -158,6 +206,19 @@ describe('campaignInputSchema', () => {
     showOnSite: false,
     firstOrderOnly: false,
     ...patch,
+  });
+
+  it('keeps picked values whole and drops repeats', () => {
+    const parsed = campaignInputSchema.parse(
+      form({
+        states: ['Dadra and Nagar Haveli and Daman and Diu', 'Haryana', 'Haryana'],
+        cities: ['Gurgaon', ' Faridabad '],
+        productIds: ['inv-150ah'],
+      }),
+    );
+    expect(parsed.states).toEqual(['Dadra and Nagar Haveli and Daman and Diu', 'Haryana']);
+    expect(parsed.cities).toEqual(['Gurgaon', 'Faridabad']);
+    expect(parsed.productIds).toEqual(['inv-150ah']);
   });
 
   it('upper-cases the code and parses rupees, lists and dates', () => {
