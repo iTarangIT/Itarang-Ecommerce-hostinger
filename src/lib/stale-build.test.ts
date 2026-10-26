@@ -15,7 +15,15 @@ describe('isStaleBuildError', () => {
     expect(isStaleBuildError(err('Failed to find Server Action "abc".'))).toBe(true);
   });
 
+  it('recognises page data cut off by a server restart', () => {
+    expect(isStaleBuildError(err('Connection closed.'))).toBe(true);
+    expect(isStaleBuildError(err('Failed to fetch', 'TypeError'))).toBe(true);
+    expect(isStaleBuildError(err('NetworkError when attempting to fetch resource.', 'TypeError'))).toBe(true);
+    expect(isStaleBuildError(err('Load failed', 'TypeError'))).toBe(true);
+  });
+
   it('leaves ordinary errors alone', () => {
+    expect(isStaleBuildError(err('Failed to fetch the order summary for #123'))).toBe(false);
     expect(isStaleBuildError(err('Cannot read properties of undefined'))).toBe(false);
     expect(isStaleBuildError(err('An error occurred in the Server Components render.'))).toBe(false);
     expect(isStaleBuildError(undefined)).toBe(false);
