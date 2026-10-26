@@ -27,6 +27,8 @@ export interface Mail {
   subject: string;
   text: string;
   html: string;
+  /** Files sent with the message, e.g. an order's invoice PDF. */
+  attachments?: { filename: string; content: Buffer; contentType: string }[];
 }
 
 let transport: Transporter | null = null;
@@ -91,6 +93,7 @@ export async function deliverMail(mail: Mail): Promise<void> {
     subject: mail.subject,
     text: mail.text,
     html: mail.html,
+    attachments: mail.attachments,
   });
 }
 

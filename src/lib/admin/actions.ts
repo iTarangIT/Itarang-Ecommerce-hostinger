@@ -11,8 +11,9 @@ import { drainInventoryQueue } from '@/lib/orders/inventory-push';
 import { canTransitionOrder } from '@/lib/orders/state-machine';
 import { hasShipmentDetails, parseShipment } from '@/lib/orders/shipment';
 import type { OrderStatus } from '@/lib/orders/types';
-import { sendMail } from '@/lib/email/mailer';
-import { stockDelayMessage } from '@/lib/email/templates';
+import { deliverMail, mailerIsLive, sendMail } from '@/lib/email/mailer';
+import { invoiceMessage, stockDelayMessage } from '@/lib/email/templates';
+import { canInvoice, markInvoiceEmailed, readInvoice } from '@/lib/orders/invoices';
 
 /**
  * Admin order actions.
@@ -153,6 +154,49 @@ export async function notifyStockDelayAction(formData: FormData): Promise<void> 
 
   revalidatePath(back);
   redirect(`${back}?notice=${encodeURIComponent('Delay email sent to the customer.')}`);
+}
+
+/**
+ * Email the uploaded invoice PDF to the customer.
+ *
+ * Unlike the delay apology this waits for SMTP and reports a refusal: the
+ * admin is told the invoice was sent, so it has to have been.
+ */
+export async function emailInvoiceAction(formData: FormData): Promise<void> {
+  const actor = await requireAdminActor();
+  const orderNumber = String(formData.get('orderNumber') ?? '');
+  const back = `/admin/orders/${orderNumber}`;
+  const notice = (message: string) => redirect(`${back}?notice=${encodeURIComponent(message)}`);
+
+  const repository = orders();
+  const order = await repository.findByOrderNumber(orderNumber);
+  if (!order) return;
+
+  if (!canInvoice(order)) notice('An invoice can be sent once the payment is received.');
+  if (!order.contact.email) notice('This order has no email address. Download the invoice and share it another way.');
+
+  const invoice = await readInvoice(order.id);
+  if (!invoice) notice('Upload the invoice PDF first.');
+  if (!mailerIsLive()) notice('Email is not configured on this server, so the invoice was not sent.');
+
+  try {
+    await deliverMail(
+      invoiceMessage(
+        order.contact.email!,
+        { name: order.contact.name, orderNumber: order.orderNumber, path: `/order/${order.orderNumber}` },
+        invoice!,
+      ),
+    );
+  } catch (error) {
+    console.error(`[email] invoice delivery failed for ${order.orderNumber}: ${(error as Error).message}`);
+    notice('The invoice email could not be sent — the mail server refused it. Check the SMTP settings and try again.');
+  }
+
+  await markInvoiceEmailed(order.id, order.contact.email!, actor);
+  await repository.addOrderNote(order.id, actor, `Invoice emailed to ${order.contact.email}`);
+
+  revalidatePath(back);
+  notice(`Invoice emailed to ${order.contact.email}.`);
 }
 
 /**
