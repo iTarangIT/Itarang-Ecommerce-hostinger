@@ -1,8 +1,9 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ArrowLeft, FlaskConical } from 'lucide-react';
-import { notifyStockDelayAction } from '@/lib/admin/actions';
+import { ArrowLeft, FileText, FlaskConical } from 'lucide-react';
+import { emailInvoiceAction, notifyStockDelayAction } from '@/lib/admin/actions';
+import { canInvoice, findInvoiceMeta } from '@/lib/orders/invoices';
 import { orders } from '@/lib/orders/postgres-repository';
 import { eventLabel } from '@/lib/orders/tracking';
 import { normaliseOrderNumber } from '@/lib/orders/numbering';
@@ -32,11 +33,14 @@ export default async function AdminOrderDetailPage({
   const order = await repository.findByOrderNumber(normaliseOrderNumber(orderNumber));
   if (!order) notFound();
 
-  const [events, payments, reservations] = await Promise.all([
+  const [events, payments, reservations, invoice] = await Promise.all([
     repository.listEvents(order.id),
     repository.listPayments(order.id),
     repository.listReservations(order.id),
+    findInvoiceMeta(order.id),
   ]);
+  const invoiceAllowed = canInvoice(order);
+  const invoiceHref = `/api/admin/orders/${encodeURIComponent(order.orderNumber)}/invoice`;
 
   return (
     <div className="container py-8">
@@ -199,6 +203,81 @@ export default async function AdminOrderDetailPage({
               </form>
             </section>
           ) : null}
+
+          {/* Invoice: uploaded once the money is in, then emailed as a PDF. */}
+          <section className="rounded-lg border border-border bg-card p-4 text-sm">
+            <h2 className="font-display text-sm font-semibold">Invoice</h2>
+            {!invoiceAllowed ? (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {order.status === 'cancelled'
+                  ? 'This order is cancelled, so no invoice is issued.'
+                  : order.paymentMethod === 'cod'
+                    ? 'A cash-on-delivery order can be invoiced once it is delivered.'
+                    : 'Available once the payment is received.'}
+              </p>
+            ) : (
+              <>
+                {invoice ? (
+                  <div className="mt-2 space-y-1">
+                    <a
+                      href={invoiceHref}
+                      target="_blank"
+                      rel="noopener"
+                      className="inline-flex items-center gap-1.5 font-medium text-foreground underline underline-offset-2"
+                    >
+                      <FileText className="h-4 w-4 shrink-0" />
+                      <span className="truncate">{invoice.fileName}</span>
+                    </a>
+                    <p className="text-xs text-muted-foreground">
+                      {Math.max(1, Math.round(invoice.sizeBytes / 1024))} KB · uploaded{' '}
+                      {formatDate(invoice.uploadedAt)} by {invoice.uploadedBy}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {invoice.emailedAt
+                        ? `Emailed to ${invoice.emailedTo} on ${formatDate(invoice.emailedAt)}`
+                        : 'Not emailed yet.'}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Upload the invoice PDF (up to 10 MB), then email it to the customer.
+                  </p>
+                )}
+
+                <form
+                  action={invoiceHref}
+                  method="post"
+                  encType="multipart/form-data"
+                  className="mt-3 space-y-2"
+                >
+                  <input
+                    type="file"
+                    name="file"
+                    accept="application/pdf,.pdf"
+                    required
+                    className="block w-full text-xs file:mr-3 file:rounded-md file:border file:border-border file:bg-surface file:px-3 file:py-1.5 file:text-xs file:font-medium"
+                  />
+                  <Button type="submit" variant="outline" fullWidth>
+                    {invoice ? 'Replace invoice' : 'Upload invoice'}
+                  </Button>
+                </form>
+
+                {invoice ? (
+                  <form action={emailInvoiceAction} className="mt-2">
+                    <input type="hidden" name="orderNumber" value={order.orderNumber} />
+                    <Button type="submit" fullWidth disabled={!order.contact.email}>
+                      {invoice.emailedAt ? 'Email invoice again' : 'Email invoice to customer'}
+                    </Button>
+                    {!order.contact.email ? (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        No email address on this order.
+                      </p>
+                    ) : null}
+                  </form>
+                ) : null}
+              </>
+            )}
+          </section>
 
           {/* Customer */}
           <section className="rounded-lg border border-border bg-card p-4 text-sm">

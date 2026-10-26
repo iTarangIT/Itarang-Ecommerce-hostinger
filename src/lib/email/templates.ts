@@ -382,6 +382,39 @@ export function stockDelayMessage(
 }
 
 /**
+ * The invoice for a paid order, sent by an admin from the order page with the
+ * uploaded PDF attached. The order link lets the customer see the order itself;
+ * the invoice travels only as the attachment.
+ */
+export function invoiceMessage(
+  to: string,
+  details: { name: string; orderNumber: string; path: string },
+  invoice: { fileName: string; content: Buffer },
+): Mail {
+  const href = `${env().NEXT_PUBLIC_SITE_URL.replace(/\/$/, '')}${details.path}`;
+  const firstName = details.name.split(/\s+/)[0] || 'there';
+
+  return {
+    to,
+    subject: `Invoice for your iTarang order ${details.orderNumber}`,
+    text: [
+      `Hi ${firstName},`,
+      '',
+      `Thank you for your order ${details.orderNumber}. Your invoice is attached to this email as a PDF.`,
+      'Please keep it for your records — you will need it for any warranty claim.',
+      '',
+      href,
+    ].join('\n'),
+    html: wrap(
+      'Your invoice is attached',
+      `Hi ${escapeHtml(firstName)}, thank you for your order <strong>${escapeHtml(details.orderNumber)}</strong>. Your invoice is attached to this email as a PDF. Please keep it for your records — you will need it for any warranty claim.`,
+      { label: 'View your order', href },
+    ),
+    attachments: [{ filename: invoice.fileName, content: invoice.content, contentType: 'application/pdf' }],
+  };
+}
+
+/**
  * The internal alert, sent to the business when a variant sells out.
  *
  * Goes to `STOCK_ALERT_EMAIL`, once per transition. It carries no customer
