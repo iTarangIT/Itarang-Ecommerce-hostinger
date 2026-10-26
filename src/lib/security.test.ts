@@ -746,13 +746,17 @@ describe('purchasing is on, and confined to the catalogue we own', () => {
     );
   });
 
-  it('no live payment credential can be accepted', () => {
-    // The env schema is what makes "test mode only" a property of the build
-    // rather than of whoever wrote .env.local.
+  it('a live payment credential is accepted only in the explicit live mode', () => {
+    // Live payments were switched on deliberately, as `PAYMENT_PROVIDER=razorpay`.
+    // The env schema is what ties the key to the mode as a property of the
+    // build rather than of whoever wrote the env file: `rzp_live_` only under
+    // `razorpay`, `rzp_test_` everywhere else.
     const envSource = readFileSync(join(ROOT, 'src', 'lib', 'env.ts'), 'utf8');
-    expect(envSource).toMatch(/startsWith\('rzp_test_'\)/);
-    expect(envSource, 'PAYMENT_PROVIDER can now select a live gateway').toMatch(
-      /PAYMENT_PROVIDER: z\.enum\(\['mock', 'razorpay-test'\]\)/,
+    expect(envSource).toMatch(
+      /PAYMENT_PROVIDER === 'razorpay' \? 'rzp_live_' : 'rzp_test_'/,
+    );
+    expect(envSource, 'PAYMENT_PROVIDER gained another mode').toMatch(
+      /PAYMENT_PROVIDER: z\.enum\(\['mock', 'razorpay-test', 'razorpay'\]\)/,
     );
   });
 

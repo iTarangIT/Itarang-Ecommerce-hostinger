@@ -21,8 +21,8 @@ export type PaymentStatus = 'pending' | 'authorized' | 'paid' | 'failed' | 'refu
 
 export type ReservationState = 'active' | 'consumed' | 'released' | 'expired';
 
-/** `cod` needs no gateway; `mock` is local-only; `razorpay-test` is inert for now. */
-export type PaymentMethod = 'cod' | 'mock' | 'razorpay-test';
+/** `cod` needs no gateway; `mock` is local-only; `razorpay-test` moves no money; `razorpay` is live. */
+export type PaymentMethod = 'cod' | 'mock' | 'razorpay-test' | 'razorpay';
 
 export interface ShippingAddress {
   line1: string;

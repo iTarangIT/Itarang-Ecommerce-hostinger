@@ -200,9 +200,10 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
     // rows all said 'mock' — the order's own record of how it was paid
     // disagreeing with the payments attached to it.
     paymentMethod: isCod ? ('cod' as const) : provider!.id,
-    // Nothing in this build takes real money, and the flag records that
-    // permanently rather than leaving it to be inferred later.
-    isTest: true,
+    // Whether this build takes real money, recorded permanently rather than
+    // left to be inferred later. COD follows the build's payment mode: a COD
+    // order placed on the live store is a real sale.
+    isTest: (provider ?? paymentProvider()).isTestOnly,
     status: isCod ? ('confirmed' as const) : ('pending_payment' as const),
     paymentStatus: 'pending' as const,
     placeOfSupply: stateCode(input.address.state),
