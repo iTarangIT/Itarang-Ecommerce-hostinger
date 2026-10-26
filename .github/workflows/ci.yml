@@ -269,6 +269,19 @@ jobs:
           fi
           echo "Wrote $(wc -l < .env.production) variable(s): $(cut -d= -f1 .env.production | tr '\n' ' ')"
 
+      # The build pre-renders pages straight from this environment's database,
+      # so the schema must match the code before it starts — a release that
+      # adds a column otherwise fails here with `column … does not exist`.
+      # Applies only migrations not yet in schema_migrations; a no-op when the
+      # database is current. DB_SSL_CA_FILE is repointed as for the build.
+      - name: Migrate the database
+        run: |
+          if grep -q '^DB_SSL_CA_FILE=' .env.production; then
+            export DB_SSL_CA_FILE="$GITHUB_WORKSPACE/db/prod-ca-2021.crt"
+          fi
+          node --experimental-strip-types --disable-warning=ExperimentalWarning \
+            --env-file=.env.production scripts/db.mts migrate
+
       # DB_SSL_CA_FILE in the env file is the server's absolute path. The build
       # runs here, so point it at the repo's copy for this step only — the
       # process environment wins over `.env.production`.
