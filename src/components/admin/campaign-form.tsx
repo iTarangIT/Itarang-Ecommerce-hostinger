@@ -3,6 +3,8 @@ import { CUSTOMER_TYPES, type Campaign } from '@/lib/offers/campaigns';
 import { STATES } from '@/lib/checkout/validation';
 import { Button } from '@/components/ui/button';
 import { Checkbox, Field, Input, Select, Textarea } from '@/components/ui/field';
+import { CampaignGeoFields } from './campaign-geo-fields';
+import { CampaignProductsField, type PickerProduct } from './campaign-products-field';
 
 /**
  * The campaign editor, shared by "new" and "edit". A plain server-rendered
@@ -27,11 +29,13 @@ const HEADING = 'font-display text-sm font-semibold uppercase tracking-wide';
 export function CampaignForm({
   campaign,
   categories,
+  products,
   action,
   submitLabel,
 }: {
   campaign: Campaign | null;
   categories: Category[];
+  products: PickerProduct[];
   action: (formData: FormData) => Promise<void>;
   submitLabel: string;
 }) {
@@ -107,24 +111,20 @@ export function CampaignForm({
       <section className={SECTION}>
         <h2 className={HEADING}>Products</h2>
         <p className="text-sm text-muted-foreground">
-          Tick nothing for any product. The discount is worked out on the qualifying products in the cart.
+          All products, or any mix of whole categories, sub-categories and single products. The
+          discount is worked out on the qualifying products in the cart.
         </p>
-        <div className="grid gap-4 sm:grid-cols-2">
-          {categories.map((category) => (
-            <fieldset key={category.slug} className="space-y-1.5 text-sm">
-              <label className="flex items-center gap-2 font-medium">
-                <Checkbox name="categories" value={category.slug} defaultChecked={campaign?.categories?.includes(category.slug)} />
-                All {category.name}
-              </label>
-              {category.subcategories.map((sub) => (
-                <label key={sub.slug} className="ml-6 flex items-center gap-2">
-                  <Checkbox name="subcategories" value={sub.slug} defaultChecked={campaign?.subcategories?.includes(sub.slug)} />
-                  {sub.name}
-                </label>
-              ))}
-            </fieldset>
-          ))}
-        </div>
+        <CampaignProductsField
+          categories={categories.map((category) => ({
+            slug: category.slug,
+            name: category.name,
+            subcategories: category.subcategories.map((sub) => ({ slug: sub.slug, name: sub.name })),
+          }))}
+          products={products}
+          defaultCategories={campaign?.categories ?? []}
+          defaultSubcategories={campaign?.subcategories ?? []}
+          defaultProducts={campaign?.products ?? []}
+        />
       </section>
 
       <section className={SECTION}>
@@ -154,25 +154,11 @@ export function CampaignForm({
 
       <section className={SECTION}>
         <h2 className={HEADING}>Where (delivery address)</h2>
-        <Field label="Cities" htmlFor="cities" hint="One per line or comma-separated, e.g. Gurugram. Empty = any city.">
-          <Textarea id="cities" name="cities" rows={2} defaultValue={campaign?.cities.join('\n') ?? ''} />
-        </Field>
-        <Field label="States" htmlFor="states" hint="Hold Ctrl (Cmd on Mac) to pick several. None selected = any state.">
-          <select
-            id="states"
-            name="states"
-            multiple
-            size={8}
-            defaultValue={campaign?.states ?? []}
-            className="w-full rounded-md border border-input bg-card p-2 text-sm"
-          >
-            {STATES.map((state) => (
-              <option key={state.code} value={state.name}>
-                {state.name}
-              </option>
-            ))}
-          </select>
-        </Field>
+        <CampaignGeoFields
+          states={STATES.map((state) => state.name)}
+          defaultStates={campaign?.states ?? []}
+          defaultCities={campaign?.cities ?? []}
+        />
       </section>
 
       <Button type="submit">{submitLabel}</Button>

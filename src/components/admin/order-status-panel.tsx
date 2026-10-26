@@ -1,7 +1,7 @@
 import { updateOrderStatusAction, updateShipmentAction } from '@/lib/admin/actions';
 import { nextOrderStatuses } from '@/lib/orders/state-machine';
 import type { Order, OrderStatus, Shipment } from '@/lib/orders/types';
-import { formatDate } from '@/lib/utils';
+import { formatDateTime } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/field';
 
@@ -13,7 +13,7 @@ import { Checkbox } from '@/components/ui/field';
  * dates and what each status means in one place above everything else.
  */
 
-const STATUS_LABEL: Record<OrderStatus, string> = {
+export const STATUS_LABEL: Record<OrderStatus, string> = {
   pending_payment: 'Waiting for payment',
   confirmed: 'Confirmed',
   packed: 'Packed',
@@ -34,7 +34,7 @@ const MEANING: Array<{ status: OrderStatus; text: string }> = [
 
 const FIELD = 'h-10 w-full rounded-md border border-input bg-card px-3 text-sm';
 
-function ShipmentFields({ shipment }: { shipment: Shipment }) {
+export function ShipmentFields({ shipment }: { shipment: Shipment }) {
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       <input name="courierName" defaultValue={shipment.courierName ?? ''} placeholder="Courier, e.g. Delhivery" className={FIELD} maxLength={80} />
@@ -136,7 +136,13 @@ export function OrderStatusPanel({ order }: { order: Order }) {
             {stages.map((stage) => (
               <div key={stage.label} className="contents">
                 <dt className="text-muted-foreground">{stage.label}</dt>
-                <dd className="tabular text-foreground">{stage.at ? formatDate(stage.at) : '—'}</dd>
+                <dd className="tabular text-foreground">
+                  {stage.at
+                    ? formatDateTime(stage.at)
+                    : stage.label === 'Packed' && (order.stages.shippedAt || order.stages.deliveredAt)
+                      ? 'Skipped'
+                      : '—'}
+                </dd>
               </div>
             ))}
           </dl>

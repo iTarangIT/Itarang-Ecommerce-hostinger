@@ -12,6 +12,7 @@ import {
   updateCampaign,
 } from '@/lib/offers/campaign-store';
 import { CUSTOMER_TYPES } from '@/lib/offers/campaigns';
+import { logAdminEvent } from './audit';
 
 /**
  * Campaign management. Each action re-checks the admin role (a Server Action
@@ -33,11 +34,18 @@ function parse(formData: FormData) {
     isActive: formData.get('isActive') === 'on',
     showOnSite: formData.get('showOnSite') === 'on',
     firstOrderOnly: formData.get('firstOrderOnly') === 'on',
-    categories: formData.getAll('categories').join(','),
-    subcategories: formData.getAll('subcategories').join(','),
-    customerTypes: formData.getAll('customerTypes').join(','),
-    states: formData.getAll('states').join(','),
+    categories: strings(formData, 'categories'),
+    subcategories: strings(formData, 'subcategories'),
+    productIds: strings(formData, 'productIds'),
+    customerTypes: strings(formData, 'customerTypes'),
+    states: strings(formData, 'states'),
+    cities: strings(formData, 'cities'),
   });
+}
+
+/** Every value submitted under one name: ticked boxes, picked cities. */
+function strings(formData: FormData, name: string): string[] {
+  return formData.getAll(name).filter((value): value is string => typeof value === 'string');
 }
 
 /** The storefront lists live campaigns on /offers and the home page. */
@@ -56,6 +64,7 @@ export async function createCampaignAction(formData: FormData): Promise<void> {
   }
   const result = await createCampaign(parsed.data, actor);
   if (!result.ok) redirect(`${BASE}/new?error=${encodeURIComponent(result.error)}`);
+  await logCampaign(actor, 'Created campaign', result.id, parsed.data.code);
   refreshStorefront();
   redirect(`${BASE}?notice=${encodeURIComponent(`Campaign ${parsed.data.code} created.`)}`);
 }
@@ -71,6 +80,7 @@ export async function updateCampaignAction(formData: FormData): Promise<void> {
   }
   const result = await updateCampaign(id, parsed.data, actor);
   if (!result.ok) redirect(`${back}?error=${encodeURIComponent(result.error)}`);
+  await logCampaign(actor, 'Edited campaign', id, parsed.data.code);
   refreshStorefront();
   redirect(`${BASE}?notice=${encodeURIComponent(`Campaign ${parsed.data.code} saved.`)}`);
 }
@@ -81,8 +91,13 @@ export async function toggleCampaignAction(formData: FormData): Promise<void> {
   const active = formData.get('active') === 'true';
   if (!Number.isInteger(id) || id <= 0) redirect(BASE);
   await setCampaignActive(id, active, actor);
+  await logCampaign(actor, active ? 'Switched campaign on' : 'Paused campaign', id, `#${id}`);
   refreshStorefront();
   redirect(`${BASE}?notice=${encodeURIComponent(active ? 'Campaign switched on.' : 'Campaign paused.')}`);
+}
+
+async function logCampaign(actor: string, action: string, id: number, code: string): Promise<void> {
+  await logAdminEvent({ entityType: 'campaign', entityId: String(id), label: code, action, actor });
 }
 
 /** Set on /admin/customers/[userId]; used by campaigns limited to a customer type. */

@@ -1,4 +1,5 @@
 import type { CouponRule } from './coupons';
+import { sameCity } from '@/lib/geo/city-names';
 
 /**
  * Coupon campaigns: a coupon rule plus who may use it and when.
@@ -63,6 +64,12 @@ export function phoneKey(phone: string): string {
 
 const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
+/** "A, B, C and 12 more" — a campaign can name every city in a state. */
+function placeList(places: string[]): string {
+  const shown = places.slice(0, 5).join(', ');
+  return places.length > 5 ? `${shown} and ${places.length - 5} more` : shown;
+}
+
 const dateLabel = (date: Date) =>
   date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
 
@@ -115,12 +122,12 @@ export function campaignIneligibility(campaign: Campaign, context: EligibilityCo
 
   if (campaign.states.length > 0 && !unknown(context.state)) {
     if (!campaign.states.some((state) => same(state, context.state ?? ''))) {
-      return `${code} applies only to deliveries in ${campaign.states.join(', ')}.`;
+      return `${code} applies only to deliveries in ${placeList(campaign.states)}.`;
     }
   }
   if (campaign.cities.length > 0 && !unknown(context.city)) {
-    if (!campaign.cities.some((city) => same(city, context.city ?? ''))) {
-      return `${code} applies only to deliveries in ${campaign.cities.join(', ')}.`;
+    if (!campaign.cities.some((city) => sameCity(city, context.city ?? ''))) {
+      return `${code} applies only to deliveries in ${placeList(campaign.cities)}.`;
     }
   }
 
@@ -145,8 +152,11 @@ export function describeRestrictions(campaign: Campaign): string[] {
     parts.push(campaign.maxPerCustomer === 1 ? 'Once per customer' : `${campaign.maxPerCustomer} uses per customer`);
   }
   if (campaign.maxRedemptionsTotal !== null) parts.push(`First ${campaign.maxRedemptionsTotal} orders`);
-  if (campaign.states.length > 0) parts.push(`Delivery in ${campaign.states.join(', ')}`);
-  if (campaign.cities.length > 0) parts.push(`Delivery in ${campaign.cities.join(', ')}`);
+  if (campaign.states.length > 0) parts.push(`Delivery in ${placeList(campaign.states)}`);
+  if (campaign.cities.length > 0) parts.push(`Delivery in ${placeList(campaign.cities)}`);
+  if (campaign.products?.length) {
+    parts.push(`${campaign.products.length} selected product${campaign.products.length === 1 ? '' : 's'}`);
+  }
   if (campaign.customerTypes.length > 0) parts.push(`For ${campaign.customerTypes.join(', ')} customers`);
   if (campaign.customerPhones.length > 0) parts.push('Selected customers only');
   if (campaign.endsAt) parts.push(`Until ${dateLabel(campaign.endsAt)}`);

@@ -14,6 +14,22 @@ export function formatDate(iso: string): string {
   }).format(new Date(iso));
 }
 
+/**
+ * "23 Oct 2026, 4:05 pm" in India time — for order stage dates, where the hour
+ * matters and the server's own clock (UTC) would show the wrong day at night.
+ */
+export function formatDateTime(iso: string): string {
+  return new Intl.DateTimeFormat('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+    timeZone: 'Asia/Kolkata',
+  }).format(new Date(iso));
+}
+
 export function pluralise(count: number, singular: string, plural = `${singular}s`): string {
   return count === 1 ? singular : plural;
 }

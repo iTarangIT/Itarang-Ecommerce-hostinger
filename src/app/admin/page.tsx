@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, BarChart3, Filter, FlaskConical, LifeBuoy, Package, RefreshCw, TicketPercent, Truck, UserRound } from 'lucide-react';
+import { AlertTriangle, BarChart3, Filter, FlaskConical, LifeBuoy, Package, RefreshCw, ScrollText, TicketPercent, Truck, UserRound } from 'lucide-react';
 import {
   pushInventoryToHostingerAction,
   resolveCatalogueAlertAction,
@@ -23,6 +23,8 @@ import { StateBlock } from '@/components/ui/states';
 import { Skeleton } from '@/components/ui/skeleton';
 import { StatusPill } from '@/components/admin/status-pill';
 import { AdminProfileMenu } from '@/components/admin/admin-profile-menu';
+import { OrderQuickActions } from '@/components/admin/order-quick-actions';
+import { Notice } from '@/components/admin/service-nav';
 
 export const dynamic = 'force-dynamic';
 
@@ -55,7 +57,13 @@ function asPaymentStatus(value: string | undefined): PaymentStatus | undefined {
 export default async function AdminOrdersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; status?: string; payment?: string; offset?: string }>;
+  searchParams: Promise<{
+    q?: string;
+    status?: string;
+    payment?: string;
+    offset?: string;
+    notice?: string;
+  }>;
 }) {
   const params = await searchParams;
   const q = params.q?.trim() || undefined;
@@ -78,6 +86,13 @@ export default async function AdminOrdersPage({
   ]);
 
   const filtered = Boolean(q || status || paymentStatus);
+
+  // What the Action button sends back, so a status change lands on this view.
+  const listQuery = new URLSearchParams();
+  if (q) listQuery.set('q', q);
+  if (params.status) listQuery.set('status', params.status);
+  if (params.payment) listQuery.set('payment', params.payment);
+  if (offset > 0) listQuery.set('offset', String(offset));
 
   return (
     <div className="container py-8">
@@ -139,9 +154,18 @@ export default async function AdminOrdersPage({
             <LifeBuoy className="h-4 w-4" />
             Service
           </Link>
+          <Link
+            href="/admin/logs"
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+          >
+            <ScrollText className="h-4 w-4" />
+            Logs
+          </Link>
           <AdminProfileMenu name={admin?.fullName ?? null} />
         </div>
       </div>
+
+      <Notice text={params.notice} />
 
       {/* Streams in behind the order table rather than delaying it. */}
       <Suspense fallback={null}>
@@ -163,7 +187,7 @@ export default async function AdminOrdersPage({
         />
       ) : (
         <div className="mt-6 overflow-x-auto rounded-lg border border-border">
-          <table className="w-full min-w-[52rem] text-left text-sm">
+          <table className="w-full min-w-[58rem] text-left text-sm">
             <thead className="bg-surface text-xs uppercase tracking-wide text-muted-foreground">
               <tr>
                 <th scope="col" className="px-4 py-3 font-semibold">Order</th>
@@ -172,6 +196,7 @@ export default async function AdminOrdersPage({
                 <th scope="col" className="px-4 py-3 font-semibold">Payment</th>
                 <th scope="col" className="px-4 py-3 font-semibold">Status</th>
                 <th scope="col" className="px-4 py-3 text-right font-semibold">Total</th>
+                <th scope="col" className="px-4 py-3 text-right font-semibold">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border bg-card">
@@ -219,6 +244,15 @@ export default async function AdminOrdersPage({
                   </td>
                   <td className="tabular px-4 py-3 text-right font-semibold">
                     {formatPrice(order.amounts.total)}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <OrderQuickActions
+                      orderNumber={order.orderNumber}
+                      customer={order.contact.name}
+                      status={order.status}
+                      shipment={order.shipment}
+                      listQuery={listQuery.toString()}
+                    />
                   </td>
                 </tr>
               ))}

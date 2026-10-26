@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import { createCampaignAction } from '@/lib/admin/campaign-actions';
 import { loadCategoryOptions } from '@/lib/catalog/category-store';
+import { campaignProductOptions } from '@/lib/offers/campaign-products';
 import { CampaignForm } from '@/components/admin/campaign-form';
 import { Notice } from '@/components/admin/service-nav';
 
@@ -19,7 +20,7 @@ export default async function NewCampaignPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const { error } = await searchParams;
-  const categories = await loadCategoryOptions();
+  const [categories, products] = await Promise.all([loadCategoryOptions(), campaignProductOptions()]);
 
   return (
     <div className="container max-w-3xl py-8">
@@ -35,6 +36,7 @@ export default async function NewCampaignPage({
       <CampaignForm
         campaign={null}
         categories={categories}
+        products={products}
         action={createCampaignAction}
         submitLabel="Create campaign"
       />

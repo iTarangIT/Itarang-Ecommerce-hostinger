@@ -9,6 +9,7 @@ import { productRepository } from '@/lib/products/postgres-repository';
 import { orders } from '@/lib/orders/postgres-repository';
 import { dispatchStockAlertsInBackground } from '@/lib/stock/alerts';
 import { buildPricingImportReport, type PricingImportReport } from './bulk-pricing';
+import { displayValue, logAdminEvent, type FieldChange } from './audit';
 import {
   MAX_WORKBOOK_BYTES,
   WorkbookError,
@@ -97,6 +98,16 @@ export async function importPricingAction(
     };
   }
 
+  await logAdminEvent({
+    entityType: 'pricing_import',
+    entityId: null,
+    label: file.name,
+    action: 'Imported price sheet',
+    actor,
+    summary: `${result.updated} variant${result.updated === 1 ? '' : 's'} updated`,
+    changes: importChanges(report.accepted, catalogue),
+  });
+
   // Stock typed into the sheet is the new count on the shelf: send the
   // out-of-stock alerts and make checkout agree, as the product page does.
   const stockRows = report.accepted.filter((row) => row.stock !== undefined);
@@ -126,4 +137,34 @@ export async function importPricingAction(
   revalidatePath(BASE);
 
   return { report, updated: result.updated };
+}
+
+const rupees = (paise: number | null | undefined) =>
+  paise === null || paise === undefined ? '—' : `₹${(paise / 100).toLocaleString('en-IN')}`;
+
+/** What each accepted row changed, old → new, for Logs → Product log. */
+function importChanges(
+  accepted: PricingImportReport['accepted'],
+  catalogue: Awaited<ReturnType<ReturnType<typeof productRepository>['listVariantPrices']>>,
+): FieldChange[] {
+  const bySku = new Map(catalogue.map((entry) => [entry.sku, entry]));
+  const changes: FieldChange[] = [];
+  for (const row of accepted) {
+    const was = bySku.get(row.sku);
+    const pairs: Array<[string, string, string | null]> = [
+      ['MRP', rupees(was?.mrp), rupees(row.mrp)],
+      ['Selling price', rupees(was?.selling), rupees(row.selling)],
+      ['Cost price', rupees(was?.costPrice), row.costPrice === undefined ? null : rupees(row.costPrice)],
+      ['Stock', displayValue(was?.stock), row.stock === undefined ? null : displayValue(row.stock)],
+      [
+        'Availability',
+        displayValue(was?.availability),
+        row.availability === undefined ? null : displayValue(row.availability),
+      ],
+    ];
+    for (const [label, from, to] of pairs) {
+      if (to !== null && from !== to) changes.push({ field: `${row.sku} · ${label}`, from, to });
+    }
+  }
+  return changes;
 }
