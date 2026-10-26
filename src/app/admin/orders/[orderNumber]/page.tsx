@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ArrowLeft, FileText, FlaskConical } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, FileText, FlaskConical } from 'lucide-react';
 import { emailInvoiceAction, notifyStockDelayAction } from '@/lib/admin/actions';
 import { canInvoice, findInvoiceMeta } from '@/lib/orders/invoices';
 import { orders } from '@/lib/orders/postgres-repository';
@@ -206,7 +206,15 @@ export default async function AdminOrderDetailPage({
 
           {/* Invoice: uploaded once the money is in, then emailed as a PDF. */}
           <section className="rounded-lg border border-border bg-card p-4 text-sm">
-            <h2 className="font-display text-sm font-semibold">Invoice</h2>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="font-display text-sm font-semibold">Invoice</h2>
+              {invoice?.emailedAt ? (
+                <span className="inline-flex items-center gap-1 rounded-sm bg-success-soft px-2 py-0.5 text-2xs font-bold uppercase text-success">
+                  <CheckCircle2 className="h-3 w-3" />
+                  Sent
+                </span>
+              ) : null}
+            </div>
             {!invoiceAllowed ? (
               <p className="mt-1 text-xs text-muted-foreground">
                 {order.status === 'cancelled'
@@ -232,15 +240,24 @@ export default async function AdminOrderDetailPage({
                       {Math.max(1, Math.round(invoice.sizeBytes / 1024))} KB · uploaded{' '}
                       {formatDate(invoice.uploadedAt)} by {invoice.uploadedBy}
                     </p>
-                    <p className="text-xs text-muted-foreground">
-                      {invoice.emailedAt
-                        ? `Emailed to ${invoice.emailedTo} on ${formatDate(invoice.emailedAt)}`
-                        : 'Not emailed yet.'}
-                    </p>
+                    {invoice.emailedAt ? (
+                      <div className="!mt-3 flex items-start gap-2 rounded-md border border-success/30 bg-success-soft p-3 text-success">
+                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold">Email sent</p>
+                          <p className="break-words text-xs">
+                            Invoice emailed to {invoice.emailedTo} on {formatDate(invoice.emailedAt)}
+                            {invoice.emailedBy ? ` by ${invoice.emailedBy}` : ''}.
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">Not emailed yet.</p>
+                    )}
                   </div>
                 ) : (
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Upload the invoice PDF (up to 10 MB), then email it to the customer.
+                    Upload the invoice PDF (up to 8 MB), then email it to the customer.
                   </p>
                 )}
 
@@ -265,8 +282,15 @@ export default async function AdminOrderDetailPage({
                 {invoice ? (
                   <form action={emailInvoiceAction} className="mt-2">
                     <input type="hidden" name="orderNumber" value={order.orderNumber} />
-                    <Button type="submit" fullWidth disabled={!order.contact.email}>
-                      {invoice.emailedAt ? 'Email invoice again' : 'Email invoice to customer'}
+                    {/* Once sent, the green box above is the news; resending is a
+                        secondary action, so it no longer takes the primary style. */}
+                    <Button
+                      type="submit"
+                      variant={invoice.emailedAt ? 'outline' : 'primary'}
+                      fullWidth
+                      disabled={!order.contact.email}
+                    >
+                      {invoice.emailedAt ? 'Resend invoice' : 'Email invoice to customer'}
                     </Button>
                     {!order.contact.email ? (
                       <p className="mt-1 text-xs text-muted-foreground">
