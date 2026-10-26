@@ -240,7 +240,7 @@ export default async function AdminOrderDetailPage({
                   </div>
                 ) : (
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Upload the invoice PDF (up to 10 MB), then email it to the customer.
+                    Upload the invoice PDF (up to 8 MB), then email it to the customer.
                   </p>
                 )}
 

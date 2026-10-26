@@ -9,7 +9,12 @@ import type { Order } from './types';
  * public bucket, and is served only through the admin-guarded route.
  */
 
-export const MAX_INVOICE_BYTES = 10 * 1024 * 1024;
+/**
+ * Kept below 10 MB on purpose: with middleware present, Next.js truncates a
+ * request body at 10 MB, so a file near that size would arrive cut off and
+ * fail to parse instead of being refused with a clear message.
+ */
+export const MAX_INVOICE_BYTES = 8 * 1024 * 1024;
 
 export interface InvoiceMeta {
   fileName: string;

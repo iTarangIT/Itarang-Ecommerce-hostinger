@@ -6,7 +6,7 @@
 --
 -- The PDF is kept in the database rather than in the public product-media
 -- bucket: an invoice carries the buyer's name, address and GSTIN, and must
--- never be reachable by URL. Files are capped at 10 MB by the upload route.
+-- never be reachable by URL. Files are capped at 8 MB by the upload route.
 --
 -- Rollback:
 --   DROP TABLE order_invoices;
