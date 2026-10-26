@@ -37,7 +37,6 @@ import { CitySelect } from '@/components/ui/city-select';
 import { StateBlock } from '@/components/ui/states';
 import { OrderSummaryPanel } from './order-summary-panel';
 import { RazorpayPanel } from './razorpay-panel';
-import { TestModeBanner } from './test-mode-banner';
 import { cn } from '@/lib/utils';
 import { categoryPath } from '@/lib/routes';
 
@@ -171,6 +170,9 @@ export function CheckoutFlow({
   const [quoteLoading, setQuoteLoading] = React.useState(false);
   const [fieldErrors, setFieldErrors] = React.useState<Record<string, string>>({});
   const [formError, setFormError] = React.useState<string | null>(null);
+  // Set when the server refused the order over the coupon, so the error can
+  // offer to drop it instead of leaving the shopper stuck on Pay.
+  const [couponRefused, setCouponRefused] = React.useState(false);
   const [placing, setPlacing] = React.useState(false);
   /**
    * Set when the server rebuilt the quote and got a different total from the
@@ -363,10 +365,13 @@ export function CheckoutFlow({
       }
 
       if (!response.ok) {
+        const issues: QuoteIssue[] = Array.isArray(data.issues) ? data.issues : [];
         setFieldErrors(data.fields ?? {});
+        setCouponRefused(issues.some((issue) => issue.code === 'coupon_invalid'));
         setFormError(
           data.message ??
             data.error ??
+            (issues.length > 0 ? issues.map((issue) => issue.message).join(' ') : undefined) ??
             (data.code === 'insufficient_stock'
               ? 'One of your items just went out of stock.'
               : 'We could not place this order.'),
@@ -483,8 +488,6 @@ export function CheckoutFlow({
   return (
     <div className="grid gap-8 lg:grid-cols-12 lg:gap-10">
       <div className="lg:col-span-7">
-        <TestModeBanner className="mb-6" />
-
         {/* Step indicator */}
         <ol className="mb-6 flex items-center gap-2">
           {STEPS.map((entry, index) => {
@@ -577,7 +580,25 @@ export function CheckoutFlow({
             className="mb-4 flex items-start gap-2 rounded-md border border-destructive/30 bg-sale-soft p-3 text-sm text-destructive"
           >
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-            {formError}
+            <span>
+              {formError}
+              {couponRefused && cart.coupon ? (
+                <>
+                  {' '}
+                  <button
+                    type="button"
+                    className="font-semibold underline underline-offset-2"
+                    onClick={() => {
+                      cart.applyCoupon(null);
+                      setCouponRefused(false);
+                      setFormError(null);
+                    }}
+                  >
+                    Remove {cart.coupon.code}
+                  </button>
+                </>
+              ) : null}
+            </span>
           </p>
         ) : null}
 
@@ -930,7 +951,6 @@ export function CheckoutFlow({
                         ? `Pay with any UPI app and get ${formatPrice(UPI_DISCOUNT)} off. The payment window opens on UPI only.`
                         : `Get ${formatPrice(UPI_DISCOUNT)} off for paying by UPI. Test mode — no money moves.`
                     }
-                    badge={provider === 'razorpay-test' ? 'Test mode' : undefined}
                   />
                   <PaymentOption
                     id="online"
@@ -950,10 +970,9 @@ export function CheckoutFlow({
                     }
                     description={
                       provider === 'razorpay-test'
-                        ? 'Pay securely through Razorpay, including card EMI. Test mode — use a test card; no real money moves.'
+                        ? 'Pay securely through Razorpay, including card EMI.'
                         : 'Simulates a card payment. No gateway is contacted and no money moves.'
                     }
-                    badge="Test mode"
                   />
 
                   {/* Not offered at all, so not shown at all.

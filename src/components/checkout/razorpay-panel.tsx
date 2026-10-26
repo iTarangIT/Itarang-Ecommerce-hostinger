@@ -187,8 +187,7 @@ export function RazorpayPanel({
         <div className="min-w-0">
           <p className="font-medium">Order {orderNumber} is held for payment</p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Razorpay test mode — use a test card. No real money moves. Your stock is reserved
-            while you pay.
+            Your stock is reserved while you pay.
           </p>
         </div>
       </div>
