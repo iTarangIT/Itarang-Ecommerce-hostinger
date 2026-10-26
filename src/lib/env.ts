@@ -14,9 +14,10 @@ import { z } from 'zod';
  * module (`commerce/hostinger/admin-client.ts`). The storefront client stays
  * read-only by construction and never sees it.
  *
- * Razorpay variables are optional and unset in this local testing phase. The
- * schema below makes it impossible to select the Razorpay provider without a
- * genuine `rzp_test_` key, and impossible to use a live key at all.
+ * Razorpay variables are optional. The schema below ties the key to the mode:
+ * `razorpay-test` and `mock` accept only an `rzp_test_` key, and only
+ * `PAYMENT_PROVIDER=razorpay` accepts an `rzp_live_` key — so live money can
+ * move only when both the mode and the key say so.
  */
 const schema = z
   .object({
@@ -91,8 +92,8 @@ const schema = z
     SUPABASE_STORAGE_BUCKET: z.string().min(1).default('product-media'),
 
     /* --------------------------------------------------------- payment */
-    PAYMENT_PROVIDER: z.enum(['mock', 'razorpay-test']).default('mock'),
-    /** Only ever a TEST key. A live key is rejected below. */
+    PAYMENT_PROVIDER: z.enum(['mock', 'razorpay-test', 'razorpay']).default('mock'),
+    /** `rzp_live_` with `razorpay`, `rzp_test_` otherwise — enforced below. */
     RAZORPAY_KEY_ID: z.string().optional(),
     RAZORPAY_KEY_SECRET: z.string().optional(),
     RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
@@ -241,19 +242,26 @@ const schema = z
       });
     }
 
-    // A live key must never be usable in this environment, whichever provider
-    // is selected. This check runs even under PAYMENT_PROVIDER=mock.
-    if (value.RAZORPAY_KEY_ID && !value.RAZORPAY_KEY_ID.startsWith('rzp_test_')) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['RAZORPAY_KEY_ID'],
-        message:
-          'Only Razorpay TEST credentials are permitted in this build. ' +
-          'RAZORPAY_KEY_ID must start with "rzp_test_".',
-      });
+    // The key must match the mode. A live key is accepted only under
+    // `PAYMENT_PROVIDER=razorpay`, and that mode accepts only a live key, so a
+    // test build can never move real money and a live build never silently
+    // takes test payments. This check runs even under PAYMENT_PROVIDER=mock.
+    if (value.RAZORPAY_KEY_ID) {
+      const prefix = value.PAYMENT_PROVIDER === 'razorpay' ? 'rzp_live_' : 'rzp_test_';
+      if (!value.RAZORPAY_KEY_ID.startsWith(prefix)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['RAZORPAY_KEY_ID'],
+          message:
+            value.PAYMENT_PROVIDER === 'razorpay'
+              ? 'PAYMENT_PROVIDER=razorpay takes payments for real: RAZORPAY_KEY_ID must start with "rzp_live_".'
+              : `PAYMENT_PROVIDER=${value.PAYMENT_PROVIDER} accepts only Razorpay TEST credentials: ` +
+                'RAZORPAY_KEY_ID must start with "rzp_test_". Set PAYMENT_PROVIDER=razorpay to use a live key.',
+        });
+      }
     }
 
-    if (value.PAYMENT_PROVIDER === 'razorpay-test') {
+    if (value.PAYMENT_PROVIDER === 'razorpay-test' || value.PAYMENT_PROVIDER === 'razorpay') {
       const missing = (
         [
           ['RAZORPAY_KEY_ID', value.RAZORPAY_KEY_ID],
@@ -269,8 +277,8 @@ const schema = z
           code: z.ZodIssueCode.custom,
           path: ['PAYMENT_PROVIDER'],
           message:
-            `PAYMENT_PROVIDER=razorpay-test requires ${missing.join(', ')}. ` +
-            'Leave PAYMENT_PROVIDER=mock until real test credentials exist.',
+            `PAYMENT_PROVIDER=${value.PAYMENT_PROVIDER} requires ${missing.join(', ')}. ` +
+            'Leave PAYMENT_PROVIDER=mock until Razorpay credentials exist.',
         });
       }
     }

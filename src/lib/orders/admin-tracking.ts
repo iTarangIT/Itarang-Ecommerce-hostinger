@@ -21,7 +21,7 @@ export const ORDER_STATUSES: OrderStatus[] = [
 
 export const PAYMENT_STATUSES: PaymentStatus[] = ['pending', 'authorized', 'paid', 'failed', 'refunded'];
 
-export const PAYMENT_METHODS: PaymentMethod[] = ['cod', 'razorpay-test', 'mock'];
+export const PAYMENT_METHODS: PaymentMethod[] = ['cod', 'razorpay', 'razorpay-test', 'mock'];
 
 export const SORTS: OrderSort[] = ['placed', 'updated', 'total', 'customer'];
 
