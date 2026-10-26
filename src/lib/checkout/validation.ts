@@ -51,7 +51,7 @@ export const quoteLineSchema = z.object({
   quantity: z.number().int().min(1).max(50),
 });
 
-export const paymentMethodSchema = z.enum(['cod', 'mock', 'razorpay-test']);
+export const paymentMethodSchema = z.enum(['cod', 'mock', 'razorpay-test', 'razorpay']);
 
 export const quoteRequestSchema = z.object({
   lines: z.array(quoteLineSchema).max(50),

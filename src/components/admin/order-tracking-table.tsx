@@ -42,7 +42,8 @@ const STATUS_LABEL: Record<OrderStatus, string> = {
 
 const METHOD_LABEL: Record<PaymentMethod, string> = {
   cod: 'Cash on delivery',
-  'razorpay-test': 'Razorpay',
+  razorpay: 'Razorpay',
+  'razorpay-test': 'Razorpay (test)',
   mock: 'Mock',
 };
 

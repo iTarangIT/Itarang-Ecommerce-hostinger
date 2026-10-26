@@ -11,18 +11,17 @@ import {
 } from './provider';
 
 /**
- * Razorpay provider — TEST MODE ONLY, and currently INERT.
+ * Razorpay provider, in test or live mode.
  *
- * No Razorpay credentials exist in this project, so this class is never
- * constructed: `resolvePaymentProvider()` returns the mock unless
- * `PAYMENT_PROVIDER=razorpay-test` is explicitly set. Nothing here issues a
- * request until that happens.
+ * Constructed only when `PAYMENT_PROVIDER` is `razorpay-test` or `razorpay`;
+ * otherwise checkout runs the mock and nothing here issues a request.
  *
  * The constructor refuses to build unless every condition holds:
- *   - the key id starts with `rzp_test_` (an `rzp_live_` key throws), and
+ *   - the key id's prefix matches the mode — `rzp_test_` for `razorpay-test`,
+ *     `rzp_live_` for `razorpay` — and
  *   - both the key secret and the webhook secret are present.
  *
- * `env()` applies the same `rzp_test_` rule at boot, so a live key cannot even
+ * `env()` applies the same prefix rule at boot, so a mismatched key cannot even
  * start the application. This is the second gate, in case the provider is
  * constructed from somewhere that bypassed the first.
  *
@@ -39,10 +38,10 @@ import {
 const API_BASE = 'https://api.razorpay.com/v1';
 
 export class RazorpayTestProvider implements PaymentProvider {
-  readonly id = 'razorpay-test' as const;
+  readonly id: 'razorpay-test' | 'razorpay';
   readonly requiresNetwork = true;
-  readonly displayName = 'Card / UPI / Net banking (Razorpay test mode)';
-  readonly isTestOnly = true;
+  readonly displayName: string;
+  readonly isTestOnly: boolean;
 
   private readonly keyId: string;
   private readonly keySecret: string;
@@ -50,11 +49,12 @@ export class RazorpayTestProvider implements PaymentProvider {
 
   constructor() {
     const config = env();
+    const mode = config.PAYMENT_PROVIDER;
 
-    if (config.PAYMENT_PROVIDER !== 'razorpay-test') {
+    if (mode !== 'razorpay-test' && mode !== 'razorpay') {
       throw new PaymentProviderError(
-        'RazorpayTestProvider constructed while PAYMENT_PROVIDER is not "razorpay-test". ' +
-          'This build uses the mock provider until real test credentials are supplied.',
+        'RazorpayTestProvider constructed while PAYMENT_PROVIDER is not "razorpay-test" or "razorpay". ' +
+          'This build uses the mock provider until Razorpay credentials are supplied.',
       );
     }
 
@@ -62,19 +62,27 @@ export class RazorpayTestProvider implements PaymentProvider {
 
     if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET || !RAZORPAY_WEBHOOK_SECRET) {
       throw new PaymentProviderError(
-        'Razorpay test credentials are not configured. Supply RAZORPAY_KEY_ID, ' +
+        'Razorpay credentials are not configured. Supply RAZORPAY_KEY_ID, ' +
           'RAZORPAY_KEY_SECRET and RAZORPAY_WEBHOOK_SECRET, or leave PAYMENT_PROVIDER=mock.',
       );
     }
 
-    // Live credentials are refused outright — this environment must never be
-    // able to move real money.
-    if (!RAZORPAY_KEY_ID.startsWith('rzp_test_')) {
+    // The key must match the mode: a test build must never be able to move
+    // real money, and a live build must never quietly take test payments.
+    const live = mode === 'razorpay';
+    if (!RAZORPAY_KEY_ID.startsWith(live ? 'rzp_live_' : 'rzp_test_')) {
       throw new PaymentProviderError(
-        'Refusing to start: only Razorpay TEST credentials (rzp_test_…) may be used here.',
+        live
+          ? 'Refusing to start: PAYMENT_PROVIDER=razorpay needs live credentials (rzp_live_…).'
+          : 'Refusing to start: only Razorpay TEST credentials (rzp_test_…) may be used here.',
       );
     }
 
+    this.id = mode;
+    this.isTestOnly = !live;
+    this.displayName = live
+      ? 'Card / UPI / Net banking (Razorpay)'
+      : 'Card / UPI / Net banking (Razorpay test mode)';
     this.keyId = RAZORPAY_KEY_ID;
     this.keySecret = RAZORPAY_KEY_SECRET;
     this.webhookSecret = RAZORPAY_WEBHOOK_SECRET;

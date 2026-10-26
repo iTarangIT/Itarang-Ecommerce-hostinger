@@ -10,7 +10,7 @@ import type { Order, PaymentStatus } from '@/lib/orders/types';
  * changing.
  */
 
-export type ProviderId = 'mock' | 'razorpay-test';
+export type ProviderId = 'mock' | 'razorpay-test' | 'razorpay';
 
 export interface PaymentIntent {
   /** The gateway's order id, stored on our order row and used for verification. */

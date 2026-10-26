@@ -117,7 +117,7 @@ export function CheckoutFlow({
    * selection is just "take the head of the list" rather than a search.
    */
   savedAddresses: CustomerAddress[];
-  provider: 'mock' | 'razorpay-test';
+  provider: 'mock' | 'razorpay-test' | 'razorpay';
 }) {
   const cart = useCart();
   const router = useRouter();
@@ -911,7 +911,7 @@ export function CheckoutFlow({
           <section className="rounded-xl border border-border bg-card p-5 sm:p-6">
             <h2 className="heading-3">How would you like to pay?</h2>
 
-            {pendingOrder && provider === 'razorpay-test' && intent ? (
+            {pendingOrder && provider !== 'mock' && intent ? (
               <RazorpayPanel
                 orderNumber={pendingOrder}
                 intent={intent}
@@ -947,7 +947,7 @@ export function CheckoutFlow({
                     icon={<Smartphone className="h-5 w-5" />}
                     title={`UPI — save ${formatPrice(UPI_DISCOUNT)}`}
                     description={
-                      provider === 'razorpay-test'
+                      provider !== 'mock'
                         ? `Pay with any UPI app and get ${formatPrice(UPI_DISCOUNT)} off. The payment window opens on UPI only.`
                         : `Get ${formatPrice(UPI_DISCOUNT)} off for paying by UPI. Test mode — no money moves.`
                     }
@@ -957,19 +957,19 @@ export function CheckoutFlow({
                     checked={payment === 'online'}
                     onSelect={() => setPayment('online')}
                     icon={
-                      provider === 'razorpay-test' ? (
+                      provider !== 'mock' ? (
                         <CreditCard className="h-5 w-5" />
                       ) : (
                         <FlaskConical className="h-5 w-5" />
                       )
                     }
                     title={
-                      provider === 'razorpay-test'
+                      provider !== 'mock'
                         ? 'Card, netbanking, wallet or EMI'
                         : 'Test payment'
                     }
                     description={
-                      provider === 'razorpay-test'
+                      provider !== 'mock'
                         ? 'Pay securely through Razorpay, including card EMI.'
                         : 'Simulates a card payment. No gateway is contacted and no money moves.'
                     }

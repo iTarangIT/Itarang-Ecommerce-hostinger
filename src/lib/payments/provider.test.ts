@@ -51,6 +51,7 @@ describe('provider resolution', () => {
 
   it('defaults to the mock provider when PAYMENT_PROVIDER is unset', () => {
     delete process.env.PAYMENT_PROVIDER;
+    delete process.env.RAZORPAY_KEY_ID;
     const provider = paymentProvider();
     expect(provider.id).toBe('mock');
     expect(provider.requiresNetwork).toBe(false);
@@ -59,6 +60,7 @@ describe('provider resolution', () => {
 
   it('never constructs the Razorpay provider under mock', () => {
     process.env.PAYMENT_PROVIDER = 'mock';
+    delete process.env.RAZORPAY_KEY_ID;
     expect(paymentProvider()).toBeInstanceOf(MockPaymentProvider);
   });
 
@@ -69,7 +71,7 @@ describe('provider resolution', () => {
     expect(() => paymentProvider()).toThrow();
   });
 
-  it('refuses a live key outright', () => {
+  it('refuses a live key in test mode', () => {
     process.env.PAYMENT_PROVIDER = 'razorpay-test';
     process.env.RAZORPAY_KEY_ID = 'rzp_live_abcdefghij';
     process.env.RAZORPAY_KEY_SECRET = 'secret';
@@ -81,6 +83,25 @@ describe('provider resolution', () => {
     process.env.PAYMENT_PROVIDER = 'mock';
     process.env.RAZORPAY_KEY_ID = 'rzp_live_abcdefghij';
     expect(() => paymentProvider()).toThrow(/rzp_test_/);
+  });
+
+  it('runs live only with a live key under PAYMENT_PROVIDER=razorpay', () => {
+    process.env.PAYMENT_PROVIDER = 'razorpay';
+    process.env.RAZORPAY_KEY_ID = 'rzp_live_abcdefghij';
+    process.env.RAZORPAY_KEY_SECRET = 'secret';
+    process.env.RAZORPAY_WEBHOOK_SECRET = 'whsecret';
+    const provider = paymentProvider();
+    expect(provider).toBeInstanceOf(RazorpayTestProvider);
+    expect(provider.id).toBe('razorpay');
+    expect(provider.isTestOnly).toBe(false);
+  });
+
+  it('refuses a test key in live mode', () => {
+    process.env.PAYMENT_PROVIDER = 'razorpay';
+    process.env.RAZORPAY_KEY_ID = 'rzp_test_abcdefghij';
+    process.env.RAZORPAY_KEY_SECRET = 'secret';
+    process.env.RAZORPAY_WEBHOOK_SECRET = 'whsecret';
+    expect(() => paymentProvider()).toThrow(/rzp_live_/);
   });
 
   it('exposes RazorpayTestProvider as a class but leaves it unused here', () => {
