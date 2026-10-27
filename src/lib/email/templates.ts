@@ -26,6 +26,21 @@ function link(path: string, token: string): string {
 }
 
 /**
+ * The iTarang wordmark at the top of every message.
+ *
+ * Linked from the live site rather than attached: an inline attachment shows
+ * up as a paperclip in several clients and adds 65 KB to every sign-in code.
+ * The alt text is styled so a client that blocks remote images still shows
+ * the name in place of the mark.
+ */
+function logoHeader(): string {
+  const base = env().NEXT_PUBLIC_SITE_URL.replace(/\/$/, '');
+  return `<p style="margin:0 0 24px">
+    <a href="${base}/" style="text-decoration:none"><img src="${base}/images/logo-wordmark-dark.png" alt="iTarang" width="140" height="35" style="display:block;border:0;height:35px;width:140px;font-size:20px;font-weight:700;color:#111"></a>
+  </p>`;
+}
+
+/**
  * `block` is raw block-level HTML placed between the heading and the sentence.
  *
  * It exists because `body` is rendered inside a `<p>`, and a `<table>` — which
@@ -40,6 +55,7 @@ function wrap(
 ): string {
   return `<!-- iTarang -->
 <div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#111">
+  ${logoHeader()}
   <h1 style="font-size:20px;margin:0 0 16px">${escapeHtml(heading)}</h1>
   ${block ?? ''}
   <p style="font-size:15px;line-height:1.6;margin:0 0 20px">${body}</p>
@@ -136,6 +152,7 @@ export function loginCodeMessage(to: string, code: string): Mail {
     ].join('\n'),
     html: `<!-- iTarang -->
 <div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#111">
+  ${logoHeader()}
   <h1 style="font-size:20px;margin:0 0 16px">Your sign-in code</h1>
   <p style="font-size:15px;line-height:1.6;margin:0 0 20px">Enter this code to sign in to iTarang. It expires in 10&nbsp;minutes and can be used once.</p>
   <p style="font-size:32px;font-weight:700;letter-spacing:8px;margin:0 0 24px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">${safe}</p>
