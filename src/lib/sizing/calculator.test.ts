@@ -54,11 +54,12 @@ describe("diversity applies to energy and never to power", () => {
     );
   });
 
-  it("defaults to everything running together", () => {
-    expect(DEFAULT_DIVERSITY).toBe(1);
+  it("defaults to the typical 50% (D-15)", () => {
+    expect(DEFAULT_DIVERSITY).toBe(0.5);
     expect(calculateSizing(ONE_FAN, 4).requiredAh).toBe(
-      calculateSizing(ONE_FAN, 4, { diversity: 1 }).requiredAh,
+      calculateSizing(ONE_FAN, 4, { diversity: 0.5 }).requiredAh,
     );
+    expect(decodeSelection("fan:1", "4").diversity).toBe(0.5);
   });
 
   it("fails closed on a value it does not recognise", () => {
@@ -79,7 +80,7 @@ describe("average consumption (20% / 50% / 100%)", () => {
     ]);
     expect(DIVERSITY_OPTIONS.map((option) => option.label)).toEqual([
       "100%",
-      "50%",
+      "50% typical",
       "20%",
     ]);
   });
@@ -314,7 +315,7 @@ describe("the URL round-trip", () => {
     // A short link for the ordinary case, and a link that *does* carry it is
     // visibly a link with an assumption in it.
     expect(
-      new URLSearchParams(encodeSelection({ fan: 1 }, 4, { diversity: 1 })).has(
+      new URLSearchParams(encodeSelection({ fan: 1 }, 4, { diversity: 0.5 })).has(
         "use",
       ),
     ).toBe(false);
@@ -322,9 +323,9 @@ describe("the URL round-trip", () => {
 
   it("round-trips a non-default diversity factor", () => {
     const qs = new URLSearchParams(
-      encodeSelection({ fan: 1 }, 4, { diversity: 0.5 }),
+      encodeSelection({ fan: 1 }, 4, { diversity: 1 }),
     );
-    expect(qs.get("use")).toBe("0.5");
+    expect(qs.get("use")).toBe("1");
     expect(
       decodeSelection(
         qs.get("load") ?? undefined,
@@ -333,7 +334,7 @@ describe("the URL round-trip", () => {
           use: qs.get("use") ?? undefined,
         },
       ).diversity,
-    ).toBe(0.5);
+    ).toBe(1);
   });
 
   it("falls back to 100% for a mangled diversity value", () => {

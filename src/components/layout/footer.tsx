@@ -172,7 +172,8 @@ export function Footer({ categories }: { categories: NavCategory[] }) {
           <div className="flex flex-col gap-3 border-t border-white/10 pt-4 text-xs text-ink-50/55 sm:flex-row sm:items-center sm:justify-between">
             <p className="flex items-center gap-1.5">
               <MapPin className="h-3.5 w-3.5" />
-              {SITE.address}
+              {SITE.legalName}, {SITE.address}
+              {SITE.gstin ? ` · GSTIN ${SITE.gstin}` : null}
             </p>
             <ul className="flex flex-wrap gap-x-4 gap-y-1">
               {POLICY_LINKS.map((link) => (
@@ -186,8 +187,8 @@ export function Footer({ categories }: { categories: NavCategory[] }) {
           </div>
 
           <p className="text-xs text-ink-50/45">
-            © {new Date().getFullYear()} {SITE.name}. All rights reserved. Prices include GST; a GST
-            invoice is issued with every order.
+            © {new Date().getFullYear()} {SITE.name}. All rights reserved. Prices include GST; your
+            GST invoice can be downloaded from your order page once it is issued.
           </p>
         </div>
       </div>

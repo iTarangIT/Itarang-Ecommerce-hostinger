@@ -8,6 +8,7 @@ import { SECONDARY_NAV, SITE, UTILITY_LINKS } from "@/lib/site";
 import { useCart, useWishlist } from "@/lib/store/hooks";
 import { useUI } from "@/lib/store/ui-provider";
 import { cn } from "@/lib/utils";
+import { HeaderPincode } from "./header-pincode";
 import { Logo } from "./logo";
 import { MegaMenu } from "./mega-menu";
 
@@ -53,9 +54,12 @@ export function Header({ categories }: { categories: NavCategory[] }) {
               wave power backup · certified installation included": we stock no
               inverters at all, and `installationIncluded` is false on all eight
               products — a claim on every page of the site that nothing backed. */}
-          <p className="text-muted-foreground">
-            Lithium iron phosphate batteries · made in India by Trontek
-          </p>
+          <div className="flex items-center gap-5">
+            <HeaderPincode />
+            <p className="text-muted-foreground">
+              Lithium iron phosphate batteries · made in India by Trontek
+            </p>
+          </div>
           <div className="flex items-center gap-5">
             {UTILITY_LINKS.map((link) => (
               <Link
@@ -74,6 +78,13 @@ export function Header({ categories }: { categories: NavCategory[] }) {
               {SITE.phone}
             </a>
           </div>
+        </div>
+      </div>
+
+      {/* Phones and tablets: the remembered pincode, also scrolling away. */}
+      <div className="border-b border-border bg-surface print:hidden lg:hidden">
+        <div className="container flex h-8 items-center">
+          <HeaderPincode />
         </div>
       </div>
 
@@ -123,7 +134,7 @@ export function Header({ categories }: { categories: NavCategory[] }) {
               className="hidden h-11 w-56 items-center gap-2 rounded-md border border-input bg-surface px-3 text-left text-sm text-muted-foreground transition-colors hover:border-primary/30 hover:bg-card xl:flex"
             >
               <Search className="h-4 w-4 shrink-0" />
-              <span className="truncate">Search inverters, batteries…</span>
+              <span className="truncate">Search batteries…</span>
             </button>
 
             <button

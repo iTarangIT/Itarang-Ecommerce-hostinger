@@ -9,6 +9,7 @@ import { PURCHASE_ENABLED } from '@/lib/commerce/purchase';
 import { summaryToCartItem, useCart, useCompare, useWishlist } from '@/lib/store/hooks';
 import { useUI } from '@/lib/store/ui-provider';
 import { track } from '@/lib/analytics/track';
+import { useSavedPincode } from '@/lib/support/pincode-store';
 import { BadgeStack } from '@/components/ui/badge';
 import { ButtonLink } from '@/components/ui/button';
 import { PriceBlock } from './price-block';
@@ -25,8 +26,9 @@ import { productPath } from '@/lib/routes';
  * The reading order — lead spec, title, price, saving, colours, buy — is the
  * retail convention the storefront now follows throughout: the shopper decides
  * on the figure that distinguishes the product, then the price, then acts. The
- * detail that used to sit on the card (rating, warranty, stock, installation)
- * moved to the product page, where there is room to state it properly.
+ * detail that used to sit on the card (rating, stock, installation) moved to
+ * the product page; the warranty came back as one short line (R-09, Luminous
+ * comparison), with the delivery estimate beside it once a pincode is known.
  */
 export function ProductCard({
   product,
@@ -41,6 +43,7 @@ export function ProductCard({
   const wishlist = useWishlist();
   const compare = useCompare();
   const { toast, open } = useUI();
+  const saved = useSavedPincode();
 
   const soldOut = product.availability === 'out-of-stock';
   const inWishlist = wishlist.has(product.id);
@@ -228,6 +231,17 @@ export function ProductCard({
           discountPlacement="below"
           className="mt-1"
         />
+
+        {/* Warranty (R-09) and, once the shopper has given a pincode, the
+            delivery estimate (R-10). Height reserved so cards stay aligned. */}
+        <p className="flex min-h-[1rem] flex-wrap gap-x-2 text-2xs font-medium text-muted-foreground">
+          {product.warrantyMonths ? (
+            <span>{Math.round(product.warrantyMonths / 12)}-year warranty</span>
+          ) : null}
+          {saved?.serviceable && saved.deliveryDays ? (
+            <span className="text-success">Delivers in ~{saved.deliveryDays} days</span>
+          ) : null}
+        </p>
 
         {/* Option line. Height is reserved either way so a row of cards keeps
             its buttons on one line. */}

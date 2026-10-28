@@ -98,6 +98,8 @@ export interface Order {
   stages: OrderStages;
   /** Courier and delivery details, entered by the admin at dispatch. */
   shipment: Shipment;
+  /** When the checkout consent tick was accepted (R-05); absent on older orders. */
+  termsAcceptedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -175,4 +177,6 @@ export interface NewOrder {
   sellerGstin?: string;
   idempotencyKey?: string;
   gatewayOrderId?: string;
+  /** The checkout consent tick was ticked; stamped as `terms_accepted_at`. */
+  termsAccepted?: boolean;
 }

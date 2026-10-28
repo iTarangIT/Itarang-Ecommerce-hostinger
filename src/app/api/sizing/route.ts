@@ -7,11 +7,11 @@ import type { Product } from '@/lib/commerce/types';
 import {
   HOME_BACKUP_SUBCATEGORIES,
   formatWh,
-  recommendBattery,
+  recommendForShopper,
   type Assessment,
   type HomeSystemVoltage,
+  type ShopperRecommendation,
   type SizingRequirement,
-  type SizingStatus,
 } from '@/lib/sizing/recommend';
 
 /**
@@ -50,9 +50,18 @@ export interface SizingRecommendation {
    * else, so "we do not stock a match" can never be printed for a request that
    * merely arrived without a system voltage.
    */
-  status: SizingStatus;
-  /** Set only when `status` is `matched`. */
+  status: ShopperRecommendation['status'];
+  /**
+   * Set when `status` is `matched` (covers the whole load) or `nearest`
+   * (covers `coversHours` of it — never a dead end, D-15).
+   */
   battery: RecommendedProduct | null;
+  /** The battery voltage the answer is for; can be above the requested one. */
+  systemVoltage: HomeSystemVoltage | null;
+  /** Hours of the requested window the battery covers. */
+  coversHours: number;
+  /** "Needs a 24 V inverter …" when the answer changes the inverter voltage. */
+  inverterNote: string | null;
   /**
    * Set only when `status` is `not-available`: the product that satisfies every
    * electrical requirement but is not sellable right now.
@@ -138,7 +147,7 @@ export async function GET(request: Request) {
   // draft product is not in this list and cannot be recommended.
   const catalogue = await allProducts();
 
-  const recommendation = recommendBattery(catalogue, requirement);
+  const recommendation = recommendForShopper(catalogue, requirement);
 
   /**
    * Inverters and combos, unchanged from before P1-B-2.
@@ -182,9 +191,13 @@ export async function GET(request: Request) {
   const body: SizingRecommendation = {
     status: recommendation.status,
     battery:
-      recommendation.status === 'matched' && recommendation.best
+      (recommendation.status === 'matched' || recommendation.status === 'nearest') &&
+      recommendation.best
         ? toRecommended(recommendation.best)
         : null,
+    systemVoltage: recommendation.systemVoltage,
+    coversHours: recommendation.coversHours,
+    inverterNote: recommendation.inverterNote,
     unavailableMatch:
       recommendation.status === 'not-available' && recommendation.best
         ? toRecommended(recommendation.best)

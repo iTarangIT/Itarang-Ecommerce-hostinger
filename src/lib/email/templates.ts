@@ -431,6 +431,155 @@ export function invoiceMessage(
   };
 }
 
+/** One order line as the order emails print it. */
+export interface OrderMailLine {
+  title: string;
+  quantity: number;
+  lineTotal: Paise;
+}
+
+function orderLinesTable(lines: OrderMailLine[], total: Paise): string {
+  const rows = lines
+    .map(
+      (line) =>
+        `<tr><td style="padding:4px 12px 4px 0">${escapeHtml(line.title)} × ${line.quantity}</td><td style="padding:4px 0;text-align:right;white-space:nowrap">${escapeHtml(formatPrice(line.lineTotal))}</td></tr>`,
+    )
+    .join('');
+  return `<table style="font-size:14px;margin:0 0 16px;border-collapse:collapse;width:100%">${rows}<tr><td style="padding:8px 12px 4px 0;border-top:1px solid #ddd;font-weight:700">Total paid</td><td style="padding:8px 0 4px;border-top:1px solid #ddd;text-align:right;font-weight:700;white-space:nowrap">${escapeHtml(formatPrice(total))}</td></tr></table>`;
+}
+
+/**
+ * The customer's confirmation, sent once when payment is received (R-03).
+ *
+ * The button opens the order page, which is also where tracking appears once
+ * the order ships.
+ */
+export function orderConfirmationMessage(
+  to: string,
+  details: { name: string; orderNumber: string; lines: OrderMailLine[]; total: Paise; path: string },
+): Mail {
+  const href = `${env().NEXT_PUBLIC_SITE_URL.replace(/\/$/, '')}${details.path}`;
+  const firstName = details.name.split(/\s+/)[0] || 'there';
+
+  return {
+    to,
+    subject: `Order ${details.orderNumber} confirmed — thank you`,
+    text: [
+      `Hi ${firstName},`,
+      '',
+      `We have received your payment and your order ${details.orderNumber} is confirmed.`,
+      '',
+      ...details.lines.map((line) => `${line.title} × ${line.quantity} — ${formatPrice(line.lineTotal)}`),
+      `Total paid: ${formatPrice(details.total)}`,
+      '',
+      'We will email you again when it ships. You can follow it on your order page:',
+      href,
+    ].join('\n'),
+    html: wrap(
+      'Your order is confirmed',
+      `Hi ${escapeHtml(firstName)}, we have received your payment and your order <strong>${escapeHtml(details.orderNumber)}</strong> is confirmed. We will email you again when it ships, and you can follow it on your order page.`,
+      { label: 'Track your order', href },
+      orderLinesTable(details.lines, details.total),
+    ),
+  };
+}
+
+/** The team's alert for the same paid order, with what is needed to act on it. */
+export function orderPaidAlertMessage(
+  to: string,
+  details: {
+    orderNumber: string;
+    customer: string;
+    phone: string;
+    email?: string;
+    city: string;
+    pincode: string;
+    paymentMethod: string;
+    lines: OrderMailLine[];
+    total: Paise;
+    isTest: boolean;
+  },
+): Mail {
+  const href = `${env().NEXT_PUBLIC_SITE_URL.replace(/\/$/, '')}/admin/orders/${encodeURIComponent(details.orderNumber)}`;
+  const prefix = details.isTest ? '[TEST] ' : '';
+  const fields: Array<[string, string]> = [
+    ['Customer', details.customer],
+    ['Mobile', details.phone],
+    ['Email', details.email ?? '—'],
+    ['Deliver to', `${details.city} ${details.pincode}`],
+    ['Paid by', details.paymentMethod],
+  ];
+  const rows = fields
+    .map(
+      ([label, value]) =>
+        `<tr><td style="padding:4px 12px 4px 0;color:#666;vertical-align:top">${escapeHtml(label)}</td><td style="padding:4px 0">${escapeHtml(value)}</td></tr>`,
+    )
+    .join('');
+
+  return {
+    to,
+    subject: `${prefix}New paid order ${details.orderNumber} — ${formatPrice(details.total)}`,
+    text: [
+      `${prefix}Paid order ${details.orderNumber}`,
+      '',
+      ...fields.map(([label, value]) => `${label}: ${value}`),
+      '',
+      ...details.lines.map((line) => `${line.title} × ${line.quantity} — ${formatPrice(line.lineTotal)}`),
+      `Total: ${formatPrice(details.total)}`,
+      '',
+      href,
+    ].join('\n'),
+    html: wrap(
+      `${prefix}New paid order — ${details.orderNumber}`,
+      'Pack and dispatch it from the order page.',
+      { label: 'Open the order', href },
+      `<table style="font-size:14px;margin:0 0 16px;border-collapse:collapse">${rows}</table>${orderLinesTable(details.lines, details.total)}`,
+    ),
+  };
+}
+
+/**
+ * The daily list of paid orders still without an invoice (R-08), sent to the
+ * team by `/api/cron/invoice-reminder`. Only sent when the list is not empty.
+ */
+export function invoiceReminderMessage(
+  to: string,
+  orders: Array<{ orderNumber: string; customerName: string; total: Paise; paidAt: string }>,
+): Mail {
+  const base = env().NEXT_PUBLIC_SITE_URL.replace(/\/$/, '');
+  const count = `${orders.length} paid order${orders.length === 1 ? '' : 's'}`;
+  const paidOn = (iso: string) =>
+    new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' });
+  const rows = orders
+    .map(
+      (order) =>
+        `<tr><td style="padding:4px 12px 4px 0"><a href="${base}/admin/orders/${encodeURIComponent(order.orderNumber)}">${escapeHtml(order.orderNumber)}</a></td><td style="padding:4px 12px 4px 0">${escapeHtml(order.customerName)}</td><td style="padding:4px 12px 4px 0;white-space:nowrap">${escapeHtml(formatPrice(order.total))}</td><td style="padding:4px 0;color:#666;white-space:nowrap">paid ${escapeHtml(paidOn(order.paidAt))}</td></tr>`,
+    )
+    .join('');
+
+  return {
+    to,
+    subject: `${count} waiting for an invoice`,
+    text: [
+      `${count} paid more than a day ago and have no invoice uploaded:`,
+      '',
+      ...orders.map(
+        (order) =>
+          `${order.orderNumber} — ${order.customerName} — ${formatPrice(order.total)} — paid ${paidOn(order.paidAt)}`,
+      ),
+      '',
+      'Raise each in Zoho or Vyapaar and upload the PDF on the order page.',
+      `${base}/admin`,
+    ].join('\n'),
+    html: wrap(
+      `${count} waiting for an invoice`,
+      'Each was paid more than a day ago. Raise the invoice in Zoho or Vyapaar and upload the PDF, with its number and date, on the order page.',
+      { label: 'Open the orders', href: `${base}/admin` },
+      `<table style="font-size:14px;margin:0 0 16px;border-collapse:collapse">${rows}</table>`,
+    ),
+  };
+}
+
 /**
  * The internal alert, sent to the business when a variant sells out.
  *

@@ -2,9 +2,10 @@ import type { Metadata } from 'next';
 import Image from 'next/image';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { CheckCircle2, Clock, FlaskConical } from 'lucide-react';
+import { CheckCircle2, Clock, FileText, FlaskConical } from 'lucide-react';
 import { orders } from '@/lib/orders/postgres-repository';
 import { hasOrderAccess } from '@/lib/orders/access';
+import { canInvoice, findInvoiceMeta } from '@/lib/orders/invoices';
 import { normaliseOrderNumber } from '@/lib/orders/numbering';
 import { formatPrice } from '@/lib/catalog/pricing';
 import { formatDate } from '@/lib/utils';
@@ -73,6 +74,8 @@ export default async function OrderPage({
   // Reviews open once the battery has arrived; the review action still checks
   // the signed-in customer bought it.
   const canReview = order.status === 'delivered' && order.paymentStatus !== 'refunded';
+  const invoice = canInvoice(order) ? await findInvoiceMeta(order.id) : null;
+  const invoiceReady = Boolean(invoice);
 
   return (
     <div className="container py-6 lg:py-10">
@@ -120,7 +123,11 @@ export default async function OrderPage({
           <div>
             <dt className="text-xs uppercase tracking-wide text-muted-foreground">Payment</dt>
             <dd className="mt-1 text-sm font-medium text-foreground">
-              {order.paymentMethod === 'cod' ? 'Cash on delivery' : 'Test payment'}
+              {order.paymentMethod === 'cod'
+                ? 'Cash on delivery'
+                : order.paymentMethod === 'razorpay'
+                  ? 'Paid online'
+                  : 'Test payment'}
               <span className="block text-xs font-normal text-muted-foreground">
                 {order.paymentStatus}
               </span>
@@ -201,6 +208,20 @@ export default async function OrderPage({
               Inclusive of {formatPrice(order.amounts.gstAmount)} GST
               {order.buyerGstin ? ` · GSTIN ${order.buyerGstin}` : ''}
             </p>
+            {invoiceReady ? (
+              <a
+                href={`/api/orders/${encodeURIComponent(order.orderNumber)}/invoice`}
+                className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-primary underline-offset-2 hover:underline"
+              >
+                <FileText className="h-4 w-4" />
+                Download invoice
+                {invoice?.invoiceNumber ? ` ${invoice.invoiceNumber}` : ''}
+              </a>
+            ) : canInvoice(order) && !order.isTest ? (
+              <p className="mt-3 text-xs text-muted-foreground">
+                Your GST invoice will appear here once it is issued.
+              </p>
+            ) : null}
           </div>
         </section>
 

@@ -462,7 +462,11 @@ export async function setCustomerType(userId: number, customerType: string | nul
 export const CAMPAIGNS_TAG = 'campaigns';
 
 /** What the storefront shows for a listed code: plain data, safe to serialise. */
-export type SiteCoupon = Omit<CouponRule, 'categories'> & { categories?: string[] };
+export type SiteCoupon = Omit<CouponRule, 'categories'> & {
+  categories?: string[];
+  /** When the campaign ends (ISO), for the announcement bar's end date (R-09). */
+  endsAt?: string;
+};
 
 const cachedCampaigns = unstable_cache(
   async () =>
@@ -499,5 +503,6 @@ export async function listSiteCoupons(now = new Date()): Promise<SiteCoupon[]> {
       products: campaign.products,
       description: campaign.description,
       oncePerCustomer: campaign.oncePerCustomer,
+      ...(campaign.endsAt ? { endsAt: campaign.endsAt.toISOString() } : {}),
     }));
 }

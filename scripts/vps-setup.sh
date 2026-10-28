@@ -59,9 +59,48 @@ PrivateTmp=true
 [Install]
 WantedBy=multi-user.target
 UNIT
+# Daily jobs (R-08: invoice reminder). The token is read from the live
+# release's env file at run time, so rotating CRON_SECRET needs only a deploy.
+# No CRON_SECRET there means the route is off and the job does nothing.
+cat > /usr/local/bin/itarang-shop-cron <<'SCRIPT'
+#!/bin/sh
+set -eu
+secret=$(grep -m1 '^CRON_SECRET=' /srv/itarang-shop/current/.env.production | cut -d= -f2- || true)
+[ -n "$secret" ] || { echo "CRON_SECRET not set; skipping"; exit 0; }
+curl -fsS -X POST -H "Authorization: Bearer $secret" \
+  http://127.0.0.1:3100/api/cron/invoice-reminder
+SCRIPT
+chmod 755 /usr/local/bin/itarang-shop-cron
+
+cat > /etc/systemd/system/itarang-shop-cron.service <<UNIT
+[Unit]
+Description=iTarang storefront daily jobs (invoice reminder)
+After=itarang-shop.service
+
+[Service]
+Type=oneshot
+User=shop
+Group=shop
+ExecStart=/usr/local/bin/itarang-shop-cron
+UNIT
+
+# 09:30 IST every day; Persistent catches up a run missed while the host was down.
+cat > /etc/systemd/system/itarang-shop-cron.timer <<UNIT
+[Unit]
+Description=Run the iTarang storefront daily jobs
+
+[Timer]
+OnCalendar=*-*-* 04:00:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+
 systemctl daemon-reload
 systemctl enable itarang-shop >/dev/null 2>&1
-echo "systemd: itarang-shop enabled (it starts on the first deploy)"
+systemctl enable --now itarang-shop-cron.timer >/dev/null 2>&1
+echo "systemd: itarang-shop enabled (it starts on the first deploy); daily cron timer on"
 
 if [ -d "$TRAEFIK_DYNAMIC" ]; then
   cat > "$TRAEFIK_DYNAMIC/itarang-shop.yml" <<YML

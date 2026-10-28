@@ -68,6 +68,7 @@ const PREFIX: Record<SupportRequestKind, string> = {
   complaint: 'CMP',
   warranty: 'WRN',
   installation: 'INS',
+  enquiry: 'ENQ',
 };
 
 /** No 0/O or 1/I/L, so a reference read out over the phone is unambiguous. */

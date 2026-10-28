@@ -14,12 +14,12 @@ const RECENT_KEY = 'itarang.recentSearches.v1';
 const MAX_RECENT = 5;
 
 const POPULAR = [
-  '900VA inverter',
+  'e-rickshaw battery',
+  '2-wheeler battery',
+  'Powercube',
+  'home inverter battery',
   'lithium battery',
-  'inverter battery combo',
-  '150Ah tubular',
-  'solar ready',
-  'UPS for desktop',
+  'EV charger',
 ];
 
 function readRecent(): string[] {

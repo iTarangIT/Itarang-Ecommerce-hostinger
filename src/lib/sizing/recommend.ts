@@ -506,3 +506,164 @@ export function recommendBattery(
 
   return { status: 'no-catalogue-match', best: null, alternatives: [], considered };
 }
+
+/* ------------------------------------------------- never a dead end (R-06) */
+
+const SYSTEM_VOLTAGES: readonly HomeSystemVoltage[] = [12, 24, 48];
+
+/**
+ * The same energy expressed at another system voltage.
+ *
+ * `requiredAh` is a figure *at* the requirement's voltage; the watt-hours
+ * behind it do not change when the battery input does, so the Ah scales by
+ * the voltage ratio. Rounded up, so a converted figure is never smaller than
+ * the energy it stands for.
+ */
+export function requiredAhAt(requirement: SizingRequirement, voltage: HomeSystemVoltage): number {
+  if (requirement.systemVoltage === null) return requirement.requiredAh;
+  return Math.ceil((requirement.requiredAh * requirement.systemVoltage) / voltage);
+}
+
+export interface ShopperRecommendation extends Omit<BatteryRecommendation, 'status'> {
+  /**
+   * `nearest` joins the statuses when nothing covers the whole load: the bank
+   * that covers the most of it, with `coversHours` saying how much (D-15).
+   */
+  status: SizingStatus | 'nearest';
+  /** The battery input voltage the answer is for — not always the asked one. */
+  systemVoltage: HomeSystemVoltage | null;
+  /** Hours of the shopper's window the recommended bank covers. */
+  coversHours: number;
+  /**
+   * Set when the answer needs a different inverter from the one the load's VA
+   * suggests, e.g. "Needs a 24 V inverter".
+   */
+  inverterNote: string | null;
+}
+
+function inverterNoteFor(chosen: HomeSystemVoltage, asked: HomeSystemVoltage | null): string | null {
+  if (asked === null || chosen === asked) return null;
+  return chosen > asked
+    ? `Needs a ${chosen} V inverter — a higher battery voltage than your load alone calls for, so the bank stays at ${MAX_BANK_UNITS} units or fewer.`
+    : `Needs a ${chosen} V inverter, which may not run every appliance at once — switch heavy loads off during a cut.`;
+}
+
+/**
+ * The calculator's answer, which is never empty when the catalogue holds a
+ * sellable home battery (D-15, 27 Oct).
+ *
+ * `recommendBattery` stays the strict judge and is unchanged. This asks it up
+ * to three questions, in order:
+ *
+ * 1. At the voltage the load's VA calls for. Any answer other than "no match"
+ *    is returned as it is.
+ * 2. At each higher home voltage (24, then 48 V), with the same energy. A big
+ *    load on a 12 V system can need more than `MAX_BANK_UNITS` batteries where a
+ *    24 V bank of the same energy would not — the energy need, not only the
+ *    inverter VA, raises the system voltage.
+ * 3. Otherwise, the nearest option: of the sellable home batteries whose bank
+ *    can carry the running load, the one that covers the most hours, at most
+ *    `MAX_BANK_UNITS` units, said plainly as "covers about X hours".
+ *
+ * Only when no sellable, fully documented home battery exists at all does the
+ * shopper get an empty answer — and that is then the truth about the catalogue.
+ */
+export function recommendForShopper(
+  catalogue: Product[],
+  requirement: SizingRequirement,
+): ShopperRecommendation {
+  const asked = requirement.systemVoltage;
+  const first = recommendBattery(catalogue, requirement);
+  const complete = (
+    recommendation: BatteryRecommendation,
+    voltage: HomeSystemVoltage | null,
+  ): ShopperRecommendation => ({
+    ...recommendation,
+    systemVoltage: voltage,
+    coversHours: recommendation.status === 'matched' ? requirement.backupHours : 0,
+    inverterNote: voltage === null ? null : inverterNoteFor(voltage, asked),
+  });
+
+  if (first.status !== 'no-catalogue-match' || asked === null) return complete(first, asked);
+
+  for (const voltage of SYSTEM_VOLTAGES.filter((v) => v > asked)) {
+    const raised = recommendBattery(catalogue, {
+      ...requirement,
+      systemVoltage: voltage,
+      requiredAh: requiredAhAt(requirement, voltage),
+    });
+    if (raised.status === 'matched') return complete(raised, voltage);
+  }
+
+  const nearest = nearestBank(catalogue, requirement);
+  if (nearest) {
+    return {
+      status: 'nearest',
+      best: nearest.assessment,
+      alternatives: [],
+      considered: first.considered,
+      systemVoltage: nearest.voltage,
+      coversHours: nearest.coversHours,
+      inverterNote: inverterNoteFor(nearest.voltage, asked),
+    };
+  }
+
+  return complete(first, asked);
+}
+
+function nearestBank(
+  catalogue: Product[],
+  requirement: SizingRequirement,
+): { assessment: Assessment; voltage: HomeSystemVoltage; coversHours: number } | null {
+  const asked = requirement.systemVoltage;
+  if (asked === null || requirement.requiredAh <= 0) return null;
+
+  let best: { assessment: Assessment; voltage: HomeSystemVoltage; coversHours: number } | null =
+    null;
+
+  for (const voltage of SYSTEM_VOLTAGES) {
+    const neededAh = requiredAhAt(requirement, voltage);
+    for (const product of catalogue) {
+      if (product.category !== 'batteries') continue;
+      // Judged at this voltage with a capacity the bank can always meet, so the
+      // only rejections left are the ones that rule the product out entirely:
+      // wrong application, missing data, out of stock, too little power.
+      const spec = readBatterySpec(product);
+      if (spec.ah === null || spec.ah <= 0) continue;
+      const units = Math.min(MAX_BANK_UNITS, Math.max(1, Math.ceil(neededAh / spec.ah)));
+      const assessment = assess(product, {
+        ...requirement,
+        systemVoltage: voltage,
+        requiredAh: spec.ah * units,
+      });
+      if (assessment.rejections.length > 0) continue;
+
+      const fraction = Math.min(1, (spec.ah * units) / neededAh);
+      // Rounded down to the half hour: "about" must not round in our favour.
+      const coversHours = Math.floor(requirement.backupHours * fraction * 2) / 2;
+      if (coversHours <= 0) continue;
+
+      const candidate = { assessment: { ...assessment, units }, voltage, coversHours };
+      if (
+        !best ||
+        coversHours > best.coversHours ||
+        (coversHours === best.coversHours &&
+          minSellingPrice(product) * units <
+            minSellingPrice(best.assessment.product) * best.assessment.units)
+      ) {
+        best = candidate;
+      }
+    }
+  }
+
+  if (best) {
+    best.assessment = {
+      ...best.assessment,
+      reasons: [
+        `Covers about ${best.coversHours} of your ${requirement.backupHours} hours at the load you chose`,
+        ...best.assessment.reasons.filter((reason) => !reason.includes('window needs')),
+      ],
+    };
+  }
+  return best;
+}

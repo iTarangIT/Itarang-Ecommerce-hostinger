@@ -135,6 +135,9 @@ function withoutDuplicatedColumns(groups: ProductRecord['specGroups']): ProductR
     .filter((group) => group.specs.length > 0);
 }
 
+/** Image roles that are spec-sheet posters rather than product photos. */
+const SPEC_IMAGE_ROLES: ReadonlySet<string> = new Set(['size', 'electrical', 'listing']);
+
 export function toDomainProduct(record: ProductRecord): Product {
   const images = record.media.length
     ? // Primary first, then gallery order. The gallery and every product card
@@ -143,6 +146,10 @@ export function toDomainProduct(record: ProductRecord): Product {
         .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary) || a.position - b.position)
         .map((media) => media.url)
     : artSet(record.art, 1);
+  const specImages = record.media
+    .filter((media) => SPEC_IMAGE_ROLES.has(media.role))
+    .sort((a, b) => a.position - b.position)
+    .map((media) => media.url);
 
   return {
     id: record.productKey,
@@ -158,6 +165,7 @@ export function toDomainProduct(record: ProductRecord): Product {
     subcategory: record.subcategory,
     art: record.art,
     images,
+    ...(specImages.length ? { specImages } : {}),
     highlights: record.highlights,
     description: record.description,
     specGroups: withoutDuplicatedColumns(record.specGroups),

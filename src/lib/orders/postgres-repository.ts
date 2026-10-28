@@ -5,6 +5,7 @@ import { countRedemptions } from '@/lib/offers/campaign-store';
 import { dispatchStockAlertsInBackground } from '@/lib/stock/alerts';
 import { recordStockTransitions, transitionBetween } from '@/lib/stock/transitions';
 import { generateOrderNumber } from './numbering';
+import { notifyOrderPaidInBackground } from './notify';
 import {
   canTransitionOrder,
   canTransitionPayment,
@@ -89,6 +90,7 @@ interface OrderRow {
   tracking_url: string | null;
   delivery_person: string | null;
   delivery_phone: string | null;
+  terms_accepted_at: Date | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -176,6 +178,7 @@ function toOrder(row: OrderRow, items: OrderItem[]): Order {
       deliveryPerson: row.delivery_person ?? undefined,
       deliveryPhone: row.delivery_phone ?? undefined,
     },
+    termsAcceptedAt: row.terms_accepted_at?.toISOString(),
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };
@@ -189,7 +192,7 @@ const ORDER_COLUMNS = `
   payment_method, is_test, idempotency_key, gateway_order_id,
   paid_at, confirmed_at, packed_at, shipped_at, delivered_at, cancelled_at,
   courier_name, tracking_number, tracking_url, delivery_person, delivery_phone,
-  created_at, updated_at`;
+  terms_accepted_at, created_at, updated_at`;
 
 /**
  * The column that records when an order first reached a status. Fixed
@@ -622,9 +625,11 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
                customer_name, customer_phone, customer_email, shipping_address,
                subtotal, product_savings, coupon_code, coupon_discount, shipping, cod_fee,
                total, gst_amount, gst_rate, place_of_supply, buyer_gstin, seller_gstin,
-               payment_method, is_test, idempotency_key, gateway_order_id, payment_discount
+               payment_method, is_test, idempotency_key, gateway_order_id, payment_discount,
+               terms_accepted_at
              ) VALUES (
-               $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25
+               $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,
+               CASE WHEN $26 THEN now() END
              ) RETURNING ${ORDER_COLUMNS}`,
             [
               orderNumber,
@@ -652,6 +657,7 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
               order.idempotencyKey ?? null,
               order.gatewayOrderId ?? null,
               order.amounts.paymentDiscount,
+              order.termsAccepted === true,
             ],
           );
           inserted = result.rows[0];
@@ -954,6 +960,15 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
      */
     let stockTransitionRecorded = false;
 
+    /**
+     * Whether this call is the one that moved the payment to `paid`.
+     *
+     * The webhook and the browser callback both arrive for one payment; the row
+     * lock makes exactly one of them see the old status, so only that one sends
+     * the confirmation mail (R-03). Sent after commit, for the reason above.
+     */
+    let newlyPaid = false;
+
     const result = await transaction(async (client) => {
       const current = await client.query<OrderRow>(
         `SELECT ${ORDER_COLUMNS} FROM orders WHERE id = $1 FOR UPDATE`,
@@ -1009,6 +1024,7 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
       // Paid means the stock is genuinely gone; abandoned reservations are
       // released by the TTL instead.
       if (status === 'paid') {
+        newlyPaid = row.payment_status !== 'paid';
         const effect = await this.consumeWithin(client, orderId);
         stockChanged = effect.stockChanged;
         stockTransitionRecorded = effect.transitionRecorded;
@@ -1019,6 +1035,7 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
     });
 
     afterStockChange(stockChanged, stockTransitionRecorded);
+    if (newlyPaid && result) notifyOrderPaidInBackground(result);
 
     return result;
   }

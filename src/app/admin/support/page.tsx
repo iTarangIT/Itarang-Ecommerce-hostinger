@@ -15,7 +15,7 @@ export const metadata: Metadata = {
 };
 
 const STATUSES: SupportRequestStatus[] = ['open', 'in_progress', 'resolved', 'closed'];
-const KINDS: SupportRequestKind[] = ['complaint', 'warranty', 'installation'];
+const KINDS: SupportRequestKind[] = ['complaint', 'warranty', 'installation', 'enquiry'];
 
 const STATUS_TONE: Record<SupportRequestStatus, string> = {
   open: 'bg-warning-soft text-warning',

@@ -160,6 +160,43 @@ const schema = z
      * are sent. Defaults to the customer-care address the site publishes.
      */
     SUPPORT_INBOX_EMAIL: z.string().email().default('care@itarang.com'),
+    /**
+     * Who hears about a paid order and about paid orders still without an
+     * invoice (R-03, R-08). Comma-separated; defaults to customer care.
+     */
+    ORDER_ALERT_EMAILS: z
+      .string()
+      .default('care@itarang.com')
+      .transform((value) =>
+        value
+          .split(',')
+          .map((address) => address.trim())
+          .filter(Boolean),
+      )
+      .pipe(z.array(z.string().email()).min(1)),
+
+    /* -------------------------------------------------------- scheduled jobs */
+    /**
+     * Bearer token for `/api/cron/*`. Unset turns the routes off (404), so a
+     * job can never run unauthenticated by accident.
+     */
+    CRON_SECRET: z.string().min(24).optional(),
+
+    /* ----------------------------------------------------- SMS OTP (Exotel) */
+    /**
+     * Exotel SMS for sign-in codes (R-21). All of SID, API key, API token,
+     * sender id, DLT entity id, DLT template id and template text, or none —
+     * without them `SmsOtpTransport` refuses, exactly as before. The template
+     * must be the DLT-approved text with `{code}` where the code goes.
+     */
+    EXOTEL_SID: z.string().optional(),
+    EXOTEL_API_KEY: z.string().optional(),
+    EXOTEL_API_TOKEN: z.string().optional(),
+    EXOTEL_SUBDOMAIN: z.string().default('api.exotel.com'),
+    EXOTEL_SMS_SENDER_ID: z.string().optional(),
+    EXOTEL_DLT_ENTITY_ID: z.string().optional(),
+    EXOTEL_DLT_OTP_TEMPLATE_ID: z.string().optional(),
+    EXOTEL_OTP_TEMPLATE: z.string().includes('{code}').optional(),
   })
   .superRefine((value, ctx) => {
     if (value.COMMERCE_PROVIDER === 'hostinger' && !value.HOSTINGER_SALES_CHANNEL_ID) {
@@ -239,6 +276,27 @@ const schema = z
           'Email is partially configured. Set all of ' +
           smtp.map(([k]) => k).join(', ') +
           ', or none of them to keep the mailer off.',
+      });
+    }
+
+    const exotel = [
+      ['EXOTEL_SID', value.EXOTEL_SID],
+      ['EXOTEL_API_KEY', value.EXOTEL_API_KEY],
+      ['EXOTEL_API_TOKEN', value.EXOTEL_API_TOKEN],
+      ['EXOTEL_SMS_SENDER_ID', value.EXOTEL_SMS_SENDER_ID],
+      ['EXOTEL_DLT_ENTITY_ID', value.EXOTEL_DLT_ENTITY_ID],
+      ['EXOTEL_DLT_OTP_TEMPLATE_ID', value.EXOTEL_DLT_OTP_TEMPLATE_ID],
+      ['EXOTEL_OTP_TEMPLATE', value.EXOTEL_OTP_TEMPLATE],
+    ] as const;
+    const exotelSet = exotel.filter(([, v]) => v);
+    if (exotelSet.length > 0 && exotelSet.length < exotel.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['EXOTEL_SID'],
+        message:
+          'SMS is partially configured. Set all of ' +
+          exotel.map(([k]) => k).join(', ') +
+          ', or none of them to keep SMS sign-in off.',
       });
     }
 
@@ -341,6 +399,16 @@ export function env(): Env {
     SELLER_STATE_CODE: process.env.SELLER_STATE_CODE,
     STOCK_ALERT_EMAIL: blank(process.env.STOCK_ALERT_EMAIL),
     SUPPORT_INBOX_EMAIL: blank(process.env.SUPPORT_INBOX_EMAIL),
+    ORDER_ALERT_EMAILS: blank(process.env.ORDER_ALERT_EMAILS),
+    CRON_SECRET: blank(process.env.CRON_SECRET),
+    EXOTEL_SID: blank(process.env.EXOTEL_SID),
+    EXOTEL_API_KEY: blank(process.env.EXOTEL_API_KEY),
+    EXOTEL_API_TOKEN: blank(process.env.EXOTEL_API_TOKEN),
+    EXOTEL_SUBDOMAIN: blank(process.env.EXOTEL_SUBDOMAIN),
+    EXOTEL_SMS_SENDER_ID: blank(process.env.EXOTEL_SMS_SENDER_ID),
+    EXOTEL_DLT_ENTITY_ID: blank(process.env.EXOTEL_DLT_ENTITY_ID),
+    EXOTEL_DLT_OTP_TEMPLATE_ID: blank(process.env.EXOTEL_DLT_OTP_TEMPLATE_ID),
+    EXOTEL_OTP_TEMPLATE: blank(process.env.EXOTEL_OTP_TEMPLATE),
   });
 
   if (!parsed.success) {

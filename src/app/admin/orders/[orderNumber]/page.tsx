@@ -213,6 +213,10 @@ export default async function AdminOrderDetailPage({
                   <CheckCircle2 className="h-3 w-3" />
                   Sent
                 </span>
+              ) : invoiceAllowed && !invoice && !order.isTest ? (
+                <span className="rounded-sm bg-warning-soft px-2 py-0.5 text-2xs font-bold uppercase text-warning">
+                  Invoice pending
+                </span>
               ) : null}
             </div>
             {!invoiceAllowed ? (
@@ -236,6 +240,12 @@ export default async function AdminOrderDetailPage({
                       <FileText className="h-4 w-4 shrink-0" />
                       <span className="truncate">{invoice.fileName}</span>
                     </a>
+                    {invoice.invoiceNumber ? (
+                      <p className="tabular text-xs font-medium text-foreground">
+                        No. {invoice.invoiceNumber}
+                        {invoice.invoiceDate ? ` · dated ${invoice.invoiceDate}` : ''}
+                      </p>
+                    ) : null}
                     <p className="text-xs text-muted-foreground">
                       {Math.max(1, Math.round(invoice.sizeBytes / 1024))} KB · uploaded{' '}
                       {formatDate(invoice.uploadedAt)} by {invoice.uploadedBy}
@@ -257,7 +267,8 @@ export default async function AdminOrderDetailPage({
                   </div>
                 ) : (
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Upload the invoice PDF (up to 8 MB), then email it to the customer.
+                    Upload the invoice PDF raised in Zoho or Vyapaar (up to 8 MB) with its number
+                    and date, then email it to the customer.
                   </p>
                 )}
 
@@ -274,6 +285,28 @@ export default async function AdminOrderDetailPage({
                     required
                     className="block w-full text-xs file:mr-3 file:rounded-md file:border file:border-border file:bg-surface file:px-3 file:py-1.5 file:text-xs file:font-medium"
                   />
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="block text-xs font-medium text-muted-foreground">
+                      Invoice number
+                      <input
+                        name="invoiceNumber"
+                        required
+                        maxLength={60}
+                        defaultValue={invoice?.invoiceNumber}
+                        className="mt-1 block h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                      />
+                    </label>
+                    <label className="block text-xs font-medium text-muted-foreground">
+                      Invoice date
+                      <input
+                        type="date"
+                        name="invoiceDate"
+                        required
+                        defaultValue={invoice?.invoiceDate}
+                        className="mt-1 block h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                      />
+                    </label>
+                  </div>
                   <Button type="submit" variant="outline" fullWidth>
                     {invoice ? 'Replace invoice' : 'Upload invoice'}
                   </Button>
@@ -320,6 +353,11 @@ export default async function AdminOrderDetailPage({
                 // claimed by an account that registers later.
                 <>Guest order — order number and phone only, no account attached.</>
               )}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {order.termsAcceptedAt
+                ? `Accepted terms and order updates on ${formatDate(order.termsAcceptedAt)}.`
+                : 'Placed before the checkout consent tick — no consent recorded.'}
             </p>
             <address className="mt-3 not-italic text-muted-foreground">
               {order.shippingAddress.line1}

@@ -7,10 +7,9 @@ import {
   isPincode,
   type ServiceabilityResult,
 } from '@/lib/support/serviceability';
+import { PINCODE_KEY, checkPincode } from '@/lib/support/pincode-store';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-
-const STORAGE_KEY = 'itarang.pincode';
 
 /**
  * "Check delivery" on the product page.
@@ -18,7 +17,8 @@ const STORAGE_KEY = 'itarang.pincode';
  * Asks `/api/pincode`, which reads the coverage list. The last pincode is
  * remembered in this browser only (it is not personal enough to store
  * anywhere else, and convenient enough to keep) and checked again on the next
- * product page, so a shopper types it once.
+ * product page, so a shopper types it once. The answer is shared through
+ * `pincode-store`, so the header shows it too (R-10).
  */
 export function DeliveryCheck() {
   const [pincode, setPincode] = React.useState('');
@@ -34,31 +34,20 @@ export function DeliveryCheck() {
     }
     setLoading(true);
     setError(null);
-    try {
-      const response = await fetch(`/api/pincode?code=${code}`);
-      const data = await response.json();
-      if (!response.ok) {
-        setError(data.error ?? 'Could not check this pincode.');
-        setResult(null);
-      } else {
-        setResult(data as ServiceabilityResult);
-        try {
-          window.localStorage.setItem(STORAGE_KEY, code);
-        } catch {
-          /* private mode — nothing to remember */
-        }
-      }
-    } catch {
-      setError('Could not check delivery just now.');
-    } finally {
-      setLoading(false);
+    const outcome = await checkPincode(code);
+    if (outcome.ok) {
+      setResult(outcome.result);
+    } else {
+      setError(outcome.error);
+      setResult(null);
     }
+    setLoading(false);
   }, []);
 
   React.useEffect(() => {
     let saved: string | null = null;
     try {
-      saved = window.localStorage.getItem(STORAGE_KEY);
+      saved = window.localStorage.getItem(PINCODE_KEY);
     } catch {
       saved = null;
     }

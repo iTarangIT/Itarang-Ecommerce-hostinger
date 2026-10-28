@@ -13,6 +13,10 @@ import { subcategoryPath } from '@/lib/routes';
  * time and asks a visitor to wait for the one they came for; two cards show
  * both lines at once, and each card is itself a way in.
  *
+ * Kept to about half its old height (R-09), so the product rail and its prices
+ * are within one scroll on a laptop: tighter padding, a shorter image band, and
+ * the copy trimmed to the headline, the three points and the two actions.
+ *
  * The photos are the Trontek listing images, cropped to the product. Every
  * figure on a card is printed on that same listing image — capacity, voltage
  * and the warranty wording — so the hero states nothing the documents do not.
@@ -55,21 +59,16 @@ export function Hero() {
         className="pointer-events-none absolute -bottom-40 -left-32 h-[26rem] w-[26rem] rounded-full bg-accent/10 blur-3xl"
       />
 
-      <div className="container relative grid items-center gap-10 py-10 sm:py-14 lg:grid-cols-12 lg:gap-12 lg:py-16">
+      <div className="container relative grid items-center gap-6 py-6 sm:py-8 lg:grid-cols-12 lg:gap-10 lg:py-8">
         <div className="animate-fade-up lg:col-span-5">
           <p className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5 text-2xs font-semibold uppercase tracking-[0.14em] text-primary-300">
             <ShieldCheck className="h-3.5 w-3.5" />
             Lithium batteries for vehicles and homes
           </p>
-          <h1 className="heading-1 mt-4 text-balance text-ink-50">
+          <h1 className="heading-1 mt-3 text-balance text-ink-50">
             Power that keeps India moving — on the road and at home
           </h1>
-          <p className="mt-4 max-w-xl text-pretty text-sm leading-relaxed text-ink-50/75 sm:text-base">
-            Trontek LiFePO4 batteries for e-rickshaws, electric scooters and home inverters. No
-            water topping, no acid, and a battery management system in every pack.
-          </p>
-
-          <ul className="mt-6 flex flex-wrap gap-x-5 gap-y-2">
+          <ul className="mt-4 flex flex-wrap gap-x-5 gap-y-2">
             {POINTS.map((point) => (
               <li key={point} className="flex items-center gap-1.5 text-sm text-ink-50/85">
                 <Check className="h-4 w-4 shrink-0 text-primary-300" />
@@ -78,7 +77,7 @@ export function Hero() {
             ))}
           </ul>
 
-          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+          <div className="mt-5 flex flex-col gap-3 sm:flex-row">
             <ButtonLink href="/products" variant="accent" size="lg">
               Shop now
               <ArrowRight className="h-4 w-4" />
@@ -95,14 +94,14 @@ export function Hero() {
           </div>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:col-span-7">
+        <div className="hidden gap-4 sm:grid sm:grid-cols-2 lg:col-span-7">
           {PRODUCTS.map((product, index) => (
             <Link
               key={product.href}
               href={product.href}
               className="group flex flex-col overflow-hidden rounded-xl bg-white text-ink-900 shadow-lg ring-1 ring-white/10 transition-transform duration-200 hover:-translate-y-1"
             >
-              <div className="relative aspect-[4/3] w-full">
+              <div className="relative aspect-[16/9] w-full">
                 <Image
                   src={product.image}
                   alt={`Trontek ${product.title}`}
@@ -110,17 +109,17 @@ export function Hero() {
                   height={product.height}
                   priority={index === 0}
                   sizes="(max-width: 640px) 90vw, (max-width: 1024px) 45vw, 340px"
-                  className="h-full w-full object-contain p-4 transition-transform duration-300 group-hover:scale-[1.03]"
+                  className="h-full w-full object-contain p-3 transition-transform duration-300 group-hover:scale-[1.03]"
                 />
               </div>
-              <div className="flex flex-1 flex-col border-t border-ink-100 p-4">
+              <div className="flex flex-1 flex-col border-t border-ink-100 p-3">
                 <p className="text-2xs font-semibold uppercase tracking-[0.12em] text-primary-600">
                   {product.eyebrow}
                 </p>
                 <p className="mt-1 font-display text-base font-semibold">{product.title}</p>
                 <p className="tabular mt-0.5 text-sm text-ink-600">{product.detail}</p>
-                <p className="mt-2 text-xs text-ink-500">{product.note}</p>
-                <span className="mt-3 inline-flex items-center gap-1 text-sm font-semibold text-primary-600">
+                <p className="mt-1 text-xs text-ink-500">{product.note}</p>
+                <span className="mt-2 inline-flex items-center gap-1 text-sm font-semibold text-primary-600">
                   Shop {product.eyebrow.toLowerCase()}
                   <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
                 </span>

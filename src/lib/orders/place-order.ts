@@ -42,6 +42,8 @@ export interface PlaceOrderInput {
   expectedTotal?: number;
   /** The shopper has seen the new price and agreed to it. */
   acceptPriceChange?: boolean;
+  /** The checkout consent tick (R-05). */
+  acceptTerms?: boolean;
 }
 
 export type PlaceOrderResult =
@@ -167,6 +169,7 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
 
   const newOrder = {
     orderNumber: generateOrderNumber(),
+    termsAccepted: input.acceptTerms === true,
     contact: {
       name: input.contact.name,
       phone: input.contact.phone,

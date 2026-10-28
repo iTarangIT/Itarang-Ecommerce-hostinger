@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { Plus_Jakarta_Sans } from 'next/font/google';
 import './globals.css';
-import { SITE } from '@/lib/site';
+import { SITE, WELCOME_OFFER_ENDS } from '@/lib/site';
 import { buildNavigation } from '@/lib/navigation';
 import { COUPONS_ENABLED } from '@/lib/offers/coupons';
 import { listSiteCoupons } from '@/lib/offers/campaign-store';
@@ -65,7 +65,6 @@ export const metadata: Metadata = {
     'pure sine wave inverter',
     'inverter battery',
     'lithium battery',
-    'tubular battery',
     'UPS system',
     'inverter battery combo',
   ],
@@ -126,7 +125,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     buildNavigation(),
     COUPONS_ENABLED ? listSiteCoupons() : Promise.resolve([]),
   ]);
-  const announcements = coupons.map((coupon) => `${coupon.label} with code ${coupon.code}`);
+  // One line per campaign, with its end date when one is known (R-09).
+  const announcements = coupons.map((coupon) => {
+    const ends = coupon.endsAt ?? WELCOME_OFFER_ENDS;
+    const date = ends
+      ? new Date(ends).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' })
+      : null;
+    return `${coupon.label} with code ${coupon.code}${date ? ` — ends ${date}` : ''}`;
+  });
 
   return (
     <html lang="en-IN" className={`${jakarta.variable} ${jakartaDisplay.variable}`} suppressHydrationWarning>
