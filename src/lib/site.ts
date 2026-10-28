@@ -116,12 +116,12 @@ export const FOOTER_COLUMNS: NavGroup[] = [
 ];
 
 /**
- * Terms, Privacy and Delivery pages (R-05) are drafted but wait for legal
- * sign-off (Chirag, B-06). While false they carry a "draft" banner, are kept
- * out of search engines, the footer and the sitemap, and the checkout tick
- * covers the refund policy and order updates only. Set to true once signed off.
+ * Terms, Privacy and Delivery pages (R-05), signed off by Chirag (B-06) on
+ * 28 Oct. While false they carry a "draft" banner, are kept out of search
+ * engines, the footer and the sitemap, and the checkout tick covers the
+ * refund policy and order updates only.
  */
-export const POLICIES_PUBLISHED = false;
+export const POLICIES_PUBLISHED = true;
 
 export const POLICY_LINKS: NavChild[] = [
   ...(POLICIES_PUBLISHED
