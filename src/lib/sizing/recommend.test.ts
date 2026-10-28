@@ -1012,3 +1012,73 @@ describe('14 · the shopper always gets a battery when one is sellable', () => {
     expect(recommendForShopper(evOnly, requirement).best).toBeNull();
   });
 });
+
+/* ------------------------------- R-06: the 48 V storage unit, once published */
+
+describe('15 · the ESS 5.1 kWh joins the answer when it is published', () => {
+  /** The draft ESS as it would be once admin gives it a price and publishes it. */
+  function publishedEss(): Product {
+    const seed = seedFor('trontek-ess-tk-51100');
+    const record = asRecord(seed);
+    return toDomainProduct({
+      ...record,
+      status: 'published',
+      variants: record.variants.map((variant) => ({
+        ...variant,
+        mrp: variant.mrp ?? 15000000,
+        selling: variant.selling ?? 12000000,
+        stock: variant.stock ?? 5,
+      })),
+    });
+  }
+
+  const WITH_ESS = [...PUBLISHED, publishedEss()];
+
+  it('reads "Residential, commercial and light-industrial" as home storage', () => {
+    const ess = publishedEss();
+    const requirement = { ...requirementFor({ fan: 2 }, 4), systemVoltage: 48 as const };
+    expect(assess(ess, requirement).rejections).not.toContain('application-not-documented');
+  });
+
+  it('still refuses the commercial BESS', () => {
+    const bess = domainFor('trontek-bess-hess-261kwh-125kw');
+    const requirement = { ...requirementFor({ fan: 2 }, 4), systemVoltage: 48 as const };
+    expect(assess(bess, requirement).rejections).toContain('application-not-documented');
+  });
+
+  it('ends every home preset on a battery, and the villa on the 48 V unit', () => {
+    for (const preset of HOME_PRESETS) {
+      const sizing = calculateSizing(preset.selection, preset.hours);
+      const result = recommendForShopper(WITH_ESS, {
+        runningWatts: sizing.runningWatts,
+        requiredAh: sizing.requiredAh,
+        requiredDcWatts: sizing.requiredDcWatts,
+        systemVoltage: sizing.systemVoltage,
+        backupHours: sizing.backupHours,
+      });
+      expect(['matched', 'nearest'], preset.id).toContain(result.status);
+      expect(result.best, preset.id).not.toBeNull();
+      if (preset.id === 'villa') {
+        expect(result.best!.product.slug).toBe(publishedEss().slug);
+        expect(result.systemVoltage).toBe(48);
+      }
+    }
+  });
+
+  it('does not let one undocumented product blank the answer', () => {
+    const undocumented = toDomainProduct({
+      ...asRecord(seedFor('trontek-ess-tk-51100')),
+      status: 'published',
+      specGroups: [],
+    });
+    const sizing = calculateSizing(HOME_PRESETS.find((p) => p.id === '3bhk')!.selection, 6);
+    const result = recommendForShopper([...PUBLISHED, undocumented], {
+      runningWatts: sizing.runningWatts,
+      requiredAh: sizing.requiredAh,
+      requiredDcWatts: sizing.requiredDcWatts,
+      systemVoltage: sizing.systemVoltage,
+      backupHours: sizing.backupHours,
+    });
+    expect(result.best).not.toBeNull();
+  });
+});

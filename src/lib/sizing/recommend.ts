@@ -84,8 +84,12 @@ export const SYSTEM_VOLTAGE_BY_NOMINAL: ReadonlyMap<number, HomeSystemVoltage> =
 const VEHICLE_APPLICATION =
   /traction|drivetrain|vehicle|rickshaw|loader|wheeler|scooter|motorcycle/i;
 
-/** Wording that marks a documented application as home backup or home storage. */
-const HOME_APPLICATION = /home backup|residential energy storage|inverter batter/i;
+/**
+ * Wording that marks a documented application as home backup or home storage.
+ * "Residential" on its own counts: the ESS range lists "Residential, commercial
+ * and light-industrial energy storage", while the commercial BESS never says it.
+ */
+const HOME_APPLICATION = /home backup|\bresidential\b|inverter batter/i;
 
 /** Specification labels that state a continuous discharge limit. */
 const DISCHARGE_LIMIT_LABELS = [
@@ -556,7 +560,7 @@ function inverterNoteFor(chosen: HomeSystemVoltage, asked: HomeSystemVoltage | n
  * to three questions, in order:
  *
  * 1. At the voltage the load's VA calls for. Any answer other than "no match"
- *    is returned as it is.
+ *    or "information missing" is returned as it is.
  * 2. At each higher home voltage (24, then 48 V), with the same energy. A big
  *    load on a 12 V system can need more than `MAX_BANK_UNITS` batteries where a
  *    24 V bank of the same energy would not — the energy need, not only the
@@ -584,7 +588,15 @@ export function recommendForShopper(
     inverterNote: voltage === null ? null : inverterNoteFor(voltage, asked),
   });
 
-  if (first.status !== 'no-catalogue-match' || asked === null) return complete(first, asked);
+  // "Information missing" describes one product, not the catalogue: the rest
+  // still gets its turn below, and `first` is the answer only if nothing else
+  // can serve the load. Every other status already carries its answer.
+  if (
+    (first.status !== 'no-catalogue-match' && first.status !== 'information-missing') ||
+    asked === null
+  ) {
+    return complete(first, asked);
+  }
 
   for (const voltage of SYSTEM_VOLTAGES.filter((v) => v > asked)) {
     const raised = recommendBattery(catalogue, {
