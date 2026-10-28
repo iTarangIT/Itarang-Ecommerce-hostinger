@@ -101,7 +101,7 @@ export function Hero() {
               href={product.href}
               className="group flex flex-col overflow-hidden rounded-xl bg-white text-ink-900 shadow-lg ring-1 ring-white/10 transition-transform duration-200 hover:-translate-y-1"
             >
-              <div className="relative aspect-[16/9] w-full">
+              <div className="relative aspect-[16/9] w-full overflow-hidden">
                 <Image
                   src={product.image}
                   alt={`Trontek ${product.title}`}

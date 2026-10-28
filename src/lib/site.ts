@@ -5,7 +5,6 @@
  * 27 Oct store tracker). A placeholder is empty, and the components that
  * show it leave the line out rather than print a guess.
  *   - GSTIN (R-20)
- *   - customer-care number and support hours (D-09)
  */
 
 /** Marks a value that business has not confirmed yet. */
@@ -21,7 +20,7 @@ export const SITE = {
   legalName: 'iTarang Network Private Limited',
   email: 'care@itarang.com',
   /**
-   * The one customer-care number (D-09 — business to confirm). It is the
+   * The one customer-care number (D-09, confirmed 28 Oct). It is the
    * seller record's number, so the header, footer, trust row, support pages
    * and product pages all print the same one. `lib/support/contacts.ts`
    * carries it in display form.
@@ -30,8 +29,8 @@ export const SITE = {
   phoneHref: 'tel:+919971027907',
   /** WhatsApp chat link; which number sends store messages is D-14. */
   whatsapp: 'https://wa.me/918076841497',
-  /** PLACEHOLDER (D-09) — real support hours from business. Empty hides the line. */
-  supportHours: PLACEHOLDER as string,
+  /** Support hours (D-09, confirmed 28 Oct). Empty hides the line. */
+  supportHours: 'Mon–Sat, 10 am – 7 pm' as string,
   /** Registered office, from store row S-07 (27 Oct tracker). */
   address: 'Unitech Business Zone, Sector 50, Gurugram, Haryana',
   /** PLACEHOLDER (R-20) — GSTIN for the footer and policy pages. Empty hides it. */

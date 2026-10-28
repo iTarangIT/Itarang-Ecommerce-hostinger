@@ -37,8 +37,10 @@ export function ProductSpecs({ product }: { product: Product }) {
             <ShieldCheck className="h-5 w-5" />
           </span>
           <p className="text-sm text-muted-foreground">
-            <span className="font-semibold text-foreground">iTarang assured</span> — certified
-            installation and a documented warranty on every product.
+            {/* "Certified installation" removed (S-07): installation is not
+                included unless the product page says so. */}
+            <span className="font-semibold text-foreground">iTarang assured</span> — the
+            manufacturer&rsquo;s warranty, as stated below, on every product.
           </p>
         </div>
 

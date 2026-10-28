@@ -411,3 +411,35 @@ describe('toDomainProduct', () => {
     expect(toDomainProduct(record({ emiEnabled: true })).emiEnabled).toBe(true);
   });
 });
+
+describe('spec-sheet posters (R-07)', () => {
+  const media = (role: 'battery' | 'size' | 'electrical' | 'listing', position: number) => ({
+    id: position,
+    storagePath: `products/test/${role}.jpg`,
+    url: `https://cdn.example/${role}.jpg`,
+    altText: role,
+    role,
+    mime: 'image/jpeg',
+    bytes: null,
+    width: null,
+    height: null,
+    position,
+    isPrimary: position === 0,
+  });
+
+  it('lists the size, electrical and listing images as spec images, in order', () => {
+    const product = toDomainProduct(
+      record({ media: [media('listing', 3), media('battery', 0), media('size', 1), media('electrical', 2)] }),
+    );
+    expect(product.images[0]).toBe('https://cdn.example/battery.jpg');
+    expect(product.specImages).toEqual([
+      'https://cdn.example/size.jpg',
+      'https://cdn.example/electrical.jpg',
+      'https://cdn.example/listing.jpg',
+    ]);
+  });
+
+  it('leaves specImages out when a product has only photos', () => {
+    expect(toDomainProduct(record({ media: [media('battery', 0)] })).specImages).toBeUndefined();
+  });
+});

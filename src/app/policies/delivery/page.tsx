@@ -7,7 +7,7 @@ import {
 } from '@/components/support/policy-sections';
 import { POLICIES_PUBLISHED } from '@/lib/site';
 import { DELIVERY_CHARGE_NOTE } from '@/lib/store/totals';
-import { DEFAULT_DELIVERY_DAYS } from '@/lib/support/serviceability';
+import { DEFAULT_DELIVERY_DAYS, DELIVERY_DAYS_MIN } from '@/lib/support/serviceability';
 
 export const metadata: Metadata = {
   title: 'Delivery policy',
@@ -33,7 +33,7 @@ const SECTIONS: PolicySection[] = [
     id: 'time',
     title: 'How long it takes',
     points: [
-      `Most orders are delivered within ${DEFAULT_DELIVERY_DAYS} working days of payment; the pincode check shows the estimate for your area.`,
+      `Most orders are delivered within ${DELIVERY_DAYS_MIN}–${DEFAULT_DELIVERY_DAYS} working days of payment; the pincode check shows the estimate for your area.`,
       'Orders are packed and handed to the courier on working days. Sundays and public holidays are not counted.',
       'The courier name and tracking details appear on your order page once it ships.',
     ],
@@ -41,7 +41,7 @@ const SECTIONS: PolicySection[] = [
   {
     id: 'charges',
     title: 'Delivery charges',
-    paragraphs: [`${DELIVERY_CHARGE_NOTE} Batteries ship in protective crates at no extra charge.`],
+    paragraphs: [`${DELIVERY_CHARGE_NOTE} There is no minimum order value, and batteries ship in protective crates at no extra charge.`],
   },
   {
     id: 'arrival',

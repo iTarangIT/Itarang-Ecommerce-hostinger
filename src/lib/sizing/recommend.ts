@@ -661,7 +661,13 @@ function nearestBank(
       ...best.assessment,
       reasons: [
         `Covers about ${best.coversHours} of your ${requirement.backupHours} hours at the load you chose`,
-        ...best.assessment.reasons.filter((reason) => !reason.includes('window needs')),
+        ...best.assessment.reasons.filter(
+          (reason) =>
+            !reason.includes('window needs') &&
+            // Judged at this bank's own voltage, so "the input your load needs"
+            // would be false when it differs; `inverterNote` says it instead.
+            !(best!.voltage !== asked && reason.includes('battery input your load needs')),
+        ),
       ],
     };
   }

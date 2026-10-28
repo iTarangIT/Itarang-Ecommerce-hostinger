@@ -45,7 +45,7 @@ const TERMS = [
   {
     id: 'delivery',
     title: 'Delivery',
-    body: 'Any delivery charge is shown in the cart, line by line, before payment. Batteries ship crated at no extra charge.',
+    body: 'Delivery is free on every order. Batteries ship crated at no extra charge.',
   },
 ].filter((term) => COUPONS_ENABLED || term.id !== 'coupons');
 

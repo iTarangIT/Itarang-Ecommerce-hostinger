@@ -1,17 +1,15 @@
 import type { Paise } from '@/lib/commerce/types';
 import type { AppliedCoupon, CartItem } from './types';
 
-/** Free standard delivery above this cart value. */
-export const FREE_SHIPPING_THRESHOLD: Paise = 499900;
 /**
- * PLACEHOLDER (D-03) — business has not agreed the delivery charge. Until it
- * is `true` the site states no threshold or charge anywhere; the cart and
- * checkout still show the charge this file computes, line by line, before
- * payment. Set it once D-03 is answered and the two constants above match.
+ * Free standard delivery at and above this cart value. Zero: delivery is free
+ * on every product (D-03, decided 28 Oct).
  */
-export const DELIVERY_CHARGE_CONFIRMED = false;
-/** The one sentence the site uses about delivery cost while D-03 is open. */
-export const DELIVERY_CHARGE_NOTE = 'Any delivery charge is shown in your cart before you pay.';
+export const FREE_SHIPPING_THRESHOLD: Paise = 0;
+/** D-03 is answered, so the site may state the delivery charge. */
+export const DELIVERY_CHARGE_CONFIRMED = true;
+/** The one sentence the site uses about delivery cost (D-03). */
+export const DELIVERY_CHARGE_NOTE = 'Delivery is free on every order.';
 export const STANDARD_SHIPPING: Paise = 39900;
 
 /** GST is included in listed prices; this is the extracted component. */
