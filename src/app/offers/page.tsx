@@ -12,7 +12,7 @@ import { CouponCard } from '@/components/merch/coupon-card';
 export const metadata: Metadata = {
   title: 'Offers',
   description:
-    'Current coupon codes, ₹200 off on UPI payments and free delivery on iTarang lithium batteries.',
+    'Current coupon codes and ₹200 off on UPI payments for iTarang lithium batteries.',
   alternates: { canonical: '/offers' },
 };
 
@@ -45,7 +45,7 @@ const TERMS = [
   {
     id: 'delivery',
     title: 'Delivery',
-    body: 'Standard delivery is free on orders above ₹4,999 after discounts. Below that a flat delivery charge applies and is shown in the cart before payment. Batteries ship crated at no extra charge.',
+    body: 'Any delivery charge is shown in the cart, line by line, before payment. Batteries ship crated at no extra charge.',
   },
 ].filter((term) => COUPONS_ENABLED || term.id !== 'coupons');
 

@@ -51,12 +51,9 @@ export default async function HomePage() {
   return (
     <>
       <Hero />
-      <TrustRow />
 
-      <CategoryTiles categories={categories} />
-
-      <WelcomeOffers coupons={coupons} />
-
+      {/* Prices within one scroll of landing (R-09): the rail sits directly
+          under the hero, before the trust row and the category tiles. */}
       {/* `popularityRank` is an editorial ordering — `to-domain.ts` says so in
           as many words — not a count of anything sold, so this rail makes no
           sales claim. */}
@@ -69,6 +66,12 @@ export default async function HomePage() {
           action={{ label: 'See all products', href: '/products' }}
         />
       </div>
+
+      <TrustRow />
+
+      <CategoryTiles categories={categories} />
+
+      <WelcomeOffers coupons={coupons} />
 
       <ToolsPromo />
 

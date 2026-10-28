@@ -10,19 +10,18 @@ import { categoryPath } from '@/lib/routes';
 export const metadata: Metadata = {
   title: 'Search',
   description:
-    'Search the full iTarang range of inverters, batteries, UPS systems and inverter + battery combos.',
+    'Search the iTarang range of lithium (LFP) batteries for e-rickshaws, two-wheelers and home inverters.',
   robots: { index: false, follow: true },
 };
 
 const POPULAR_SEARCHES = [
-  '900VA inverter',
-  '1100VA inverter',
+  'e-rickshaw battery',
+  '51V 105Ah',
+  '2-wheeler battery',
+  'Powercube',
+  'home inverter battery',
   'lithium battery',
-  '150Ah tubular',
-  'inverter battery combo',
-  'solar ready inverter',
-  'UPS for desktop',
-  'digital UPS',
+  'EV charger',
 ];
 
 export default async function SearchPage({

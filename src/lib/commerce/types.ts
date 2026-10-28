@@ -251,6 +251,13 @@ export interface Product {
   art: ProductArtKind;
   /** Image paths, first is the primary. */
   images: string[];
+  /**
+   * The subset of `images` that are spec-sheet posters (dimensions, electrical
+   * rating, listing card) rather than photos of the product. The gallery shows
+   * photos; these go under "Download spec sheet" (R-07). Absent when the
+   * provider does not know image roles.
+   */
+  specImages?: string[];
   /** Terse selling points shown on the PDP above the fold. */
   highlights: string[];
   description: string[];

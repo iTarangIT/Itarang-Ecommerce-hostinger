@@ -32,7 +32,7 @@ export type SupportSubmitResult =
   | { ok: true; reference: string }
   | { ok: false; message: string; fieldErrors?: FormErrors };
 
-const KINDS = new Set<SupportRequestKind>(['complaint', 'warranty', 'installation']);
+const KINDS = new Set<SupportRequestKind>(['complaint', 'warranty', 'installation', 'enquiry']);
 
 export async function submitSupportRequestAction(
   kind: SupportRequestKind,

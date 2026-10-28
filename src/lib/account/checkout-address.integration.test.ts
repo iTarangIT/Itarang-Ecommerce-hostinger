@@ -112,6 +112,7 @@ function checkoutPayload(saved: {
       pincode: saved.pincode,
     },
     paymentMethod: 'razorpay-test' as const,
+    acceptTerms: true as const,
   };
 }
 

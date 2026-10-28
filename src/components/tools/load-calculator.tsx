@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
   ArrowRight,
+  MessageSquare,
   Bath,
   BatteryCharging,
   BedDouble,
@@ -51,6 +52,7 @@ import {
   type Selection,
 } from "@/lib/sizing/calculator";
 import { summaryToCartItem, useCart } from "@/lib/store/hooks";
+import { formatPrice } from "@/lib/catalog/pricing";
 import { useUI } from "@/lib/store/ui-provider";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { ProductCard } from "@/components/product/product-card";
@@ -911,7 +913,8 @@ export function LoadCalculator({
                   <Skeleton className="h-48 w-full" />
                   <Skeleton className="h-32 w-full" />
                 </div>
-              ) : recommendation.status === "matched" &&
+              ) : (recommendation.status === "matched" ||
+                  recommendation.status === "nearest") &&
                 recommendation.battery ? (
                 /*
                   One branch per outcome the route distinguishes, because the
@@ -920,11 +923,56 @@ export function LoadCalculator({
                   product is a false statement about their home.
                 */
                 <div className="space-y-4">
-                  <div className="rounded-xl border-2 border-accent bg-card p-4 sm:p-5">
-                    <p className="inline-flex items-center gap-1.5 rounded-full bg-accent px-2.5 py-1 text-2xs font-bold uppercase tracking-wide text-accent-foreground">
-                      <Check className="h-3 w-3" />
-                      Recommended
+                  <div
+                    className={cn(
+                      "rounded-xl border-2 bg-card p-4 sm:p-5",
+                      recommendation.status === "nearest"
+                        ? "border-warning/60"
+                        : "border-accent",
+                    )}
+                  >
+                    {recommendation.status === "nearest" ? (
+                      <p className="inline-flex items-center gap-1.5 rounded-full bg-warning-soft px-2.5 py-1 text-2xs font-bold uppercase tracking-wide text-warning">
+                        <Info className="h-3 w-3" />
+                        Nearest option
+                      </p>
+                    ) : (
+                      <p className="inline-flex items-center gap-1.5 rounded-full bg-accent px-2.5 py-1 text-2xs font-bold uppercase tracking-wide text-accent-foreground">
+                        <Check className="h-3 w-3" />
+                        Recommended
+                      </p>
+                    )}
+                    {/* The headline the shopper buys: N × product, combined
+                        price, and how much of their window it covers (R-06). */}
+                    <p className="mt-3 font-display text-base font-bold text-foreground">
+                      {recommendation.battery.units > 1
+                        ? `${recommendation.battery.units} × `
+                        : ""}
+                      {recommendation.battery.product.title}
+                      <span className="tabular ml-2 text-sm font-semibold text-muted-foreground">
+                        {formatPrice(
+                          recommendation.battery.product.price *
+                            recommendation.battery.units,
+                        )}
+                      </span>
                     </p>
+                    <p
+                      className={cn(
+                        "mt-1 text-sm",
+                        recommendation.status === "nearest"
+                          ? "font-semibold text-warning"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      {recommendation.status === "nearest"
+                        ? `Covers about ${recommendation.coversHours} of your ${sizing.backupHours} hours of backup at this load. Nothing in our range covers all of it.`
+                        : `Covers your ${sizing.backupHours} hours of backup.`}
+                    </p>
+                    {recommendation.inverterNote ? (
+                      <p className="mt-2 rounded-md border border-border bg-surface p-2.5 text-xs text-foreground">
+                        {recommendation.inverterNote}
+                      </p>
+                    ) : null}
                     <div className="mt-3 grid gap-4 sm:grid-cols-2">
                       <ProductCard product={recommendation.battery.product} />
                       <div>
@@ -944,8 +992,9 @@ export function LoadCalculator({
                             voltage. */}
                         {recommendation.battery.units > 1 ? (
                           <p className="mb-3 rounded-md bg-accent-50 p-2.5 text-xs font-semibold text-foreground">
-                            You need {recommendation.battery.units} of these,
-                            wired in parallel, to cover {sizing.requiredAh} Ah.
+                            {recommendation.battery.units} of these, wired in
+                            parallel at{" "}
+                            {recommendation.systemVoltage ?? sizing.systemVoltage} V.
                           </p>
                         ) : null}
                         <p className="tabular text-xs font-medium text-foreground">
@@ -1004,6 +1053,18 @@ export function LoadCalculator({
                             ? `Add all ${recommendation.battery.units} to cart`
                             : "Add this battery to cart"}
                         </PurchaseButton>
+                        <ButtonLink
+                          href={enquiryHref(
+                            recommendation.battery.product.title,
+                            sizing,
+                          )}
+                          variant="outline"
+                          fullWidth
+                          className="mt-2"
+                        >
+                          <MessageSquare className="h-4 w-4" />
+                          Send an enquiry
+                        </ButtonLink>
                       </div>
                     </div>
                   </div>
@@ -1041,6 +1102,7 @@ export function LoadCalculator({
                   requiredAh={sizing.requiredAh}
                   requiredDcWatts={sizing.requiredDcWatts}
                   systemVoltage={sizing.systemVoltage}
+                  enquiry={enquiryHref(undefined, sizing)}
                 />
               )}
             </div>
@@ -1084,7 +1146,7 @@ export function LoadCalculator({
                     <div className="flex justify-between gap-3">
                       <dt>Battery input</dt>
                       <dd className="tabular font-semibold text-foreground">
-                        {sizing.systemVoltage} V
+                        {recommendation.systemVoltage ?? sizing.systemVoltage} V
                       </dd>
                     </div>
                     <div className="flex justify-between gap-3">
@@ -1307,12 +1369,14 @@ function NoMatch({
   requiredAh,
   requiredDcWatts,
   systemVoltage,
+  enquiry,
 }: {
   status: SizingRecommendation["status"];
   unavailableMatch: SizingRecommendation["unavailableMatch"];
   requiredAh: number;
   requiredDcWatts: number;
   systemVoltage: number;
+  enquiry: string;
 }) {
   const requirement = `Your load needs about ${requiredAh} Ah at a ${systemVoltage}V battery input, delivering around ${requiredDcWatts} W continuously.`;
 
@@ -1350,11 +1414,34 @@ function NoMatch({
         Please contact our support team and we can help you find the right
         solution.
       </p>
-      <ButtonLink href="/support" variant="primary" size="sm" className="mt-4">
-        Talk to our support team
-      </ButtonLink>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <ButtonLink href={enquiry} variant="primary" size="sm">
+          <MessageSquare className="h-4 w-4" />
+          Send an enquiry
+        </ButtonLink>
+        <ButtonLink href="/support" variant="outline" size="sm">
+          Talk to our support team
+        </ButtonLink>
+      </div>
     </div>
   );
+}
+
+/** `/support/enquiry`, prefilled with what the calculator showed (R-06). */
+function enquiryHref(
+  product: string | undefined,
+  sizing: {
+    runningWatts: number;
+    backupHours: number;
+    requiredAh: number;
+    systemVoltage: number;
+  },
+): string {
+  const query = new URLSearchParams({
+    load: `Load calculator: ${sizing.runningWatts} W running for ${sizing.backupHours} h, about ${sizing.requiredAh} Ah at ${sizing.systemVoltage} V.`,
+  });
+  if (product) query.set("product", product);
+  return `/support/enquiry?${query}`;
 }
 
 function Stat({

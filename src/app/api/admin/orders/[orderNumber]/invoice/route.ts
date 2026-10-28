@@ -7,6 +7,7 @@ import {
   MAX_INVOICE_BYTES,
   canInvoice,
   looksLikePdf,
+  parseInvoiceDetails,
   readInvoice,
   safeInvoiceFileName,
   saveInvoice,
@@ -17,7 +18,8 @@ export const dynamic = 'force-dynamic';
 /**
  * An order's invoice PDF, admin only.
  *
- *   POST  upload (multipart, field `file`) — replaces any earlier invoice
+ *   POST  upload (multipart: `file`, `invoiceNumber`, `invoiceDate`) — replaces
+ *         any earlier invoice
  *   GET   download
  *
  * A route handler rather than a Server Action because Server Action bodies are
@@ -81,14 +83,22 @@ export async function POST(request: Request, { params }: Params) {
     return backToOrder(order.orderNumber, 'That file is too large (limit 8 MB).');
   }
 
+  const details = parseInvoiceDetails(formData.get('invoiceNumber'), formData.get('invoiceDate'));
+  if ('error' in details) return backToOrder(order.orderNumber, details.error);
+
   const content = Buffer.from(await file.arrayBuffer());
   if (!looksLikePdf(content)) {
     return backToOrder(order.orderNumber, 'That file is not a PDF. Upload the invoice as a PDF.');
   }
 
   const fileName = safeInvoiceFileName(file.name, order.orderNumber);
-  await saveInvoice(order.id, { fileName, content }, actor);
-  await repository.addOrderNote(order.id, actor, `Invoice uploaded (${fileName})`, false);
+  await saveInvoice(order.id, { fileName, content }, details, actor);
+  await repository.addOrderNote(
+    order.id,
+    actor,
+    `Invoice ${details.invoiceNumber} dated ${details.invoiceDate} uploaded (${fileName})`,
+    false,
+  );
 
   return backToOrder(order.orderNumber, 'Invoice uploaded. Use "Email invoice" to send it to the customer.');
 }

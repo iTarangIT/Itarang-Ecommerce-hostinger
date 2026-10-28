@@ -1,30 +1,49 @@
 /**
  * Site-wide configuration.
  *
- * DEVELOPMENT PLACEHOLDERS — every value marked `PLACEHOLDER` below is carried
- * over from the current Hostinger storefront or stands in for information we do
- * not have yet. None of them should go live without being confirmed:
- *   - registered address, GSTIN, CIN
- *   - support hours
- *   - service network coverage claim
+ * Values marked `PLACEHOLDER` are waiting on business (task R-20 in the
+ * 27 Oct store tracker). A placeholder is empty, and the components that
+ * show it leave the line out rather than print a guess.
+ *   - GSTIN (R-20)
+ *   - customer-care number and support hours (D-09)
  */
+
+/** Marks a value that business has not confirmed yet. */
+export const PLACEHOLDER = '';
 
 export const SITE = {
   name: 'iTarang Products',
   shortName: 'iTarang',
-  tagline: 'Pure sine wave power backup for Indian homes',
+  tagline: 'Lithium batteries for EVs and home backup',
   description:
-    'iTarang builds silent pure sine wave inverters, long-life lithium and tubular batteries, UPS systems and ready-to-install combos — with certified installation and documented warranty.',
-  url: 'https://itarang.in',
+    'Lithium iron phosphate (LFP) batteries for e-rickshaws, two-wheelers and home inverters, made in India by Trontek and sold online by iTarang.',
+  url: 'https://shop.itarang.com',
+  legalName: 'iTarang Network Private Limited',
   email: 'care@itarang.com',
-  phone: '+91-8076841497',
-  phoneHref: 'tel:+918076841497',
+  /**
+   * The one customer-care number (D-09 — business to confirm). It is the
+   * seller record's number, so the header, footer, trust row, support pages
+   * and product pages all print the same one. `lib/support/contacts.ts`
+   * carries it in display form.
+   */
+  phone: '+91-9971027907',
+  phoneHref: 'tel:+919971027907',
+  /** WhatsApp chat link; which number sends store messages is D-14. */
   whatsapp: 'https://wa.me/918076841497',
-  /** PLACEHOLDER — confirm hours with the support team. */
-  supportHours: 'Mon – Sat, 9:00 AM – 7:00 PM',
-  /** PLACEHOLDER — registered office address required for GST invoices. */
-  address: 'Registered address to be confirmed',
+  /** PLACEHOLDER (D-09) — real support hours from business. Empty hides the line. */
+  supportHours: PLACEHOLDER as string,
+  /** Registered office, from store row S-07 (27 Oct tracker). */
+  address: 'Unitech Business Zone, Sector 50, Gurugram, Haryana',
+  /** PLACEHOLDER (R-20) — GSTIN for the footer and policy pages. Empty hides it. */
+  gstin: PLACEHOLDER as string,
 } as const;
+
+/**
+ * PLACEHOLDER (R-09) — when the WELCOME offers end, `YYYY-MM-DD`, for the
+ * announcement bar. Business to give the date; a campaign's own end date in
+ * /admin/campaigns wins when set. Empty shows no date.
+ */
+export const WELCOME_OFFER_ENDS: string = PLACEHOLDER;
 
 export interface NavChild {
   label: string;
@@ -97,11 +116,25 @@ export const FOOTER_COLUMNS: NavGroup[] = [
   },
 ];
 
+/**
+ * Terms, Privacy and Delivery pages (R-05) are drafted but wait for legal
+ * sign-off (Chirag, B-06). While false they carry a "draft" banner, are kept
+ * out of search engines, the footer and the sitemap, and the checkout tick
+ * covers the refund policy and order updates only. Set to true once signed off.
+ */
+export const POLICIES_PUBLISHED = false;
+
 export const POLICY_LINKS: NavChild[] = [
+  ...(POLICIES_PUBLISHED
+    ? [
+        { label: 'Terms & conditions', href: '/policies/terms' },
+        { label: 'Privacy policy', href: '/policies/privacy' },
+        { label: 'Delivery policy', href: '/policies/delivery' },
+      ]
+    : [{ label: 'Delivery information', href: '/support/faq#delivery' }]),
   { label: 'Refund & returns', href: '/policies/refund' },
   { label: 'Payment failure', href: '/policies/payment-failure' },
   { label: 'Warranty terms', href: '/support/faq#warranty' },
-  { label: 'Delivery information', href: '/support/faq#delivery' },
   { label: 'Offer terms', href: '/offers#terms' },
   { label: 'Grievance officer', href: '/support/grievance' },
 ];
@@ -123,8 +156,8 @@ export interface TrustItem {
  *    lists an intelligent BMS among its key features.
  * 2. `countryOfOrigin` is `India` on all eight, brand `TRONTEK`, and the
  *    manufacturer record's country of origin is India.
- * 3. `SELLERS[0].customerCarePhone` and `grievanceOfficerName` — the same
- *    number and named officer the product pages print.
+ * 3. `SITE.phone`, the one customer-care number used in the header, footer
+ *    and WhatsApp link (D-09), and the grievance officer page.
  * 4. Every product's closing FAQ states the take-back programme under the
  *    Battery Waste Management Rules, 2022.
  *
@@ -155,7 +188,7 @@ export const TRUST_ITEMS: TrustItem[] = [
   {
     icon: 'phone',
     title: 'A person to call',
-    detail: 'Customer care on 9971027907, and a named grievance officer.',
+    detail: `Customer care on ${SITE.phone.replace(/^\+91-/, '')}, and a named grievance officer.`,
   },
   {
     icon: 'recycle',

@@ -117,7 +117,7 @@ export const FAQ_SECTIONS: FaqSection[] = [
         id: 'delivery-charge',
         question: 'How much does delivery cost?',
         answer:
-          'Standard delivery is free on orders above ₹4,999. Below that a flat delivery charge applies and is shown in the cart before you pay. Batteries ship in protective crates at no extra charge.',
+          'Any delivery charge is shown in your cart, line by line, before you pay. Batteries ship in protective crates at no extra charge.',
       },
       {
         id: 'installation',

@@ -1,5 +1,5 @@
 /**
- * The three after-sales forms, defined once.
+ * The after-sales forms and the product enquiry, defined once.
  *
  * The pages render these fields and the server validates against the same
  * list, so a field added here is collected, checked and stored without a
@@ -21,7 +21,7 @@ export interface FormFieldSpec {
   maxLength?: number;
 }
 
-export type SupportRequestKind = 'complaint' | 'warranty' | 'installation';
+export type SupportRequestKind = 'complaint' | 'warranty' | 'installation' | 'enquiry';
 
 /** Identity fields every request has; stored in their own columns. */
 const CONTACT: FormFieldSpec[] = [
@@ -144,12 +144,33 @@ export const SUPPORT_FORMS: Record<SupportRequestKind, FormFieldSpec[]> = {
       placeholder: 'Inverter make and model, where the battery will sit, access instructions.',
     },
   ],
+  // "Send an enquiry" from the load calculator (R-06): the result is
+  // prefilled into `requirement` so the team sees what the shopper saw.
+  enquiry: [
+    ...CONTACT,
+    {
+      name: 'product',
+      label: 'Product you are asking about',
+      type: 'text',
+      maxLength: 160,
+      placeholder: 'e.g. Powercube 1.4 (TK12100)',
+    },
+    {
+      name: 'requirement',
+      label: 'What you need',
+      type: 'textarea',
+      required: true,
+      maxLength: 2000,
+      placeholder: 'Appliances, hours of backup, your inverter — anything that helps us size it.',
+    },
+  ],
 };
 
 export const KIND_LABEL: Record<SupportRequestKind, string> = {
   complaint: 'Complaint',
   warranty: 'Warranty registration',
   installation: 'Installation booking',
+  enquiry: 'Product enquiry',
 };
 
 export type FormValues = Record<string, string>;

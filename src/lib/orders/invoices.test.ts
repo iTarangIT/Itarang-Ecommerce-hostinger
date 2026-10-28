@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canInvoice, looksLikePdf, safeInvoiceFileName } from './invoices';
+import { canInvoice, looksLikePdf, parseInvoiceDetails, safeInvoiceFileName } from './invoices';
 
 describe('canInvoice', () => {
   it('allows a paid online order', () => {
@@ -45,5 +45,33 @@ describe('safeInvoiceFileName', () => {
 
   it('falls back to the order number when nothing usable is left', () => {
     expect(safeInvoiceFileName('???.pdf', 'ITG-2610-ABC')).toBe('invoice-ITG-2610-ABC.pdf');
+  });
+});
+
+describe('parseInvoiceDetails', () => {
+  const today = '2026-10-28';
+
+  it('accepts a number and a past or current date, trimmed', () => {
+    expect(parseInvoiceDetails('  ZB/2026/0412 ', '2026-10-28', today)).toEqual({
+      invoiceNumber: 'ZB/2026/0412',
+      invoiceDate: '2026-10-28',
+    });
+  });
+
+  it('requires the number', () => {
+    expect(parseInvoiceDetails('  ', '2026-10-27', today)).toHaveProperty('error');
+    expect(parseInvoiceDetails(null, '2026-10-27', today)).toHaveProperty('error');
+  });
+
+  it('requires a real date that is not in the future', () => {
+    expect(parseInvoiceDetails('INV-1', '', today)).toHaveProperty('error');
+    expect(parseInvoiceDetails('INV-1', '27/10/2026', today)).toHaveProperty('error');
+    expect(parseInvoiceDetails('INV-1', '2026-10-29', today)).toEqual({
+      error: 'The invoice date cannot be in the future.',
+    });
+  });
+
+  it('refuses an over-long number', () => {
+    expect(parseInvoiceDetails('X'.repeat(61), '2026-10-27', today)).toHaveProperty('error');
   });
 });

@@ -83,6 +83,15 @@ export const placeOrderSchema = z.object({
 
   /** Set once the shopper has seen and accepted a changed price. */
   acceptPriceChange: z.boolean().optional(),
+
+  /**
+   * The checkout tick: the shopper accepts the policies and order updates on
+   * WhatsApp, SMS and email (R-05). Required — no order without it — and its
+   * time is stored as `orders.terms_accepted_at`.
+   */
+  acceptTerms: z.literal(true, {
+    errorMap: () => ({ message: 'Tick the box to accept the terms and order updates.' }),
+  }),
 });
 
 export const callbackSchema = z.object({

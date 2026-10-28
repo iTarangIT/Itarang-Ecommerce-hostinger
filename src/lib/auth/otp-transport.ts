@@ -1,3 +1,4 @@
+import { env } from '@/lib/env';
 import { deliverMail, mailerIsLive } from '@/lib/email/mailer';
 import { loginCodeMessage } from '@/lib/email/templates';
 import type { OtpChannel } from './otp';
@@ -16,7 +17,8 @@ import type { OtpChannel } from './otp';
  * logged the code, displayed it, or quietly succeeded would turn "mobile
  * sign-in is not built" into "mobile sign-in is broken in a way that looks
  * like it works", and a code in a log file is a credential in a log file.
- * `SmsOtpTransport` refuses, and says so.
+ * `SmsOtpTransport` sends through Exotel when every `EXOTEL_*` variable is set
+ * (R-21), and otherwise refuses, and says so.
  */
 export interface OtpTransport {
   readonly channel: OtpChannel;
@@ -65,20 +67,110 @@ export class EmailOtpTransport implements OtpTransport {
   }
 }
 
+export interface ExotelConfig {
+  sid: string;
+  apiKey: string;
+  apiToken: string;
+  subdomain: string;
+  senderId: string;
+  dltEntityId: string;
+  dltTemplateId: string;
+  /** The DLT-approved text, with `{code}` where the code goes. */
+  template: string;
+}
+
+/** Exotel settings from the environment, or null while any is missing. */
+export function exotelConfig(): ExotelConfig | null {
+  const e = env();
+  if (
+    !e.EXOTEL_SID ||
+    !e.EXOTEL_API_KEY ||
+    !e.EXOTEL_API_TOKEN ||
+    !e.EXOTEL_SMS_SENDER_ID ||
+    !e.EXOTEL_DLT_ENTITY_ID ||
+    !e.EXOTEL_DLT_OTP_TEMPLATE_ID ||
+    !e.EXOTEL_OTP_TEMPLATE
+  ) {
+    return null;
+  }
+  return {
+    sid: e.EXOTEL_SID,
+    apiKey: e.EXOTEL_API_KEY,
+    apiToken: e.EXOTEL_API_TOKEN,
+    subdomain: e.EXOTEL_SUBDOMAIN,
+    senderId: e.EXOTEL_SMS_SENDER_ID,
+    dltEntityId: e.EXOTEL_DLT_ENTITY_ID,
+    dltTemplateId: e.EXOTEL_DLT_OTP_TEMPLATE_ID,
+    template: e.EXOTEL_OTP_TEMPLATE,
+  };
+}
+
+/** `+91` and ten digits for an Indian mobile number, or null. */
+export function indianMobile(value: string): string | null {
+  const digits = value.replace(/\D/g, '').replace(/^(?:91|0)(?=[6-9]\d{9}$)/, '');
+  return /^[6-9]\d{9}$/.test(digits) ? `+91${digits}` : null;
+}
+
 /**
- * The unimplemented half, stated rather than stubbed.
+ * Sign-in codes by SMS through Exotel (R-21).
  *
- * Reachable only if something asks for the `sms` channel, which no UI does.
- * It throws so that a mistake in wiring is a loud failure at the boundary
- * instead of a customer waiting for a message that was never going to arrive.
+ * Indian SMS must carry a registered DLT entity, sender id and template, and
+ * the text must match the template exactly, so all three come from the
+ * environment and the body is the template with `{code}` filled in. Without
+ * that configuration it refuses rather than pretending — the same rule as
+ * before an SMS provider existed. The code itself never reaches a log: on
+ * failure only Exotel's HTTP status is recorded.
  */
 export class SmsOtpTransport implements OtpTransport {
   readonly channel = 'sms' as const;
 
-  async send(): Promise<never> {
-    throw new OtpDeliveryError(
-      'Mobile sign-in is not available yet. No SMS provider is configured.',
-    );
+  constructor(
+    private readonly config: ExotelConfig | null = exotelConfig(),
+    private readonly fetchImpl: typeof fetch = fetch,
+  ) {}
+
+  async send(to: string, code: string): Promise<void> {
+    if (!this.config) {
+      throw new OtpDeliveryError(
+        'Mobile sign-in is not available yet. No SMS provider is configured.',
+      );
+    }
+    const mobile = indianMobile(to);
+    if (!mobile) throw new OtpDeliveryError('That is not an Indian mobile number.');
+    if (!/^\d{4,8}$/.test(code)) throw new OtpDeliveryError('Refusing to send a malformed code.');
+
+    const { sid, apiKey, apiToken, subdomain } = this.config;
+    const url = `https://${subdomain}/v1/Accounts/${encodeURIComponent(sid)}/Sms/send.json`;
+    const body = new URLSearchParams({
+      From: this.config.senderId,
+      To: mobile,
+      Body: this.config.template.replace('{code}', code),
+      DltEntityId: this.config.dltEntityId,
+      DltTemplateId: this.config.dltTemplateId,
+      SmsType: 'transactional',
+      Priority: 'high',
+    });
+
+    let response: Response;
+    try {
+      response = await this.fetchImpl(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Basic ${Buffer.from(`${apiKey}:${apiToken}`).toString('base64')}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body,
+        signal: AbortSignal.timeout(10_000),
+      });
+    } catch (error) {
+      console.error('[otp] Exotel SMS request failed before a response');
+      throw new OtpDeliveryError('The SMS provider could not be reached.', { cause: error });
+    }
+
+    if (!response.ok) {
+      console.error(`[otp] Exotel SMS refused with HTTP ${response.status}`);
+      throw new OtpDeliveryError('The SMS provider did not accept the sign-in code.');
+    }
   }
 }
 

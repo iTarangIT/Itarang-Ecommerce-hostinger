@@ -134,22 +134,25 @@ export const MAX_CUSTOM_APPLIANCES = 8;
  *   figure legitimately reduces.
  *
  * So `requiredVa`, `peakWatts` and `runningWatts` ignore it entirely and only
- * `requiredAh` and `loadEnergyWh` respond to it. Defaulting to 100% is
- * deliberate, and is the behaviour from before the control existed: a shopper
- * opts in to the assumption rather than discovering later that a default
- * shrank their backup.
+ * `requiredAh` and `loadEnergyWh` respond to it. The default is 50%, labelled
+ * "typical" (D-15, 27 Oct): at 100% every larger home preset needed more
+ * battery than any bank we sell and the calculator dead-ended. The shopper can
+ * still choose 100%, and the note under the control says what 50% assumes.
  *
- * Only these exact values are accepted anywhere (calculation and URL). Older
- * links that carried `use=0.75` — an option this control used to offer — now
- * fall back to 100%, the conservative direction.
+ * Only these exact values are accepted anywhere (calculation and URL). Anything
+ * unrecognised — including older links that carried `use=0.75` — falls back to
+ * 100%, the conservative direction; only an absent value takes the default.
  */
 export const DIVERSITY_OPTIONS = [
   { value: 1, label: '100%', description: 'Everything on backup runs together' },
-  { value: 0.5, label: '50%', description: 'About half of it runs at any one time' },
+  { value: 0.5, label: '50% typical', description: 'Typical — about half of it runs at any one time' },
   { value: 0.2, label: '20%', description: 'Only a few things run at once, on and off' },
 ] as const;
 
-export const DEFAULT_DIVERSITY = 1;
+export const DEFAULT_DIVERSITY = 0.5;
+
+/** What an unrecognised value becomes: everything runs together. */
+const FAIL_CLOSED_DIVERSITY = 1;
 
 function isDiversity(value: number): boolean {
   return DIVERSITY_OPTIONS.some((option) => option.value === value);
@@ -304,8 +307,8 @@ export function dcWattsFor(runningWatts: number): number {
  * @param backupHours hours of backup wanted per power cut / day.
  * @param options.diversity "average consumption" — the fraction of the
  *   connected load drawn on average over the window. One of
- *   `DIVERSITY_OPTIONS` (1, 0.5 or 0.2); omitted or unrecognised means 1, which
- *   is exactly the arithmetic from before the option existed. Scales
+ *   `DIVERSITY_OPTIONS` (1, 0.5 or 0.2); omitted means `DEFAULT_DIVERSITY`,
+ *   unrecognised means 1. Scales
  *   `loadEnergyWh` and `requiredAh` only — see `DIVERSITY_OPTIONS`.
  * @param options.custom shopper-described appliances, added to running watts.
  *
@@ -320,9 +323,11 @@ export function calculateSizing(
   // Fails closed to "everything runs together". An out-of-range value must
   // never quietly become a smaller battery than the shopper was shown.
   const diversity =
-    options.diversity !== undefined && isDiversity(options.diversity)
-      ? options.diversity
-      : DEFAULT_DIVERSITY;
+    options.diversity === undefined
+      ? DEFAULT_DIVERSITY
+      : isDiversity(options.diversity)
+        ? options.diversity
+        : FAIL_CLOSED_DIVERSITY;
 
   let runningWatts = 0;
   let largestSurgeDelta = 0;
@@ -464,7 +469,7 @@ export function decodeSelection(
     }
   }
   const parsedHours = Number(hours);
-  const parsedUse = Number(options.use);
+  const parsedUse = options.use === undefined ? DEFAULT_DIVERSITY : Number(options.use);
 
   return {
     selection,
@@ -472,7 +477,7 @@ export function decodeSelection(
       Number.isFinite(parsedHours) && parsedHours >= 1 && parsedHours <= 12 ? parsedHours : 4,
     // Anything unrecognised falls back to "everything runs together", so a
     // mangled link cannot present a smaller requirement than the real one.
-    diversity: isDiversity(parsedUse) ? parsedUse : DEFAULT_DIVERSITY,
+    diversity: isDiversity(parsedUse) ? parsedUse : FAIL_CLOSED_DIVERSITY,
     custom: decodeCustom(options.custom),
   };
 }

@@ -6,6 +6,7 @@ import {
   serviceabilityMessage,
   type ServiceabilityResult,
 } from './serviceability';
+import { lookupPincodePlace } from './pincode-directory';
 
 /**
  * Pincode lookup against `serviceable_pincodes`. Server-only.
@@ -24,7 +25,10 @@ interface Row {
   active: boolean;
 }
 
-export async function lookupPincode(raw: string): Promise<ServiceabilityResult | { error: string }> {
+export async function lookupPincode(
+  raw: string,
+  options: { withPlace?: boolean } = {},
+): Promise<ServiceabilityResult | { error: string }> {
   const pincode = raw.trim();
   if (!isPincode(pincode)) return { error: PINCODE_ERROR };
 
@@ -36,6 +40,10 @@ export async function lookupPincode(raw: string): Promise<ServiceabilityResult |
     console.warn('[serviceability] lookup failed:', (error as Error).message);
     return null;
   });
+
+  // Not on our list: still name the place, from India Post's directory, so the
+  // header and the checkout address can show and fill it (R-10, D-19).
+  const place = row || options.withPlace === false ? null : await lookupPincodePlace(pincode);
 
   const base = row
     ? {
@@ -52,6 +60,7 @@ export async function lookupPincode(raw: string): Promise<ServiceabilityResult |
         serviceable: true,
         confirmed: false,
         pincode,
+        ...(place ? { city: place.city, ...(place.state ? { state: place.state } : {}) } : {}),
         deliveryDays: DEFAULT_DELIVERY_DAYS,
         codAvailable: false,
         installationDays: DEFAULT_DELIVERY_DAYS + 1,

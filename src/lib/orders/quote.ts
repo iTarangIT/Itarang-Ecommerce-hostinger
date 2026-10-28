@@ -269,7 +269,8 @@ export async function buildQuote(request: QuoteRequest): Promise<QuoteResult> {
 
   let serviceability: ServiceabilityResult | null = null;
   if (request.pincode) {
-    const outcome = await lookupPincode(request.pincode);
+    // Coverage only — the place name is the address form's job, not pricing's.
+    const outcome = await lookupPincode(request.pincode, { withPlace: false });
     if ('error' in outcome) {
       issues.push({ code: 'not_serviceable', message: outcome.error });
     } else {

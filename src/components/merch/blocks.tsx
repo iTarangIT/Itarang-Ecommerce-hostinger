@@ -62,61 +62,64 @@ function describeTaxonomy(categories: NavCategory[]): string {
   return `${families} ${families === 1 ? 'family' : 'families'}, ${types} ${types === 1 ? 'type' : 'types'}.`;
 }
 
+/**
+ * One tile per thing a shopper actually shops for (R-09): "3-wheeler",
+ * "2-wheeler", "Home inverter" rather than one "Batteries" card alone in a
+ * three-column row. Built from the live navigation, so an empty subcategory
+ * never gets a tile and a new one gets one on its own.
+ */
 export function CategoryTiles({ categories }: { categories: NavCategory[] }) {
+  const tiles = categories.flatMap((category) =>
+    category.subcategories.map((sub) => ({
+      key: sub.href,
+      href: sub.href,
+      name: sub.name,
+      description: sub.description,
+      count: sub.count,
+      image: sub.image ?? category.featured?.image,
+      icon: category.icon,
+    })),
+  );
+
   return (
     <section className="container section">
       <SectionHeader
         eyebrow="Shop by category"
-        title="Power systems for your home"
-        // Counted from the taxonomy rather than written down. It read
-        // "fourteen types" and there are fifteen — the two EV subcategories
-        // were added and the sentence was not.
+        title="Find the battery for your vehicle or home"
         description={`${describeTaxonomy(categories)} Start where you know what you need, or let the load calculator decide for you.`}
         action={{ label: 'Browse everything', href: '/search' }}
       />
-      <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
-        {categories.map((category) => (
+      <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
+        {tiles.map((tile) => (
           <article
-            key={category.slug}
+            key={tile.key}
             className="group relative flex flex-col overflow-hidden rounded-lg border border-border bg-card transition-all duration-200 hover:-translate-y-0.5 hover:shadow-raised"
           >
             <div className="relative aspect-[16/10] overflow-hidden bg-surface">
-              {category.featured ? (
+              {tile.image ? (
                 <Image
-                  src={category.featured.image}
+                  src={tile.image}
                   alt=""
                   fill
-                  sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
+                  sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
                   className="object-contain p-4 transition-transform duration-300 group-hover:scale-[1.04]"
                 />
               ) : null}
               <span className="absolute left-3 top-3 grid h-9 w-9 place-items-center rounded-md bg-card text-primary shadow-card">
-                <CategoryIcon kind={category.icon} className="h-4.5 w-4.5" />
+                <CategoryIcon kind={tile.icon} className="h-4.5 w-4.5" />
               </span>
             </div>
             <div className="flex flex-1 flex-col p-4">
               <h3 className="font-display text-base font-bold text-foreground">
-                <Link href={category.href} className="after:absolute after:inset-0">
-                  {category.name}
+                <Link href={tile.href} className="after:absolute after:inset-0">
+                  {tile.name}
                 </Link>
               </h3>
               <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-                {category.tagline}
+                {tile.description}
               </p>
-              <ul className="relative z-10 mt-3 flex flex-wrap gap-1.5">
-                {category.subcategories.slice(0, 3).map((sub) => (
-                  <li key={sub.href}>
-                    <Link
-                      href={sub.href}
-                      className="inline-block rounded-sm border border-border px-2 py-1 text-2xs font-medium text-muted-foreground transition-colors hover:border-accent/50 hover:text-accent-600"
-                    >
-                      {sub.name.replace(/ (Inverters|Batteries|UPS|Combos)$/, '')}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-              <p className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-primary-600">
-                {category.total} products
+              <p className="mt-auto inline-flex items-center gap-1 pt-3 text-xs font-semibold text-primary-600">
+                {tile.count} {tile.count === 1 ? 'product' : 'products'}
                 <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
               </p>
             </div>

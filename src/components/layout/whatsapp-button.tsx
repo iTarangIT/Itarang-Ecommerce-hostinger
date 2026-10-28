@@ -14,15 +14,20 @@ import { cn } from '@/lib/utils';
  *
  * Hidden where it would get in the way of a task: checkout, the admin console
  * and the sign-in pages. On a product page it sits higher, above the sticky
- * buy bar.
+ * buy bar, and steps aside while the buy box is on screen so it never covers
+ * "Buy now" (R-07).
+ *
+ * Outlined rather than filled (R-09): orange/amber is kept for Buy and Shop
+ * now, so the chat bubble does not compete with them.
  */
 const HIDDEN_PREFIXES = ['/checkout', '/admin', '/login', '/register', '/staff', '/order/'];
 
 export function WhatsAppButton() {
   const pathname = usePathname() ?? '/';
-  if (HIDDEN_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return null;
-
   const onProductPage = pathname.startsWith('/products/');
+  const buyBoxVisible = useBuyBoxVisible(onProductPage, pathname);
+
+  if (HIDDEN_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return null;
 
   const open = (event: React.MouseEvent<HTMLAnchorElement>) => {
     const subject = document.title.split('|')[0]?.trim();
@@ -39,11 +44,14 @@ export function WhatsAppButton() {
       rel="noreferrer"
       onClick={open}
       aria-label="Chat with us on WhatsApp"
+      aria-hidden={buyBoxVisible || undefined}
+      tabIndex={buyBoxVisible ? -1 : undefined}
       className={cn(
-        'group fixed right-4 z-40 print:hidden flex items-center gap-2 rounded-full bg-[#25D366] p-3 text-white shadow-lg transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 lg:right-6',
+        'group fixed right-4 z-40 print:hidden flex items-center gap-2 rounded-full border-2 border-primary bg-background p-3 text-primary shadow-lg transition-[transform,opacity] hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 lg:right-6',
         onProductPage
           ? 'bottom-[calc(var(--bottom-nav-height)+5rem)] lg:bottom-24'
           : 'bottom-[calc(var(--bottom-nav-height)+1rem)] lg:bottom-6',
+        buyBoxVisible && 'pointer-events-none translate-y-2 opacity-0',
       )}
     >
       <svg viewBox="0 0 32 32" aria-hidden="true" className="h-6 w-6 fill-current">
@@ -52,4 +60,24 @@ export function WhatsAppButton() {
       <span className="hidden pr-1 text-sm font-semibold sm:inline">Chat with us</span>
     </a>
   );
+}
+
+/** Whether the product page's buy box (`[data-buy-box]`) is on screen. */
+function useBuyBoxVisible(enabled: boolean, pathname: string): boolean {
+  const [visible, setVisible] = React.useState(false);
+
+  React.useEffect(() => {
+    setVisible(false);
+    if (!enabled || typeof IntersectionObserver === 'undefined') return;
+    const target = document.querySelector('[data-buy-box]');
+    if (!target) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setVisible(Boolean(entry?.isIntersecting)),
+      { threshold: 0.05 },
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [enabled, pathname]);
+
+  return visible;
 }

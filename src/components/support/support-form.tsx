@@ -29,14 +29,17 @@ export function SupportForm({
   submitLabel,
   successTitle,
   successBody,
+  initialValues,
 }: {
   kind: SupportRequestKind;
   submitLabel: string;
   successTitle: string;
   successBody: string;
+  /** Prefill, e.g. the calculator result an enquiry was started from. */
+  initialValues?: FormValues;
 }) {
   const fields: FormFieldSpec[] = SUPPORT_FORMS[kind];
-  const [values, setValues] = React.useState<FormValues>({});
+  const [values, setValues] = React.useState<FormValues>(initialValues ?? {});
   const [errors, setErrors] = React.useState<FormErrors>({});
   const [formError, setFormError] = React.useState<string | null>(null);
   const [reference, setReference] = React.useState<string | null>(null);

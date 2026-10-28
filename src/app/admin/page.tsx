@@ -11,6 +11,7 @@ import { inventoryPushAttention, inventoryPushPending } from '@/lib/orders/inven
 import { cn } from '@/lib/utils';
 import { currentUser } from '@/lib/auth/session';
 import { orders } from '@/lib/orders/postgres-repository';
+import { canInvoice, ordersWithoutInvoice } from '@/lib/orders/invoices';
 import { catalogHealth } from '@/lib/commerce/health';
 import { openCatalogueAlerts } from '@/lib/commerce/catalogue-sync';
 import { allProducts } from '@/lib/catalog/collections';
@@ -86,6 +87,11 @@ export default async function AdminOrdersPage({
   ]);
 
   const filtered = Boolean(q || status || paymentStatus);
+
+  // R-08: a real, invoiceable order with no invoice yet gets a badge.
+  const awaitingInvoice = await ordersWithoutInvoice(
+    list.filter((order) => !order.isTest && canInvoice(order)).map((order) => order.id),
+  );
 
   // What the Action button sends back, so a status change lands on this view.
   const listQuery = new URLSearchParams();
@@ -241,6 +247,11 @@ export default async function AdminOrdersPage({
                   </td>
                   <td className="px-4 py-3">
                     <StatusPill kind="order" value={order.status} />
+                    {awaitingInvoice.has(order.id) ? (
+                      <span className="ml-2 rounded-sm bg-warning-soft px-1.5 py-0.5 text-2xs font-bold uppercase text-warning">
+                        Invoice pending
+                      </span>
+                    ) : null}
                   </td>
                   <td className="tabular px-4 py-3 text-right font-semibold">
                     {formatPrice(order.amounts.total)}

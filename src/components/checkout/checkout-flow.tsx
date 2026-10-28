@@ -27,6 +27,8 @@ import type { ServiceabilityResult } from '@/lib/support/serviceability';
 import { formatPrice } from '@/lib/catalog/pricing';
 import { UPI_DISCOUNT } from '@/lib/offers/coupons';
 import { GSTIN_PATTERN, PINCODE_PATTERN, STATES } from '@/lib/checkout/validation';
+import { POLICIES_PUBLISHED } from '@/lib/site';
+import { checkPincode } from '@/lib/support/pincode-store';
 import type { CustomerAddress } from '@/lib/account/addresses';
 import { addAddressAction } from '@/lib/account/address-actions';
 import { useCart } from '@/lib/store/hooks';
@@ -174,6 +176,8 @@ export function CheckoutFlow({
   // offer to drop it instead of leaving the shopper stuck on Pay.
   const [couponRefused, setCouponRefused] = React.useState(false);
   const [placing, setPlacing] = React.useState(false);
+  // R-05: no order without the consent tick; its time is stored on the order.
+  const [acceptTerms, setAcceptTerms] = React.useState(false);
   /**
    * Set when the server rebuilt the quote and got a different total from the
    * one on screen. Holds both figures so the shopper is shown the change
@@ -245,6 +249,37 @@ export function CheckoutFlow({
     };
   }, [lines, cart.coupon?.code, address.pincode, payment, provider, router]);
 
+  /*
+   * The pincode fills state and city (R-10, D-19): from our coverage list, or
+   * India Post's directory for anywhere else. Only fields that are empty or
+   * still hold what the last pincode filled are touched, so a city the shopper
+   * corrected by hand is never overwritten.
+   */
+  const autofilled = React.useRef<{ state: string; city: string }>({ state: '', city: '' });
+  React.useEffect(() => {
+    const pincode = address.pincode;
+    if (!PINCODE_PATTERN.test(pincode)) return;
+    let cancelled = false;
+    void checkPincode(pincode).then((outcome) => {
+      if (cancelled || !outcome.ok) return;
+      const { state, city } = outcome.result;
+      if (!state && !city) return;
+      setAddress((current) => {
+        if (current.pincode !== pincode) return current;
+        const canSetState = !current.state || current.state === autofilled.current.state;
+        const canSetCity = !current.city || current.city === autofilled.current.city;
+        const next = { ...current };
+        if (state && canSetState && STATES.some((entry) => entry.name === state)) next.state = state;
+        if (city && canSetCity && next.state === (state ?? next.state)) next.city = city;
+        autofilled.current = { state: next.state, city: next.city };
+        return next;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [address.pincode]);
+
   /* ------------------------------------------------------- validation */
 
   const validateStep = (target: Step): boolean => {
@@ -309,6 +344,10 @@ export function CheckoutFlow({
 
   const placeOrder = async ({ acceptPriceChange = false } = {}) => {
     if (!validateStep(3)) return;
+    if (!acceptTerms) {
+      setFormError('Tick the box above the button to accept the terms and order updates.');
+      return;
+    }
     if (!quote?.placeable) {
       setFormError('Some items in your cart need attention before you can place this order.');
       return;
@@ -340,6 +379,7 @@ export function CheckoutFlow({
           // order, never lower it.
           expectedTotal: quote.totals.total,
           acceptPriceChange,
+          acceptTerms,
         }),
       });
 
@@ -1005,7 +1045,35 @@ export function CheckoutFlow({
                   ) : null}
                 </div>
 
-                <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-between">
+                <label className="mt-6 flex items-start gap-3 rounded-md border border-border bg-surface p-3 text-sm text-foreground">
+                  <Checkbox
+                    checked={acceptTerms}
+                    onChange={(event) => setAcceptTerms(event.target.checked)}
+                    className="mt-0.5"
+                    aria-describedby="checkout-consent-note"
+                  />
+                  <span>
+                    I agree to the{' '}
+                    {POLICIES_PUBLISHED ? (
+                      <>
+                        <Link href="/policies/terms" target="_blank" className="underline underline-offset-2">
+                          Terms
+                        </Link>
+                        ,{' '}
+                        <Link href="/policies/privacy" target="_blank" className="underline underline-offset-2">
+                          Privacy Policy
+                        </Link>{' '}
+                        and{' '}
+                      </>
+                    ) : null}
+                    <Link href="/policies/refund" target="_blank" className="underline underline-offset-2">
+                      Refund Policy
+                    </Link>
+                    , and to order updates on WhatsApp, SMS and email.
+                  </span>
+                </label>
+
+                <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:justify-between">
                   <Button onClick={() => goTo(2)} variant="ghost">
                     <ArrowLeft className="h-4 w-4" />
                     Back
@@ -1015,7 +1083,7 @@ export function CheckoutFlow({
                     onClick={() => placeOrder()}
                     variant="accent"
                     size="lg"
-                    disabled={placing || quoteLoading || !quote?.placeable}
+                    disabled={placing || quoteLoading || !quote?.placeable || !acceptTerms}
                   >
                     {placing ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
@@ -1027,12 +1095,8 @@ export function CheckoutFlow({
                       : `Pay ${quote ? formatPrice(quote.totals.total) : ''}`}
                   </Button>
                 </div>
-                <p className="mt-3 text-xs text-muted-foreground">
-                  By placing this order you agree to our{' '}
-                  <Link href="/policies/refund" className="underline underline-offset-2 hover:text-foreground">
-                    refund policy
-                  </Link>
-                  . If a payment fails after money is deducted, see the{' '}
+                <p id="checkout-consent-note" className="mt-3 text-xs text-muted-foreground">
+                  If a payment fails after money is deducted, see the{' '}
                   <Link
                     href="/policies/payment-failure"
                     className="underline underline-offset-2 hover:text-foreground"

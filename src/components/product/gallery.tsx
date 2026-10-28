@@ -6,33 +6,34 @@ import { ChevronLeft, ChevronRight, Expand } from 'lucide-react';
 import { Modal } from '@/components/ui/overlay';
 import { BadgeStack } from '@/components/ui/badge';
 import type { BadgeKind } from '@/lib/commerce/types';
-import type { Attribute } from './key-attributes';
 import { cn } from '@/lib/utils';
 
 /**
  * Product gallery.
  *
- * On desktop every image is on show at once in a two-column grid, with the
- * product's headline attributes occupying the second tile — a shopper sees the
- * whole set without operating a thumbnail rail first. Mobile keeps the
- * swipeable snap carousel, and both open the same lightbox.
+ * Photos only (R-07): the first one large, as the hero, with the rest as a
+ * thumbnail row beneath it. Spec-sheet posters (`Product.specImages`) are left
+ * out — the page offers them under "Download spec sheet" — and Key Highlights
+ * sit beside the gallery in the buy column instead of taking a tile here.
+ * Mobile keeps the swipeable snap carousel, and both open the same lightbox.
  */
 export function Gallery({
-  images,
+  images: allImages,
+  specImages = [],
   title,
   badges = [],
-  highlights = [],
 }: {
   images: string[];
+  /** Posters to keep out of the gallery. */
+  specImages?: string[];
   title: string;
   badges?: BadgeKind[];
-  /**
-   * Headline attributes for the overlay tile. Fewer than three and the tile is
-   * dropped rather than padded out — a "Key Highlights" panel listing two
-   * facts is not a highlight panel.
-   */
-  highlights?: Attribute[];
 }) {
+  const posters = new Set(specImages);
+  const photos = allImages.filter((src) => !posters.has(src));
+  // A product whose only images are posters still shows them rather than nothing.
+  const images = photos.length > 0 ? photos : allImages;
+
   const [index, setIndex] = React.useState(0);
   const [lightbox, setLightbox] = React.useState(false);
   const [zoomed, setZoomed] = React.useState(false);
@@ -52,8 +53,6 @@ export function Gallery({
   // here and in the lightbox.
   if (images.length === 0) return null;
 
-  const showHighlights = highlights.length >= 3;
-
   // Keep the active dot in sync when the shopper swipes rather than taps.
   const onScroll = () => {
     const el = scrollerRef.current;
@@ -62,73 +61,53 @@ export function Gallery({
     if (next !== index) setIndex(next);
   };
 
+  const hero = images[index] ?? images[0]!;
+
   return (
     <div>
       <div className="min-w-0 flex-1">
-        {/* Desktop grid — every image at once, highlights in the second tile. */}
-        <div className="hidden grid-cols-2 gap-3 lg:grid">
-          {images.map((src, i) => (
-            <React.Fragment key={`${src}-${i}`}>
-              <button
-                type="button"
-                onClick={() => {
-                  setIndex(i);
-                  setLightbox(true);
-                }}
-                aria-label={`Expand image ${i + 1} of ${images.length}`}
-                className="group relative aspect-square overflow-hidden rounded-xl border border-border bg-surface transition-colors hover:border-primary/40"
-              >
-                <Image
-                  src={src}
-                  alt={`${title} — view ${i + 1}`}
-                  fill
-                  priority={i === 0}
-                  sizes="(max-width: 1024px) 100vw, 320px"
-                  className="object-contain p-6"
-                />
-                {i === 0 ? (
-                  <span className="pointer-events-none absolute left-3 top-3">
-                    <BadgeStack badges={badges} max={3} />
-                  </span>
-                ) : null}
-                <span className="absolute bottom-3 right-3 grid h-9 w-9 place-items-center rounded-full border border-border bg-card/95 text-foreground opacity-0 shadow-card transition-opacity group-hover:opacity-100">
-                  <Expand className="h-4 w-4" />
-                </span>
-              </button>
-
-              {/* Slotted after the first image so it lands in the top-right
-                  tile, where the reference page puts it. */}
-              {i === 0 && showHighlights ? (
-                <div className="relative aspect-square overflow-hidden rounded-xl border border-border">
-                  <Image
-                    src={images[0]}
-                    alt=""
-                    fill
-                    sizes="(max-width: 1024px) 100vw, 320px"
-                    className="object-cover opacity-25"
-                  />
-                  <div className="absolute inset-0 bg-ink-900/85" />
-                  <div className="absolute inset-0 flex flex-col gap-3 overflow-hidden p-5 xl:p-6">
-                    <p className="font-display text-2xl font-bold leading-tight text-white">
-                      Key
-                      <br />
-                      Highlights
-                    </p>
-                    <dl className="min-h-0 space-y-2">
-                      {highlights.slice(0, 5).map((pair) => (
-                        <div key={pair.label}>
-                          <dt className="text-xs leading-tight text-white/70">{pair.label}</dt>
-                          <dd className="truncate text-lg font-bold leading-tight text-white">
-                            {pair.value}
-                          </dd>
-                        </div>
-                      ))}
-                    </dl>
-                  </div>
-                </div>
-              ) : null}
-            </React.Fragment>
-          ))}
+        {/* Desktop — the selected photo large, the others as thumbnails. */}
+        <div className="hidden lg:block">
+          <button
+            type="button"
+            onClick={() => setLightbox(true)}
+            aria-label={`Expand image ${index + 1} of ${images.length}`}
+            className="group relative block aspect-[4/3] w-full overflow-hidden rounded-xl border border-border bg-surface transition-colors hover:border-primary/40"
+          >
+            <Image
+              src={hero}
+              alt={`${title} — view ${index + 1}`}
+              fill
+              priority
+              sizes="(max-width: 1024px) 100vw, 680px"
+              className="object-contain p-8"
+            />
+            <span className="pointer-events-none absolute left-3 top-3">
+              <BadgeStack badges={badges} max={3} />
+            </span>
+            <span className="absolute bottom-3 right-3 grid h-9 w-9 place-items-center rounded-full border border-border bg-card/95 text-foreground opacity-0 shadow-card transition-opacity group-hover:opacity-100">
+              <Expand className="h-4 w-4" />
+            </span>
+          </button>
+          {images.length > 1 ? (
+            <div className="mt-3 grid grid-cols-5 gap-3">
+              {images.map((src, i) => (
+                <button
+                  key={`${src}-${i}`}
+                  type="button"
+                  onClick={() => setIndex(i)}
+                  aria-label={`Show image ${i + 1}`}
+                  aria-current={i === index}
+                  className={cn(
+                    'relative aspect-square overflow-hidden rounded-lg border-2 bg-surface',
+                    i === index ? 'border-accent' : 'border-border hover:border-primary/40',
+                  )}
+                >
+                  <Image src={src} alt="" fill sizes="120px" className="object-contain p-2" />
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
 
         {/* Mobile / tablet swipe carousel */}

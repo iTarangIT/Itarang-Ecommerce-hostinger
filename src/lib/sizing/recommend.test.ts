@@ -5,13 +5,15 @@ import { TRONTEK_PRODUCTS } from '../../../db/seed/trontek-products.ts';
 import { toDomainProduct } from '@/lib/products/to-domain';
 import type { ProductRecord } from '@/lib/products/types';
 import type { Product } from '@/lib/commerce/types';
-import { calculateSizing } from './calculator';
+import { HOME_PRESETS, calculateSizing } from './calculator';
 import {
   MAX_BANK_UNITS,
   SYSTEM_VOLTAGE_BY_NOMINAL,
   assess,
   parseDischargeAmps,
   recommendBattery,
+  recommendForShopper,
+  requiredAhAt,
   type SizingRequirement,
 } from './recommend';
 
@@ -186,7 +188,7 @@ describe('calculateSizing (shape only, no figures asserted)', () => {
   });
 
   it("states the load energy as the shopper's own two inputs multiplied", () => {
-    const result = calculateSizing({ led: 10 }, 5);
+    const result = calculateSizing({ led: 10 }, 5, { diversity: 1 });
     expect(result.loadEnergyWh).toBe(result.runningWatts * 5);
   });
 });
@@ -931,5 +933,82 @@ describe('13 · parallel bank sizing', () => {
     const ev = domainFor('trontek-tk-liev-51105');
     const result = recommendBattery([ev], { ...base, requiredAh: 1000 });
     expect(result.status).not.toBe('matched');
+  });
+});
+
+/* --------------------------------------------- R-06: never a dead end (D-15) */
+
+describe('14 · the shopper always gets a battery when one is sellable', () => {
+  it('ends every home preset, at default settings, on a match or the nearest option', () => {
+    for (const preset of HOME_PRESETS) {
+      const sizing = calculateSizing(preset.selection, preset.hours);
+      const result = recommendForShopper(PUBLISHED, {
+        runningWatts: sizing.runningWatts,
+        requiredAh: sizing.requiredAh,
+        requiredDcWatts: sizing.requiredDcWatts,
+        systemVoltage: sizing.systemVoltage,
+        backupHours: sizing.backupHours,
+      });
+      expect(['matched', 'nearest'], preset.id).toContain(result.status);
+      expect(result.best, preset.id).not.toBeNull();
+      expect(result.best!.units, preset.id).toBeGreaterThanOrEqual(1);
+      expect(result.best!.units, preset.id).toBeLessThanOrEqual(MAX_BANK_UNITS);
+      expect(result.coversHours, preset.id).toBeGreaterThan(0);
+      expect(result.coversHours, preset.id).toBeLessThanOrEqual(sizing.backupHours);
+    }
+  });
+
+  it('leaves an answer the strict engine gives untouched', () => {
+    const requirement = requirementFor({ fan: 2, led: 4 }, 4);
+    const strict = recommendBattery(PUBLISHED, requirement);
+    const shopper = recommendForShopper(PUBLISHED, requirement);
+    expect(shopper.status).toBe(strict.status);
+    expect(shopper.best?.product.slug).toBe(strict.best?.product.slug);
+    expect(shopper.coversHours).toBe(requirement.backupHours);
+    expect(shopper.inverterNote).toBeNull();
+  });
+
+  it('says "covers about" honestly, rounded down, when nothing covers the load', () => {
+    const requirement: SizingRequirement = {
+      runningWatts: 800,
+      requiredAh: 1000,
+      requiredDcWatts: 950,
+      systemVoltage: 12,
+      backupHours: 8,
+    };
+    const result = recommendForShopper(PUBLISHED, requirement);
+    expect(result.status).toBe('nearest');
+    // 4 × 105 Ah of the 1000 Ah needed is 42% of 8 h = 3.36 h, shown as 3.
+    expect(result.best!.units).toBe(MAX_BANK_UNITS);
+    expect(result.coversHours).toBe(3);
+    expect(result.best!.reasons[0]).toMatch(/covers about 3 of your 8 hours/i);
+  });
+
+  it('never offers a vehicle pack as the nearest option', () => {
+    const requirement: SizingRequirement = {
+      runningWatts: 800,
+      requiredAh: 5000,
+      requiredDcWatts: 950,
+      systemVoltage: 48,
+      backupHours: 8,
+    };
+    const result = recommendForShopper(PUBLISHED, requirement);
+    if (result.best) {
+      expect(EV_PRODUCT_KEYS.map((key) => domainFor(key).slug)).not.toContain(
+        result.best.product.slug,
+      );
+    }
+  });
+
+  it('converts Ah between voltages on equal energy, rounding up', () => {
+    const requirement = requirementFor({ fan: 2 }, 4);
+    expect(requiredAhAt({ ...requirement, systemVoltage: 12, requiredAh: 510 }, 24)).toBe(255);
+    expect(requiredAhAt({ ...requirement, systemVoltage: 12, requiredAh: 515 }, 24)).toBe(258);
+  });
+
+  it('is empty only when there is no sellable home battery at all', () => {
+    const requirement = requirementFor({ fan: 2, led: 4 }, 4);
+    const evOnly = PUBLISHED.filter((product) => product.subcategory !== 'home-inverter');
+    expect(recommendForShopper(evOnly, requirement).best).toBeNull();
   });
 });

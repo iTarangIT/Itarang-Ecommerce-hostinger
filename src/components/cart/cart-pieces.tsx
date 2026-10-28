@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { BadgeCheck, Bookmark, Tag, Trash2, Truck, X } from 'lucide-react';
 import type { AppliedCoupon, CartItem } from '@/lib/store/types';
 import type { CartTotals } from '@/lib/store/totals';
-import { FREE_SHIPPING_THRESHOLD } from '@/lib/store/totals';
+import { DELIVERY_CHARGE_CONFIRMED, FREE_SHIPPING_THRESHOLD } from '@/lib/store/totals';
 import { formatPrice } from '@/lib/catalog/pricing';
 import { COUPONS_DISABLED_NOTE, COUPONS_ENABLED } from '@/lib/offers/coupons';
 import { useCart } from '@/lib/store/hooks';
@@ -127,7 +127,8 @@ export function CartLineItem({
 /* ------------------------------------------------------- free ship meter */
 
 export function FreeShipMeter({ totals }: { totals: CartTotals }) {
-  if (totals.itemCount === 0) return null;
+  // No threshold is promised until the delivery charge is agreed (D-03).
+  if (!DELIVERY_CHARGE_CONFIRMED || totals.itemCount === 0) return null;
 
   const qualified = totals.amountToFreeShipping <= 0;
   const progress = Math.min(
@@ -340,8 +341,8 @@ export function OrderSummary({
       </div>
       {showGst ? (
         <p className="text-xs text-muted-foreground">
-          Inclusive of {formatPrice(totals.gstIncluded)} GST. A GST invoice is issued with every
-          order.
+          Inclusive of {formatPrice(totals.gstIncluded)} GST. Your GST invoice appears on your order
+          page once it is issued.
         </p>
       ) : null}
       {totals.totalSavings > 0 ? (

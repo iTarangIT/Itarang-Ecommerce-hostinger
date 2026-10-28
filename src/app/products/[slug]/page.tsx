@@ -1,7 +1,8 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ArrowRight, Calculator, FlaskConical } from 'lucide-react';
+import Image from 'next/image';
+import { ArrowRight, Calculator, Download, FlaskConical, ShieldCheck } from 'lucide-react';
 import { catalog } from '@/lib/commerce';
 import {
   DEMO_PRODUCT,
@@ -249,10 +250,18 @@ export default async function ProductPage({ params }: PageProps) {
 
   const warrantyMonths = product.warrantyMonths;
 
-  // The headline figures for the gallery's overlay tile. Computed here so the
-  // gallery — a client component — receives five strings rather than the whole
-  // product.
+  // The headline figures, shown beside the gallery under the title (R-07).
   const highlightPairs = attributePairs(product);
+
+  // Where a product has no reviews yet, this slot carries its warranty instead
+  // of "No reviews yet" above the price (R-07).
+  const warrantyLine =
+    product.warrantyText ??
+    (warrantyMonths !== undefined
+      ? `${Math.round(warrantyMonths / 12)}-year warranty${
+          product.warrantyCycles ? ` or ${product.warrantyCycles} cycles` : ''
+        }`
+      : null);
 
   return (
     <>
@@ -273,9 +282,9 @@ export default async function ProductPage({ params }: PageProps) {
           <div className="min-w-0 lg:col-span-7">
             <Gallery
               images={product.images}
+              specImages={product.specImages}
               title={product.title}
               badges={product.badges}
-              highlights={highlightPairs}
             />
           </div>
 
@@ -311,22 +320,42 @@ export default async function ProductPage({ params }: PageProps) {
               </p>
               <h1 className="heading-1 mt-1.5 text-balance">{product.title}</h1>
               <p className="mt-2 text-sm text-muted-foreground sm:text-base">{product.subtitle}</p>
-              <div className="mt-3">
-                {product.rating ? (
+              {product.rating ? (
+                <div className="mt-3">
                   <RatingSummaryInline
                     average={product.rating.average}
                     count={product.rating.count}
                     size="md"
                     href="#reviews"
                   />
-                ) : (
-                  <span className="text-sm text-muted-foreground">No reviews yet</span>
-                )}
-              </div>
+                </div>
+              ) : warrantyLine ? (
+                <p className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-foreground">
+                  <ShieldCheck className="h-4 w-4 text-success" />
+                  {warrantyLine}
+                </p>
+              ) : null}
             </div>
 
-            {/* Price, selectors, buy controls, delivery and the service row. */}
-            <BuyBox product={product} />
+            {highlightPairs.length >= 3 ? (
+              <dl className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg border border-border bg-surface p-3 sm:grid-cols-3">
+                {highlightPairs.slice(0, 6).map((pair) => (
+                  <div key={pair.label} className="min-w-0">
+                    <dt className="text-2xs uppercase tracking-wide text-muted-foreground">
+                      {pair.label}
+                    </dt>
+                    <dd className="truncate text-sm font-bold text-foreground">{pair.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            ) : null}
+
+            {/* Price, selectors, buy controls, delivery and the service row.
+                `data-buy-box` lets the WhatsApp bubble step aside while this
+                is on screen, so it never covers "Buy now" (R-07). */}
+            <div data-buy-box>
+              <BuyBox product={product} />
+            </div>
 
             {isDemo ? null : <DeliveryCheck />}
 
@@ -379,12 +408,35 @@ export default async function ProductPage({ params }: PageProps) {
           <ProductSpecs product={product} />
 
           {isDemo ? null : (
-            <Link
-              href={specSheetPath(product.slug)}
-              className="inline-flex items-center gap-2 text-sm font-semibold text-primary hover:underline"
-            >
-              Download the spec sheet (PDF) →
-            </Link>
+            <div>
+              <Link
+                href={specSheetPath(product.slug)}
+                className="inline-flex items-center gap-2 text-sm font-semibold text-primary hover:underline"
+              >
+                <Download className="h-4 w-4" />
+                Download spec sheet (PDF)
+              </Link>
+              {/* The spec posters that used to fill the gallery (R-07). */}
+              {product.specImages && product.specImages.length > 0 ? (
+                <ul className="mt-3 flex flex-wrap gap-3">
+                  {product.specImages.map((src, index) => (
+                    <li key={src}>
+                      <a
+                        href={src}
+                        target="_blank"
+                        rel="noopener"
+                        className="group block w-28 text-center text-xs text-muted-foreground hover:text-foreground"
+                      >
+                        <span className="relative block aspect-square overflow-hidden rounded-md border border-border bg-surface group-hover:border-primary/40">
+                          <Image src={src} alt="" fill sizes="112px" className="object-contain p-1" />
+                        </span>
+                        <span className="mt-1 block">Spec sheet {index + 1}</span>
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
           )}
 
           {product.sizeChart ? <SizeChart chart={product.sizeChart} /> : null}

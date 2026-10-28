@@ -30,6 +30,8 @@ export interface NavSubcategory {
   href: string;
   description: string;
   count: number;
+  /** The most popular product's image, for the home page tiles (R-09). */
+  image?: string;
 }
 
 export interface NavCategory {
@@ -95,12 +97,17 @@ export const buildNavigation = cache(async (): Promise<NavCategory[]> => {
       href: categoryPath(category.slug),
       icon: category.icon,
       highlights: category.highlights,
-      subcategories: stocked.map((sub) => ({
-        name: sub.name,
-        href: subcategoryPath(category.slug, sub.slug),
-        description: sub.description,
-        count: inCategory.filter((p) => p.subcategory === sub.slug).length,
-      })),
+      subcategories: stocked.map((sub) => {
+        const inSub = inCategory.filter((p) => p.subcategory === sub.slug);
+        const lead = [...inSub].sort((a, b) => a.popularityRank - b.popularityRank)[0];
+        return {
+          name: sub.name,
+          href: subcategoryPath(category.slug, sub.slug),
+          description: sub.description,
+          count: inSub.length,
+          ...(lead?.images[0] ? { image: lead.images[0] } : {}),
+        };
+      }),
       featured:
         featuredProduct && price
           ? {

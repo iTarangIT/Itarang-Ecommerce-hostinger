@@ -1,5 +1,5 @@
 import type { MetadataRoute } from 'next';
-import { SITE } from '@/lib/site';
+import { POLICIES_PUBLISHED, SITE } from '@/lib/site';
 import { catalog } from '@/lib/commerce';
 import { allProducts } from '@/lib/catalog/collections';
 import { categoryPath, productPath, subcategoryPath } from '@/lib/routes';
@@ -34,6 +34,12 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { path: '/support/grievance', priority: 0.3 },
     { path: '/policies/refund', priority: 0.3 },
     { path: '/policies/payment-failure', priority: 0.3 },
+    ...(POLICIES_PUBLISHED
+      ? ['/policies/terms', '/policies/privacy', '/policies/delivery'].map((path) => ({
+          path,
+          priority: 0.3,
+        }))
+      : []),
   ];
 
   const categoryRoutes: Route[] = categories.flatMap((category) => [

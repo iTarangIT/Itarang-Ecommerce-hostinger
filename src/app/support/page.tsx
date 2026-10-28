@@ -65,10 +65,12 @@ export default function SupportPage() {
               <Phone className="mt-0.5 h-5 w-5 shrink-0 text-accent" />
               <span>
                 <span className="block text-sm font-semibold">{SITE.phone}</span>
-                <span className="mt-0.5 flex items-center gap-1 text-xs text-ink-50/60">
-                  <Clock className="h-3 w-3" />
-                  {SITE.supportHours}
-                </span>
+                {SITE.supportHours ? (
+                  <span className="mt-0.5 flex items-center gap-1 text-xs text-ink-50/60">
+                    <Clock className="h-3 w-3" />
+                    {SITE.supportHours}
+                  </span>
+                ) : null}
               </span>
             </a>
             <a

@@ -3,7 +3,7 @@
 import Image from 'next/image';
 import { AlertTriangle, ShieldCheck, Truck } from 'lucide-react';
 import type { CartItem } from '@/lib/store/types';
-import type { CartTotals } from '@/lib/store/totals';
+import { DELIVERY_CHARGE_NOTE, type CartTotals } from '@/lib/store/totals';
 import { formatPrice } from '@/lib/catalog/pricing';
 import type { QuoteIssue } from '@/lib/orders/quote';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -116,11 +116,11 @@ export function OrderSummaryPanel({
       <ul className="mt-5 space-y-2 border-t border-border pt-4 text-xs text-muted-foreground">
         <li className="flex items-center gap-2">
           <Truck className="h-4 w-4 shrink-0 text-success" />
-          Free delivery above ₹4,999
+          {DELIVERY_CHARGE_NOTE}
         </li>
         <li className="flex items-center gap-2">
           <ShieldCheck className="h-4 w-4 shrink-0 text-success" />
-          Documented warranty with every product
+          Warranty terms printed on every product page
         </li>
       </ul>
     </div>

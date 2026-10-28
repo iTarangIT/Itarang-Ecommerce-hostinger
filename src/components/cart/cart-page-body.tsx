@@ -4,7 +4,6 @@ import * as React from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import {
-  BadgeCheck,
   Bookmark,
   Info,
   Lock,
@@ -20,6 +19,7 @@ import { formatPrice } from '@/lib/catalog/pricing';
 import { PURCHASE_ENABLED } from '@/lib/commerce/purchase';
 import { SITE } from '@/lib/site';
 import { useCart } from '@/lib/store/hooks';
+import { DELIVERY_CHARGE_NOTE } from '@/lib/store/totals';
 import { useUI } from '@/lib/store/ui-provider';
 import { Breadcrumbs } from '@/components/ui/breadcrumbs';
 import { Button, ButtonLink } from '@/components/ui/button';
@@ -199,15 +199,11 @@ export function CartPageBody({
                 <ul className="mt-4 space-y-2 border-t border-border pt-4 text-xs text-muted-foreground">
                   <li className="flex items-center gap-2">
                     <Truck className="h-4 w-4 shrink-0 text-success" />
-                    Free delivery above ₹4,999
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <BadgeCheck className="h-4 w-4 shrink-0 text-success" />
-                    Certified installation on inverters and batteries
+                    {DELIVERY_CHARGE_NOTE}
                   </li>
                   <li className="flex items-center gap-2">
                     <ShieldCheck className="h-4 w-4 shrink-0 text-success" />
-                    Documented warranty with every product
+                    Warranty terms printed on every product page
                   </li>
                 </ul>
               </div>

@@ -49,3 +49,12 @@ export function PolicySections({
     </div>
   );
 }
+
+/** Shown on a policy that is drafted but not yet signed off (`POLICIES_PUBLISHED`). */
+export function PolicyDraftNotice() {
+  return (
+    <p className="mb-4 rounded-lg border border-warning/40 bg-warning-soft p-3 text-sm font-medium text-foreground">
+      Draft — pending legal review. This page is not yet linked from the store.
+    </p>
+  );
+}
