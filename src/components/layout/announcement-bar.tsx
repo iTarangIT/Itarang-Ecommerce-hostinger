@@ -21,11 +21,13 @@ const STORAGE_PREFIX = 'itarang.announcement.dismissed.v3';
  *
  * What is here now is what the business specified and the checkout applies:
  * the campaigns marked "show on site" in /admin/campaigns, the UPI discount
- * (`UPI_DISCOUNT`, applied by `buildQuote`). No delivery line until the
- * charge is agreed (D-03, `DELIVERY_CHARGE_CONFIRMED`). No card offers and no
- * no-cost EMI — the business has neither online.
+ * (`UPI_DISCOUNT`, applied by `buildQuote`) and free delivery on every order
+ * (D-03, decided 28 Oct). No card offers and no no-cost EMI — the business has
+ * neither online.
  */
-const STANDING_MESSAGES = [{ text: 'Extra ₹200 off when you pay by UPI', href: '/offers' }];
+const STANDING_MESSAGES = [
+  { text: 'Free delivery on every order · Extra ₹200 off when you pay by UPI', href: '/offers' },
+];
 
 /**
  * One announcement, standing still (R-09). It used to rotate every 5.5 s

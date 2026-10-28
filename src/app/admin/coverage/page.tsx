@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { Upload } from 'lucide-react';
 import { importCoverageAction } from '@/lib/admin/service-actions';
 import { coverageStats, searchCoverage } from '@/lib/support/serviceability-server';
-import { DEFAULT_DELIVERY_DAYS } from '@/lib/support/serviceability';
+import { DEFAULT_DELIVERY_DAYS, DELIVERY_DAYS_MIN } from '@/lib/support/serviceability';
 import { Button } from '@/components/ui/button';
 import { Notice, ServiceNav } from '@/components/admin/service-nav';
 
@@ -27,7 +27,7 @@ export default async function AdminCoveragePage({
       <ServiceNav
         current="/admin/coverage"
         title="Delivery coverage"
-        description={`The pincodes behind the "Check delivery" box and the checkout. A listed, active pincode shows its own delivery time; a pincode marked inactive cannot be ordered to; any pincode not listed is told "usually ${DEFAULT_DELIVERY_DAYS - 2}–${DEFAULT_DELIVERY_DAYS} working days".`}
+        description={`The pincodes behind the "Check delivery" box and the checkout. A listed, active pincode shows its own delivery time; a pincode marked inactive cannot be ordered to; any pincode not listed is told "usually ${DELIVERY_DAYS_MIN}–${DEFAULT_DELIVERY_DAYS} working days".`}
       />
       <Notice text={search.notice} />
 

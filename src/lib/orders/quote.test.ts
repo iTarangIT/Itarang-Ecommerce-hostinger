@@ -36,30 +36,23 @@ describe('totals', () => {
     expect(totals.itemCount).toBe(2);
   });
 
-  it('charges delivery below the free-shipping threshold', () => {
+  it('delivers free on every order (D-03)', () => {
     const totals = calculateTotals([item()], null);
-    expect(totals.shipping).toBe(39900);
-    expect(totals.total).toBe(139900);
-  });
-
-  it('waives delivery at and above the threshold', () => {
-    // ₹4,999 exactly.
-    const totals = calculateTotals([item({ price: { mrp: 600000, selling: 499900 } })], null);
     expect(totals.shipping).toBe(0);
-    expect(totals.total).toBe(499900);
+    expect(totals.total).toBe(100000);
+    expect(totals.amountToFreeShipping).toBe(0);
   });
 
-  it('applies a coupon before deciding on free delivery', () => {
+  it('keeps delivery free after a coupon', () => {
     const line = item({ price: { mrp: 600000, selling: 520000 } });
     const totals = calculateTotals([line], {
       code: 'TEST',
       label: 'Test',
       discount: 50000,
     });
-    // 520000 − 50000 = 470000, which is below the threshold, so delivery applies.
     expect(totals.couponDiscount).toBe(50000);
-    expect(totals.shipping).toBe(39900);
-    expect(totals.total).toBe(509900);
+    expect(totals.shipping).toBe(0);
+    expect(totals.total).toBe(470000);
   });
 
   it('honours a free-shipping coupon regardless of cart value', () => {

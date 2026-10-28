@@ -131,10 +131,14 @@ export function FreeShipMeter({ totals }: { totals: CartTotals }) {
   if (!DELIVERY_CHARGE_CONFIRMED || totals.itemCount === 0) return null;
 
   const qualified = totals.amountToFreeShipping <= 0;
-  const progress = Math.min(
-    100,
-    Math.round(((FREE_SHIPPING_THRESHOLD - totals.amountToFreeShipping) / FREE_SHIPPING_THRESHOLD) * 100),
-  );
+  // A zero threshold (free delivery on every order) is always full.
+  const progress =
+    FREE_SHIPPING_THRESHOLD > 0
+      ? Math.min(
+          100,
+          Math.round(((FREE_SHIPPING_THRESHOLD - totals.amountToFreeShipping) / FREE_SHIPPING_THRESHOLD) * 100),
+        )
+      : 100;
 
   return (
     <div className="rounded-md border border-border bg-surface p-3">

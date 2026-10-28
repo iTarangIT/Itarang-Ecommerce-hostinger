@@ -117,7 +117,7 @@ export const FAQ_SECTIONS: FaqSection[] = [
         id: 'delivery-charge',
         question: 'How much does delivery cost?',
         answer:
-          'Any delivery charge is shown in your cart, line by line, before you pay. Batteries ship in protective crates at no extra charge.',
+          'Nothing. Delivery is free on every order, and batteries ship in protective crates at no extra charge. Most orders arrive within 7–10 working days of payment.',
       },
       {
         id: 'installation',

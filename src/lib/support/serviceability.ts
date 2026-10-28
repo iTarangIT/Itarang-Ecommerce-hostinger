@@ -27,8 +27,13 @@ export interface ServiceabilityResult {
   message: string;
 }
 
-/** Working days quoted for a pincode that is not on the coverage list. */
-export const DEFAULT_DELIVERY_DAYS = 7;
+/**
+ * Working days quoted for a pincode that is not on the coverage list:
+ * 7–10 working days (D-04, decided 28 Oct). `DEFAULT_DELIVERY_DAYS` is the
+ * upper end, used for the "deliver by" date.
+ */
+export const DELIVERY_DAYS_MIN = 7;
+export const DEFAULT_DELIVERY_DAYS = 10;
 
 export const PINCODE_ERROR = 'Enter a valid 6-digit pincode.';
 
@@ -57,5 +62,5 @@ export function serviceabilityMessage(result: Omit<ServiceabilityResult, 'messag
   const place = result.city ? ` to ${result.city}` : '';
   return result.confirmed
     ? `Delivery${place} in ${result.deliveryDays}–${result.deliveryDays + 1} working days.`
-    : `Delivery usually takes ${result.deliveryDays - 2}–${result.deliveryDays} working days. We confirm the date after you order.`;
+    : `Delivery usually takes ${Math.min(DELIVERY_DAYS_MIN, result.deliveryDays)}–${result.deliveryDays} working days. We confirm the date after you order.`;
 }
