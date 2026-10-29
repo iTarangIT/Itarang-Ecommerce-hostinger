@@ -21,7 +21,7 @@ export interface FormFieldSpec {
   maxLength?: number;
 }
 
-export type SupportRequestKind = 'complaint' | 'warranty' | 'installation' | 'enquiry';
+export type SupportRequestKind = 'complaint' | 'warranty' | 'installation' | 'enquiry' | 'callback';
 
 /** Identity fields every request has; stored in their own columns. */
 const CONTACT: FormFieldSpec[] = [
@@ -164,6 +164,20 @@ export const SUPPORT_FORMS: Record<SupportRequestKind, FormFieldSpec[]> = {
       placeholder: 'Appliances, hours of backup, your inverter — anything that helps us size it.',
     },
   ],
+  // "Connect with an iTarang expert" popup for first-time visitors. The
+  // consent tick is a one-option select so the shared validator enforces it.
+  callback: [
+    { name: 'name', label: 'Full name', type: 'text', required: true, maxLength: 120 },
+    { name: 'phone', label: 'Mobile number', type: 'tel', required: true },
+    { name: 'pincode', label: 'Pincode', type: 'pincode', required: true },
+    {
+      name: 'consent',
+      label: 'Agreed to Terms, Privacy Policy and a call back',
+      type: 'select',
+      required: true,
+      options: ['yes'],
+    },
+  ],
 };
 
 export const KIND_LABEL: Record<SupportRequestKind, string> = {
@@ -171,6 +185,7 @@ export const KIND_LABEL: Record<SupportRequestKind, string> = {
   warranty: 'Warranty registration',
   installation: 'Installation booking',
   enquiry: 'Product enquiry',
+  callback: 'Expert callback',
 };
 
 export type FormValues = Record<string, string>;
