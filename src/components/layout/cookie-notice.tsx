@@ -1,18 +1,21 @@
 'use client';
 
 import * as React from 'react';
+import Link from 'next/link';
+import { Cookie, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 const STORAGE_KEY = 'itarang.cookie-notice.v1';
 
 /**
- * A one-time notice about cookies.
+ * A one-time notice about cookies, as a full-width bar along the bottom.
  *
  * The site sets only first-party cookies — the session, the cart and the
  * visitor id the analytics funnel uses — and no third-party trackers, so this
  * is a notice, not a consent wall: it says what is used and goes away once
- * acknowledged. Shown after the page has settled so it never shifts layout
- * on first paint, and sits above the mobile bottom navigation.
+ * acknowledged, by "Got it" or the close button alike. It appears together
+ * with the first-visit expert popup, and sits below that popup's overlay and
+ * above the mobile bottom navigation.
  */
 export function CookieNotice() {
   const [visible, setVisible] = React.useState(false);
@@ -25,7 +28,7 @@ export function CookieNotice() {
       seen = true; // storage blocked: nothing to remember the choice in, so do not nag
     }
     if (seen) return;
-    const timer = window.setTimeout(() => setVisible(true), 1500);
+    const timer = window.setTimeout(() => setVisible(true), 800);
     return () => window.clearTimeout(timer);
   }, []);
 
@@ -44,16 +47,30 @@ export function CookieNotice() {
     <div
       role="region"
       aria-label="Cookie notice"
-      className="fixed inset-x-3 print:hidden bottom-[calc(var(--bottom-nav-height)+0.75rem)] z-50 mx-auto flex max-w-xl items-center gap-3 rounded-lg border border-border bg-card p-3 shadow-lg sm:p-4 lg:bottom-6"
+      className="fixed inset-x-0 bottom-[calc(var(--bottom-nav-height)+env(safe-area-inset-bottom,0px))] z-50 animate-slide-up border-t border-border bg-card shadow-overlay print:hidden lg:bottom-0"
     >
-      {/* One compact row on a phone so it does not cover half the screen. */}
-      <p className="min-w-0 flex-1 text-xs text-muted-foreground sm:text-sm">
-        We use our own cookies to keep you signed in, remember your cart and understand how the
-        site is used. No advertising trackers.
-      </p>
-      <Button size="sm" className="shrink-0" onClick={dismiss}>
-        Got it
-      </Button>
+      <div className="container flex items-center gap-3 py-3 sm:gap-5 sm:py-4">
+        <Cookie aria-hidden className="hidden h-10 w-10 shrink-0 text-primary sm:block" strokeWidth={1.75} />
+        <p className="min-w-0 flex-1 text-xs leading-relaxed text-muted-foreground sm:text-sm">
+          This website uses cookies to keep you signed in, remember your cart and understand how the
+          site is used, so we can improve your browsing experience. We do not use advertising
+          trackers.{' '}
+          <Link href="/policies/privacy" className="font-medium text-primary underline-offset-4 hover:underline">
+            Privacy policy
+          </Link>
+        </p>
+        <Button className="shrink-0 rounded-full px-6 sm:px-10" onClick={dismiss}>
+          Got it
+        </Button>
+        <button
+          type="button"
+          onClick={dismiss}
+          aria-label="Close cookie notice"
+          className="-mr-1 grid h-9 w-9 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+        >
+          <X className="h-5 w-5" />
+        </button>
+      </div>
     </div>
   );
 }
