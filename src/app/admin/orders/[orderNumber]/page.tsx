@@ -2,7 +2,14 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ArrowLeft, CheckCircle2, FileText, FlaskConical } from 'lucide-react';
-import { emailInvoiceAction, notifyStockDelayAction } from '@/lib/admin/actions';
+import {
+  cancelAndRefundAction,
+  emailInvoiceAction,
+  notifyStockDelayAction,
+} from '@/lib/admin/actions';
+import { paymentProvider } from '@/lib/payments';
+import { sendPaymentLinkAction } from '@/lib/admin/staff-order-actions';
+import { REFUND_REFUSAL_MESSAGES, refundRefusal, refundableAmount } from '@/lib/orders/refund-rules';
 import { canInvoice, findInvoiceMeta } from '@/lib/orders/invoices';
 import { orders } from '@/lib/orders/postgres-repository';
 import { eventLabel } from '@/lib/orders/tracking';
@@ -33,12 +40,18 @@ export default async function AdminOrderDetailPage({
   const order = await repository.findByOrderNumber(normaliseOrderNumber(orderNumber));
   if (!order) notFound();
 
-  const [events, payments, reservations, invoice] = await Promise.all([
+  const [events, payments, reservations, invoice, refunds] = await Promise.all([
     repository.listEvents(order.id),
     repository.listPayments(order.id),
     repository.listReservations(order.id),
     findInvoiceMeta(order.id),
+    repository.listRefunds(order.id),
   ]);
+  const refusal = refundRefusal(order, refunds, paymentProvider().id);
+  const refundable = refundableAmount(order, refunds);
+  // Online payments only; a COD order has nothing to refund through the gateway.
+  const showRefunds =
+    order.paymentMethod !== 'cod' && (order.paymentStatus === 'paid' || refunds.length > 0);
   const invoiceAllowed = canInvoice(order);
   const invoiceHref = `/api/admin/orders/${encodeURIComponent(order.orderNumber)}/invoice`;
 
@@ -62,11 +75,53 @@ export default async function AdminOrderDetailPage({
             Test order
           </span>
         ) : null}
+        {order.placedBy ? (
+          <span className="rounded-sm bg-secondary px-2 py-1 text-2xs font-bold uppercase text-muted-foreground">
+            Placed by staff · {order.placedBy}
+          </span>
+        ) : null}
       </div>
       <p className="mt-1 text-sm text-muted-foreground">Placed {formatDate(order.createdAt)}</p>
       {notice ? (
         <p className="mt-4 rounded-lg border border-border bg-surface p-3 text-sm font-medium text-foreground">
           {notice}
+        </p>
+      ) : null}
+
+      {order.cancellationRequest && order.status !== 'cancelled' ? (
+        <p className="mt-4 rounded-lg border border-warning/40 bg-warning-soft p-3 text-sm text-foreground">
+          <strong className="font-semibold">The customer asked to cancel</strong> on{' '}
+          {formatDate(order.cancellationRequest.requestedAt)}
+          {order.cancellationRequest.note ? ` — “${order.cancellationRequest.note}”` : ''}. Call them on{' '}
+          <span className="tabular">{order.contact.phone}</span>, then use Cancel and refund below.
+        </p>
+      ) : null}
+
+      {order.placedBy && !order.paymentLink && order.status === 'pending_payment' ? (
+        <form
+          action={sendPaymentLinkAction}
+          className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-warning/40 bg-warning-soft p-3 text-sm"
+        >
+          <input type="hidden" name="orderNumber" value={order.orderNumber} />
+          <span className="text-foreground">No payment link has gone to the customer yet.</span>
+          <Button type="submit" variant="outline" size="sm">
+            Send payment link
+          </Button>
+        </form>
+      ) : null}
+
+      {order.paymentLink && order.status === 'pending_payment' ? (
+        <p className="mt-4 rounded-lg border border-border bg-surface p-3 text-sm text-foreground">
+          Payment link sent to the customer:{' '}
+          <a
+            href={order.paymentLink.url}
+            target="_blank"
+            rel="noopener"
+            className="break-all font-medium underline underline-offset-2"
+          >
+            {order.paymentLink.url}
+          </a>
+          . The order confirms by itself when it is paid.
         </p>
       ) : null}
 
@@ -187,6 +242,88 @@ export default async function AdminOrderDetailPage({
         </div>
 
         <aside className="space-y-6 lg:col-span-4">
+          {/* R-12: cancel and refund a paid, unshipped order (D-08: any admin, up to the amount paid). */}
+          {showRefunds ? (
+            <section className="rounded-lg border border-border bg-card p-4 text-sm">
+              <h2 className="font-display text-sm font-semibold">Cancel and refund</h2>
+              {refunds.length > 0 ? (
+                <ul className="mt-2 space-y-2">
+                  {refunds.map((refund) => (
+                    <li key={refund.id} className="rounded-md border border-border p-2 text-xs">
+                      <span className="flex justify-between gap-2">
+                        <span className="tabular font-semibold text-foreground">
+                          {formatPrice(refund.amount)}
+                        </span>
+                        <span
+                          className={
+                            refund.status === 'processed'
+                              ? 'font-semibold text-success'
+                              : refund.status === 'failed'
+                                ? 'font-semibold text-destructive'
+                                : 'font-semibold text-warning'
+                          }
+                        >
+                          {refund.status === 'processed'
+                            ? 'Refunded'
+                            : refund.status === 'failed'
+                              ? 'Failed'
+                              : 'Pending'}
+                        </span>
+                      </span>
+                      <span className="mt-1 block text-muted-foreground">
+                        {refund.reason} · by {refund.requestedBy} · {formatDate(refund.createdAt)}
+                      </span>
+                      {refund.gatewayRefundId ? (
+                        <span className="tabular block text-muted-foreground">
+                          {refund.gatewayRefundId}
+                        </span>
+                      ) : null}
+                      {refund.error ? (
+                        <span className="block break-words text-destructive">{refund.error}</span>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {refusal ? (
+                <p className="mt-2 text-xs text-muted-foreground">{REFUND_REFUSAL_MESSAGES[refusal]}</p>
+              ) : (
+                <form action={cancelAndRefundAction} className="mt-3 space-y-2">
+                  <input type="hidden" name="orderNumber" value={order.orderNumber} />
+                  <p className="text-xs text-muted-foreground">
+                    Refunds to the original payment method through Razorpay and cancels the order,
+                    which puts the stock back. Up to{' '}
+                    <span className="tabular font-semibold">{formatPrice(refundable)}</span> can be
+                    refunded.
+                  </p>
+                  <label className="block text-xs font-medium text-muted-foreground">
+                    Amount (₹)
+                    <input
+                      name="amount"
+                      required
+                      inputMode="decimal"
+                      defaultValue={(refundable / 100).toFixed(2)}
+                      className="tabular mt-1 block h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                    />
+                  </label>
+                  <label className="block text-xs font-medium text-muted-foreground">
+                    Reason
+                    <input
+                      name="reason"
+                      required
+                      maxLength={500}
+                      defaultValue={order.cancellationRequest ? 'Customer asked to cancel' : undefined}
+                      className="mt-1 block h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                    />
+                  </label>
+                  <Button type="submit" variant="outline" fullWidth>
+                    {order.status === 'cancelled' ? 'Refund' : 'Cancel and refund'}
+                  </Button>
+                </form>
+              )}
+            </section>
+          ) : null}
+
           {/* The apology the business asked for when stock runs out. */}
           {order.status === 'confirmed' || order.status === 'packed' ? (
             <section className="rounded-lg border border-border bg-card p-4">

@@ -227,6 +227,15 @@ export function toDomainProduct(record: ProductRecord): Product {
     // `emiEnabled` key at all rather than an explicit false. Absent is the
     // shape every other unstated claim on this type takes.
     ...(record.emiEnabled ? { emiEnabled: true } : {}),
+    // A label without a group names nothing, so it is dropped with it. The
+    // label falls back to the model name: "TK12100" in a dropdown is less
+    // friendly than "1.4 kWh" but still tells the members apart.
+    ...(record.variantGroup
+      ? {
+          variantGroup: record.variantGroup,
+          variantLabel: record.variantLabel?.trim() || record.modelName || record.title,
+        }
+      : {}),
     badges: record.badges,
     // No product in this catalogue has buyer-facing options yet. When one does,
     // the options are derived from the variants' `optionValues` rather than

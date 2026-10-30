@@ -19,10 +19,15 @@ import { useUI } from '@/lib/store/ui-provider';
 import { track } from '@/lib/analytics/track';
 import { Button } from '@/components/ui/button';
 import { QuantityStepper } from '@/components/cart/quantity-stepper';
+import type { FamilyOption } from '@/lib/catalog/variant-family';
+import { productPath } from '@/lib/routes';
+import { isDemoSlug } from '@/lib/commerce/demo/demo-slug';
+import { Select } from '@/components/ui/field';
 import { PriceBlock } from './price-block';
 import { PurchaseButton } from './purchase-button';
 import { NotifyMe } from './notify-me';
 import { ServiceStrip } from './service-strip';
+import { FinanceEnquiry } from './finance-enquiry';
 import { cn } from '@/lib/utils';
 
 /** Pick the variant matching a full option selection. */
@@ -57,7 +62,23 @@ function optionHasPriceSpread(product: Product, option: ProductOption): boolean 
   return new Set(prices).size > 1;
 }
 
-export function BuyBox({ product }: { product: Product }) {
+export function BuyBox({
+  product,
+  family = null,
+  emiByVariant = {},
+}: {
+  product: Product;
+  /**
+   * The other members of this product's family (R-11), from `familyOptions`.
+   * Null for a product with no family, which shows no dropdown.
+   */
+  family?: FamilyOption[] | null;
+  /**
+   * Lowest card-EMI instalment per variant id, computed on the server from the
+   * live Razorpay plans. A variant missing from it shows no EMI line.
+   */
+  emiByVariant?: Record<string, Paise>;
+}) {
   const cart = useCart();
   const wishlist = useWishlist();
   const recentlyViewed = useRecentlyViewed();
@@ -135,6 +156,8 @@ export function BuyBox({ product }: { product: Product }) {
 
   // Feedback for the gap between the click and /cart’s own skeleton.
   const [navigating, startNavigating] = React.useTransition();
+  // Pending while another family member's page loads.
+  const [switchingMember, startSwitchingMember] = React.useTransition();
 
   const buyNow = () => {
     cart.add(product, variant, quantity);
@@ -164,11 +187,45 @@ export function BuyBox({ product }: { product: Product }) {
         mrp={variant.price.mrp}
         discount={discount}
         size="lg"
-        // Only when the catalogue states it. Passing this unconditionally is
-        // what put a no-cost EMI offer on every product over ₹5,000.
-        showEmi={product.emiEnabled === true}
+        // Present only when the product is set to show EMI and Razorpay's
+        // live plans cover this price — see `app/products/[slug]/page.tsx`.
+        emiMonthly={emiByVariant[variant.id] ?? null}
         showTaxNote
       />
+
+      {/* The family's capacity dropdown (R-11, D-16). Each member is its own
+          product with its own page, so choosing one opens that page: price,
+          SKU, stock and images all follow. `replace` rather than `push` so
+          Back leaves the family instead of stepping through every capacity
+          tried, and `scroll: false` keeps the shopper where they are. */}
+      {family ? (
+        <div>
+          <label
+            htmlFor="family-capacity"
+            className="text-sm font-semibold uppercase tracking-wide text-muted-foreground"
+          >
+            Capacity
+          </label>
+          <Select
+            id="family-capacity"
+            className="mt-2.5"
+            value={product.slug}
+            disabled={switchingMember}
+            onChange={(event) => {
+              const slug = event.target.value;
+              if (slug === product.slug) return;
+              startSwitchingMember(() => router.replace(productPath(slug), { scroll: false }));
+            }}
+          >
+            {family.map((member) => (
+              <option key={member.slug} value={member.slug}>
+                {member.label} — {formatPrice(member.selling)}
+                {member.available ? '' : ' (out of stock)'}
+              </option>
+            ))}
+          </Select>
+        </div>
+      ) : null}
 
       {/* Variant selection — unavailable combinations are disabled, never hidden. */}
       {product.options.map((option) => {
@@ -323,6 +380,19 @@ export function BuyBox({ product }: { product: Product }) {
             Buy now
           </PurchaseButton>
         </div>
+
+        {/* "Buy on finance" (R-15): a call-back request the team turns into
+            a finance application. Offered whether or not the variant can be
+            bought online — a shopper waiting on stock can still apply. Not
+            on the demo fixture, which describes nothing on sale. */}
+        {!isDemoSlug(product.slug) ? (
+          <FinanceEnquiry
+            page="product"
+            items={[{ variantId: variant.id, quantity }]}
+            summary={product.options.length ? `${product.title} — ${variant.title}` : product.title}
+            pricePaise={variant.price.selling > 0 ? variant.price.selling * quantity : null}
+          />
+        ) : null}
 
         {/* Sold out is the one purchase block with something to offer, so it
             gets the notify control rather than the sentence below. The product

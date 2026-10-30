@@ -20,7 +20,10 @@ import type { Order, PaymentMethod } from './types';
  * stored on the order is always the server's own figure.
  */
 
-export interface PlaceOrderInput {
+/**
+ * Who is placing the order: exactly one of the two, and the compiler holds it.
+ */
+interface CustomerPlaced {
   /**
    * The authenticated customer placing the order. Required.
    *
@@ -30,6 +33,29 @@ export interface PlaceOrderInput {
    * than reaching this function without it.
    */
   userId: number;
+  placedBy?: never;
+}
+
+/**
+ * An order staff place for a customer (R-18). It names the admin instead of an
+ * owner: the customer may have no account, and matching one by an unverified
+ * phone number could hand the order to somebody else. Such an order is reached
+ * through /track, by order number and phone, like the historical guest orders.
+ */
+interface StaffPlaced {
+  userId?: never;
+  placedBy: string;
+}
+
+export type PlaceOrderInput = (CustomerPlaced | StaffPlaced) & PlaceOrderDetails;
+
+interface PlaceOrderDetails {
+  /**
+   * How long the stock is held. Defaults to `RESERVATION_TTL_MINUTES`, which
+   * fits a shopper at the payment window; a payment link sent to a customer's
+   * phone needs as long as the link is open.
+   */
+  reservationTtlMinutes?: number;
   lines: Array<{ variantId: string; quantity: number }>;
   contact: ContactInput;
   address: AddressInput;
@@ -66,6 +92,12 @@ const MAX_OPEN_COD_ORDERS = 3;
 export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResult> {
   const config = env();
   const repository = orders();
+
+  // The invariant from `PlaceOrderInput.userId`, held here rather than trusted
+  // to every route: an order without an owner must say which admin placed it.
+  if (input.userId === undefined && !input.placedBy) {
+    throw new Error('placeOrder needs the signed-in customer, or the admin placing it for them.');
+  }
 
   const quote = await buildQuote({
     lines: input.lines,
@@ -197,6 +229,7 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
     },
     items: quote.orderItems,
     userId: input.userId,
+    placedBy: input.placedBy,
     // Derived from the provider that will actually run, never from the request
     // body. A client could previously post `paymentMethod: 'razorpay-test'` to
     // a mock build and get an order row labelled razorpay-test whose payment
@@ -232,10 +265,10 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
     order: newOrder,
     reservations: quote.items.map((item) => ({ variantId: item.id, quantity: item.quantity })),
     availableByVariant,
-    reservationTtlMinutes: config.RESERVATION_TTL_MINUTES,
+    reservationTtlMinutes: input.reservationTtlMinutes ?? config.RESERVATION_TTL_MINUTES,
     couponLimits: quote.campaign
       ? {
-          userId: input.userId,
+          userId: input.userId ?? null,
           maxTotal: quote.campaign.maxRedemptionsTotal,
           maxPerCustomer: quote.campaign.maxPerCustomer,
         }
@@ -285,6 +318,10 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
   }
 
   /* ---------------------------------------------------------- online */
+
+  // A staff-placed order is paid through a payment link sent to the customer,
+  // not a payment window in this browser (`staff-order.ts`).
+  if (input.placedBy) return { ok: true, order, intent: null, reused: false };
 
   const intent = await provider!.createIntent(order);
   await repository.setGatewayOrderId(order.id, intent.gatewayOrderId, provider!.id);

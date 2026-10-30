@@ -21,7 +21,7 @@ const SECTIONS: PolicySection[] = [
     title: 'Damaged, faulty or wrong products',
     paragraphs: [
       'If your order arrives damaged, does not work, or is not what you ordered, tell us within 48 hours of delivery. Send your order number with photos of the product and the packaging.',
-      'Once we have confirmed the problem we replace the product at no cost, or refund it in full if a replacement is not available.',
+      'Once we have confirmed the problem we replace the product free of charge, or refund it in full if a replacement is not available.',
     ],
   },
   {

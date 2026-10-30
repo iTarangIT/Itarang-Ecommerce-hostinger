@@ -20,9 +20,9 @@ export const OFFERS: Offer[] = [
   {
     id: 'off-emi-1',
     kind: 'emi',
-    title: 'No-cost EMI from ₹5,000',
+    title: 'Card EMI from ₹5,000',
     detail:
-      'Three, six and nine month no-cost EMI on major credit cards for orders above ₹5,000. Processing fee, where applicable, is shown before you confirm.',
+      'Three, six and nine month EMI on major credit cards for orders above ₹5,000. Interest is set by your card issuer and shown, with any processing fee, before you confirm.',
     minCart: 500000,
     termsUrl: '/offers#emi',
   },

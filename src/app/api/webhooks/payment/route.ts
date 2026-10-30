@@ -58,6 +58,47 @@ export async function POST(request: Request) {
   }
 
   try {
+    // Refunds settle against `order_refunds`, not the payment-amount check
+    // below: a partial refund is a legitimate figure smaller than the order
+    // total, and treating it as an underpayment recorded it as a failure.
+    if (result.eventType.startsWith('refund.') && result.refundId) {
+      const order =
+        (result.gatewayOrderId && (await repository.findByGatewayOrderId(result.gatewayOrderId))) ||
+        (result.gatewayPaymentId && (await repository.findByGatewayPaymentId(result.gatewayPaymentId))) ||
+        null;
+
+      if (!order) {
+        console.warn(`[webhook] ${result.eventType} ${result.refundId} for an unknown order`);
+      } else if (result.eventType === 'refund.processed' || result.eventType === 'refund.failed') {
+        const { fullyRefunded } = await repository.settleRefund({
+          orderId: order.id,
+          provider: provider.id,
+          gatewayRefundId: result.refundId,
+          gatewayPaymentId: result.gatewayPaymentId,
+          amount: result.amount,
+          status: result.eventType === 'refund.processed' ? 'processed' : 'failed',
+        });
+        if (fullyRefunded) {
+          await repository.applyPaymentStatus(order.id, 'refunded', 'webhook', result.eventType);
+        }
+      }
+
+      await repository.completeWebhookEvent(provider.id, result.eventId);
+      return NextResponse.json({ ok: true, refund: result.refundId, eventType: result.eventType });
+    }
+
+    // A staff-placed order paid by payment link (R-18). The payment belongs to
+    // a gateway order Razorpay made for the link, so it is attached to our
+    // order here; from then on the ordinary path below — amount check, payment
+    // row, `paid` — applies, and a `payment.captured` for the same payment
+    // finds the order by that gateway id.
+    if (result.paymentLinkId && result.gatewayOrderId) {
+      const linked = await repository.findByPaymentLinkId(result.paymentLinkId);
+      if (linked && linked.gatewayOrderId !== result.gatewayOrderId) {
+        await repository.setGatewayOrderId(linked.id, result.gatewayOrderId, provider.id);
+      }
+    }
+
     if (!result.status || !result.gatewayOrderId) {
       // A verified event we do not act on — recorded, acknowledged, ignored.
       await repository.completeWebhookEvent(provider.id, result.eventId);

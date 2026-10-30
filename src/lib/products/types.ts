@@ -141,13 +141,25 @@ export interface ProductRecord {
   installationIncluded: boolean;
   returnWindowDays: number | null;
   /**
-   * Whether this product is advertised with no-cost EMI.
+   * Whether the product page shows the card-EMI line ("Card EMI from ₹x a
+   * month", figure from Razorpay's plans — see `payments/emi-plans.ts`).
    *
-   * Not optional and not nullable: a product either carries the offer or it
+   * Not optional and not nullable: a product either shows the line or it
    * does not, and there is no third "unknown" state worth modelling. It
    * defaults to false in the database and the importer never writes it.
    */
   emiEnabled: boolean;
+  /**
+   * The family this product belongs to (R-11, D-16), e.g. `powercube`, and
+   * what it is called in the family's capacity dropdown, e.g. "1.4 kWh".
+   *
+   * Optional as well as nullable so record fixtures written before families
+   * existed still type-check; absent and null both mean "no family". Like
+   * `emiEnabled`, the importer never writes either: grouping is an admin
+   * decision and a re-import must not undo it.
+   */
+  variantGroup?: string | null;
+  variantLabel?: string | null;
 
   manufacturer: Manufacturer | null;
   seller: Seller | null;
@@ -207,6 +219,15 @@ export interface ProductListRow {
   updatedBy: string | null;
 }
 
+/** One member of a product family, as the admin family panel lists it. */
+export interface FamilyMemberRow {
+  productKey: string;
+  title: string;
+  status: ProductStatus;
+  variantGroup: string;
+  variantLabel: string | null;
+}
+
 /* ------------------------------------------------------------- write inputs */
 
 export interface CreateProductInput {
@@ -252,6 +273,8 @@ export interface UpdateProductInput {
   installationIncluded?: boolean;
   returnWindowDays?: number | null;
   emiEnabled?: boolean;
+  variantGroup?: string | null;
+  variantLabel?: string | null;
   manufacturerId?: number | null;
   sellerId?: number | null;
   hsnCode?: string | null;

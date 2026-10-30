@@ -14,7 +14,14 @@ import {
 import { DealerSheetError, planDealerImport, summariseDealerImport } from '@/lib/support/dealer-import';
 import { MAX_DEALER_FILE_BYTES, readDealerFile } from '@/lib/support/dealer-workbook';
 import { createDealer, createDealers, listDealerKeys, setDealerActive } from '@/lib/support/dealers';
-import { updateSupportRequest, type SupportRequestStatus } from '@/lib/support/requests';
+import {
+  findSupportRequest,
+  recordCrmForward,
+  updateSupportRequest,
+  type SupportRequestStatus,
+} from '@/lib/support/requests';
+import { forwardFinanceLead } from '@/lib/support/crm-lead';
+import { financeLeadFrom } from '@/lib/support/finance-enquiry';
 import { parseCoverageCsv, upsertCoverage } from '@/lib/support/serviceability-server';
 
 /**
@@ -50,6 +57,34 @@ export async function updateSupportRequestAction(formData: FormData): Promise<vo
 
   await updateSupportRequest(id, { status, adminNote: note || undefined }, actor);
   done('/admin/support', 'Request updated.');
+}
+
+/**
+ * Send a finance enquiry to the CRM again (R-15) — for one that was saved
+ * while the CRM was down or not yet configured. The CRM recognises our
+ * reference, so sending one it already holds comes back as a duplicate with
+ * the existing lead id rather than a second lead.
+ */
+export async function forwardFinanceRequestAction(formData: FormData): Promise<void> {
+  await requireAdminActor('/admin/support');
+  const id = Number(formData.get('id'));
+  if (!Number.isInteger(id)) return;
+
+  const request = await findSupportRequest(id);
+  if (!request || request.kind !== 'finance') done('/admin/support', 'That finance enquiry no longer exists.');
+  if (request.crmForwardedAt) done('/admin/support', `${request.reference} is already in the CRM.`);
+
+  const outcome = await forwardFinanceLead(financeLeadFrom(request));
+  if ('skipped' in outcome) {
+    done('/admin/support', 'The CRM is not configured (CRM_BASE_URL / CRM_STORE_API_KEY). Nothing was sent.');
+  }
+  await recordCrmForward(id, outcome);
+  done(
+    '/admin/support',
+    outcome.ok
+      ? `${request.reference} sent to the CRM as lead ${outcome.leadId}${outcome.duplicate ? ' (it was already there)' : ''}.`
+      : `${request.reference} was not accepted: ${outcome.error}`,
+  );
 }
 
 /* ---------------------------------------------------------------- reviews */

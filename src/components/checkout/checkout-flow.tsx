@@ -38,6 +38,7 @@ import { Checkbox, Field, Input, Select } from '@/components/ui/field';
 import { CitySelect } from '@/components/ui/city-select';
 import { StateBlock } from '@/components/ui/states';
 import { OrderSummaryPanel } from './order-summary-panel';
+import { FinanceEnquiry } from '@/components/product/finance-enquiry';
 import { RazorpayPanel } from './razorpay-panel';
 import { cn } from '@/lib/utils';
 import { categoryPath } from '@/lib/routes';
@@ -1119,6 +1120,29 @@ export function CheckoutFlow({
             issues={quote?.issues ?? []}
             loading={quoteLoading && !quote}
           />
+          {/* "Buy on finance" (R-15) for a shopper who would rather pay in
+              instalments than now: the cart goes with the enquiry, and the
+              server re-reads each line from the catalogue. */}
+          {cart.items.length > 0 ? (
+            <div className="mt-4 rounded-lg border border-border bg-card p-4">
+              <p className="text-sm text-muted-foreground">
+                Prefer to pay in instalments? Leave your number and our team will call you.
+              </p>
+              <FinanceEnquiry
+                page="checkout"
+                className="mt-3"
+                items={cart.items.map((item) => ({ variantId: item.id, quantity: item.quantity }))}
+                summary={cart.items
+                  .map((item) =>
+                    `${item.title}${item.variantTitle ? ` — ${item.variantTitle}` : ''}${
+                      item.quantity > 1 ? ` × ${item.quantity}` : ''
+                    }`,
+                  )
+                  .join(', ')}
+                pricePaise={quote?.totals.total ?? null}
+              />
+            </div>
+          ) : null}
         </div>
       </aside>
     </div>

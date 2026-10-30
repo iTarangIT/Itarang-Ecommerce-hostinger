@@ -1,6 +1,12 @@
 import type { Metadata } from 'next';
-import { updateSupportRequestAction } from '@/lib/admin/service-actions';
-import { listSupportRequests, type SupportRequestStatus } from '@/lib/support/requests';
+import { forwardFinanceRequestAction, updateSupportRequestAction } from '@/lib/admin/service-actions';
+import {
+  countUnforwardedFinanceRequests,
+  listSupportRequests,
+  type SupportRequest,
+  type SupportRequestStatus,
+} from '@/lib/support/requests';
+import { crmConfigured } from '@/lib/support/crm-lead';
 import { KIND_LABEL, SUPPORT_FORMS, type SupportRequestKind } from '@/lib/support/request-forms';
 import { formatDate } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -15,7 +21,14 @@ export const metadata: Metadata = {
 };
 
 const STATUSES: SupportRequestStatus[] = ['open', 'in_progress', 'resolved', 'closed'];
-const KINDS: SupportRequestKind[] = ['complaint', 'warranty', 'installation', 'enquiry', 'callback'];
+const KINDS: SupportRequestKind[] = [
+  'complaint',
+  'warranty',
+  'installation',
+  'enquiry',
+  'callback',
+  'finance',
+];
 
 const STATUS_TONE: Record<SupportRequestStatus, string> = {
   open: 'bg-warning-soft text-warning',
@@ -24,29 +37,50 @@ const STATUS_TONE: Record<SupportRequestStatus, string> = {
   closed: 'bg-secondary text-secondary-foreground',
 };
 
-/** Field labels for the `details` keys, from the forms that produced them. */
-const LABELS = new Map(
-  Object.values(SUPPORT_FORMS)
+/**
+ * Field labels for the `details` keys, from the forms that produced them, plus
+ * the product a finance enquiry was resolved to on the server (R-15).
+ */
+const LABELS = new Map([
+  ...Object.values(SUPPORT_FORMS)
     .flat()
-    .map((field) => [field.name, field.label]),
-);
+    .map((field) => [field.name, field.label] as const),
+  ['page', 'Asked from'],
+  ['productSku', 'SKU'],
+  ['productTitle', 'Product'],
+  ['productUrl', 'Product page'],
+  ['pricePaise', 'Price'],
+]);
+
+/** A finance enquiry's price is stored in paise, like every amount; shown in rupees. */
+function detailValue(key: string, value: string): string {
+  if (key === 'pricePaise' && /^\d+$/.test(value)) return `₹${(Number(value) / 100).toLocaleString('en-IN')}`;
+  return value;
+}
 
 export default async function AdminSupportPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; kind?: string; notice?: string }>;
+  searchParams: Promise<{ status?: string; kind?: string; crm?: string; notice?: string }>;
 }) {
   const search = await searchParams;
   const status = STATUSES.find((s) => s === search.status);
   const kind = KINDS.find((k) => k === search.kind);
-  const requests = await listSupportRequests({ status, kind });
+  const unforwarded = search.crm === 'pending';
+  const [requests, unforwardedCount] = await Promise.all([
+    listSupportRequests({ status, kind, unforwarded }),
+    countUnforwardedFinanceRequests(),
+  ]);
+  const crmOn = crmConfigured();
 
-  const filterHref = (next: { status?: string; kind?: string }) => {
+  const filterHref = (next: { status?: string; kind?: string; crm?: string }) => {
     const params = new URLSearchParams();
     const s = 'status' in next ? next.status : status;
     const k = 'kind' in next ? next.kind : kind;
+    const c = 'crm' in next ? next.crm : unforwarded ? 'pending' : undefined;
     if (s) params.set('status', s);
     if (k) params.set('kind', k);
+    if (c) params.set('crm', c);
     const q = params.toString();
     return `/admin/support${q ? `?${q}` : ''}`;
   };
@@ -91,7 +125,24 @@ export default async function AdminSupportPage({
             </a>
           ))}
         </div>
+        {/* Finance enquiries the CRM has not accepted (R-15): saved and mailed,
+            but still to be keyed into the CRM or sent again from here. */}
+        <a
+          href={filterHref({ crm: unforwarded ? undefined : 'pending', kind: undefined })}
+          className={cn(
+            'rounded-md border px-2.5 py-1',
+            unforwarded ? 'border-primary bg-primary/10 font-medium' : 'border-border',
+          )}
+        >
+          Not sent to CRM ({unforwardedCount})
+        </a>
       </div>
+      {!crmOn && unforwardedCount > 0 ? (
+        <p className="mt-3 text-xs text-muted-foreground">
+          The CRM hand-off is off (CRM_BASE_URL and CRM_STORE_API_KEY are not set), so finance
+          enquiries are kept here and mailed to the service inbox only.
+        </p>
+      ) : null}
 
       {requests.length === 0 ? (
         <p className="mt-8 rounded-lg border border-border bg-surface p-6 text-sm text-muted-foreground">
@@ -126,8 +177,14 @@ export default async function AdminSupportPage({
                   ) : null}
                   {request.pincode ? <Detail label="Pincode" value={request.pincode} /> : null}
                   {Object.entries(request.details).map(([key, value]) => (
-                    <Detail key={key} label={LABELS.get(key) ?? key} value={value} wide={value.length > 60} />
+                    <Detail
+                      key={key}
+                      label={LABELS.get(key) ?? key}
+                      value={detailValue(key, value)}
+                      wide={value.length > 60}
+                    />
                   ))}
+                  {request.kind === 'finance' ? <CrmStatus request={request} /> : null}
                 </dl>
 
                 <form action={updateSupportRequestAction} className="space-y-2 lg:col-span-4">
@@ -164,6 +221,38 @@ export default async function AdminSupportPage({
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+/** Where a finance enquiry stands with the CRM, and a way to send it again. */
+function CrmStatus({ request }: { request: SupportRequest }) {
+  if (request.crmForwardedAt) {
+    return (
+      <Detail
+        label="CRM"
+        value={`Lead ${request.crmLeadId ?? '—'}, sent ${formatDate(request.crmForwardedAt)}`}
+        wide
+      />
+    );
+  }
+  return (
+    <div className="sm:col-span-2">
+      <dt className="text-xs text-muted-foreground">CRM</dt>
+      <dd className="flex flex-wrap items-center gap-2 text-foreground">
+        <span className="text-warning">
+          Not sent
+          {request.crmLastError
+            ? ` — ${request.crmLastError} (${request.crmAttempts} attempt${request.crmAttempts === 1 ? '' : 's'})`
+            : ''}
+        </span>
+        <form action={forwardFinanceRequestAction}>
+          <input type="hidden" name="id" value={request.id} />
+          <Button type="submit" size="sm" variant="outline">
+            Send to CRM
+          </Button>
+        </form>
+      </dd>
     </div>
   );
 }

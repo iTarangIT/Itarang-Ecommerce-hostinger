@@ -3,6 +3,7 @@ import type {
   BulkVariantUpdate,
   CataloguePriceRow,
   CreateProductInput,
+  FamilyMemberRow,
   Manufacturer,
   ManufacturerInput,
   MediaInput,
@@ -46,6 +47,12 @@ export interface ProductRepository {
 
   listManufacturers(): Promise<Manufacturer[]>;
   listSellers(): Promise<Seller[]>;
+
+  /**
+   * Every product that belongs to a family, whatever its status — the admin
+   * family panel's list of existing families and of this product's siblings.
+   */
+  listFamilyMembers(): Promise<FamilyMemberRow[]>;
 
   /* ------------------------------------------------------------ writes */
 

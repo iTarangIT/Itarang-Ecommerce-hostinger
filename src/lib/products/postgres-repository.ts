@@ -22,6 +22,7 @@ import type {
   BulkVariantUpdate,
   CataloguePriceRow,
   CreateProductInput,
+  FamilyMemberRow,
   Manufacturer,
   ManufacturerInput,
   MediaInput,
@@ -86,6 +87,8 @@ interface ProductRow {
   installation_included: boolean;
   return_window_days: number | null;
   emi_enabled: boolean;
+  variant_group: string | null;
+  variant_label: string | null;
   manufacturer_id: number | null;
   seller_id: number | null;
   hsn_code: string | null;
@@ -202,6 +205,7 @@ const PRODUCT_COLUMNS = `
   product_type, net_quantity, category, subcategory, art, description, highlights,
   box_contents, care_instructions, country_of_origin, warranty_months, warranty_cycles,
   warranty_text, installation_included, return_window_days, emi_enabled,
+  variant_group, variant_label,
   manufacturer_id, seller_id,
   hsn_code, tax_rate, facets, badges,
   to_char(launched_at, 'YYYY-MM-DD') AS launched_at,
@@ -374,6 +378,8 @@ const PRODUCT_PATCH_COLUMNS: Record<keyof UpdateProductInput, string> = {
   installationIncluded: 'installation_included',
   returnWindowDays: 'return_window_days',
   emiEnabled: 'emi_enabled',
+  variantGroup: 'variant_group',
+  variantLabel: 'variant_label',
   manufacturerId: 'manufacturer_id',
   sellerId: 'seller_id',
   hsnCode: 'hsn_code',
@@ -555,6 +561,8 @@ class PostgresProductRepository implements ProductRepository {
       installationIncluded: row.installation_included,
       returnWindowDays: row.return_window_days,
       emiEnabled: row.emi_enabled,
+      variantGroup: row.variant_group,
+      variantLabel: row.variant_label,
       manufacturer: row.manufacturer_id
         ? (parties.manufacturers.get(row.manufacturer_id) ?? null)
         : null,
@@ -759,6 +767,28 @@ class PostgresProductRepository implements ProductRepository {
          FROM sellers ORDER BY name`,
     );
     return rows.map(toSeller);
+  }
+
+  async listFamilyMembers(): Promise<FamilyMemberRow[]> {
+    const rows = await query<{
+      product_key: string;
+      title: string;
+      status: ProductStatus;
+      variant_group: string;
+      variant_label: string | null;
+    }>(
+      `SELECT product_key, title, status, variant_group, variant_label
+         FROM products
+        WHERE variant_group IS NOT NULL
+        ORDER BY variant_group, title`,
+    );
+    return rows.map((row) => ({
+      productKey: row.product_key,
+      title: row.title,
+      status: row.status,
+      variantGroup: row.variant_group,
+      variantLabel: row.variant_label,
+    }));
   }
 
   /* --------------------------------------------------------------- writes */

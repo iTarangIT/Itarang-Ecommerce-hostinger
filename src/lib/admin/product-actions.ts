@@ -846,6 +846,65 @@ export async function updateProductPartiesAction(formData: FormData): Promise<vo
   );
 }
 
+/* ------------------------------------------------------------------ family */
+
+/**
+ * The family key as stored: lower case, words joined by hyphens, so "Power
+ * Cube" and "powercube " typed on two products do not quietly make two
+ * families. Matches the column's CHECK in migration 0033.
+ */
+const variantGroupSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .transform((value) => value.replace(/[\s_]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, ''))
+  .pipe(
+    z
+      .string()
+      .max(60, 'A family name can be at most 60 characters.')
+      .regex(/^([a-z0-9][a-z0-9-]*)?$/, 'A family name may use only letters, numbers and hyphens.'),
+  )
+  .transform((value) => (value ? value : null));
+
+const familySchema = z.object({
+  productKey: productKeySchema,
+  variantGroup: variantGroupSchema.optional().transform((value) => value ?? null),
+  variantLabel: optionalText(40),
+});
+
+/**
+ * Put a product in a family, or take it out (R-11). Logged like every other
+ * field edit, so Logs → Product log shows who grouped what and when.
+ */
+export async function updateProductFamilyAction(formData: FormData): Promise<void> {
+  const actor = await requireAdminActor();
+  const raw = Object.fromEntries(formData);
+  const parsed = familySchema.safeParse(raw);
+
+  if (!parsed.success) {
+    backTo(String(raw.productKey ?? ''), 'information', {
+      error: parsed.error.issues.map((issue) => issue.message).join(' '),
+    });
+  }
+
+  const { productKey, variantGroup, variantLabel } = parsed.data;
+  // A label names a member of a family; without one it would name nothing,
+  // so leaving the family clears it too.
+  const patch = { variantGroup, variantLabel: variantGroup ? variantLabel : null };
+  const before = await snapshot(productKey);
+  settle(
+    productKey,
+    'information',
+    await logged(await productRepository().updateProduct(productKey, patch, actor), {
+      actor,
+      productKey,
+      action: 'Edited family',
+      before,
+      changes: diffFields(flat(before), patch),
+    }),
+  );
+}
+
 /* --------------------------------------------------------------------- seo */
 
 const seoSchema = z.object({

@@ -100,6 +100,12 @@ export interface Order {
   shipment: Shipment;
   /** When the checkout consent tick was accepted (R-05); absent on older orders. */
   termsAcceptedAt?: string;
+  /** The customer asked to cancel before dispatch (R-12). */
+  cancellationRequest?: { requestedAt: string; note?: string };
+  /** Admin email when staff placed the order for the customer (R-18). */
+  placedBy?: string;
+  /** The Razorpay payment link sent for a staff-placed order (R-18). */
+  paymentLink?: { id: string; url: string };
   createdAt: string;
   updatedAt: string;
 }
@@ -179,4 +185,24 @@ export interface NewOrder {
   gatewayOrderId?: string;
   /** The checkout consent tick was ticked; stamped as `terms_accepted_at`. */
   termsAccepted?: boolean;
+  /** Admin email when staff placed the order for the customer (R-18). */
+  placedBy?: string;
+}
+
+export type RefundStatus = 'pending' | 'processed' | 'failed';
+
+/** A refund started from the admin order page (R-12, migration 0032). */
+export interface RefundRecord {
+  id: number;
+  orderId: number;
+  provider: string;
+  gatewayPaymentId: string;
+  gatewayRefundId?: string;
+  amount: Paise;
+  status: RefundStatus;
+  reason: string;
+  requestedBy: string;
+  error?: string;
+  createdAt: string;
+  processedAt?: string;
 }

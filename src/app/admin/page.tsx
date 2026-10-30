@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, BarChart3, Filter, FlaskConical, LifeBuoy, Package, RefreshCw, ScrollText, TicketPercent, Truck, UserRound } from 'lucide-react';
+import { AlertTriangle, BarChart3, Filter, FlaskConical, LifeBuoy, Package, PhoneCall, Plus, RefreshCw, ScrollText, TicketPercent, Truck, UserRound } from 'lucide-react';
 import {
   pushInventoryToHostingerAction,
   resolveCatalogueAlertAction,
@@ -111,6 +111,20 @@ export default async function AdminOrdersPage({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          <Link
+            href="/admin/orders/new"
+            className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          >
+            <Plus className="h-4 w-4" />
+            New order
+          </Link>
+          <Link
+            href="/admin/callbacks"
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+          >
+            <PhoneCall className="h-4 w-4" />
+            Call-backs
+          </Link>
           <Link
             href="/track"
             className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary"

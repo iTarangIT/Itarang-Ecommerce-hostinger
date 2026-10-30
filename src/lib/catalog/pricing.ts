@@ -58,11 +58,3 @@ export function formatAmount(paise: Paise): string {
     Math.round(paise / 100),
   );
 }
-
-/**
- * Indicative no-cost EMI instalment over `months`.
- * "No cost" means the instalment is simply the price divided by the tenure.
- */
-export function emiPerMonth(paise: Paise, months = 6): Paise {
-  return Math.round(paise / months);
-}

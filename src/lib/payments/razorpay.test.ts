@@ -287,3 +287,103 @@ describe('construction refuses unsafe configuration', () => {
     expect(() => new RazorpayTestProvider()).toThrow();
   });
 });
+
+describe('refunds and payment links (R-12, R-18)', () => {
+  const provider = () => new RazorpayTestProvider();
+
+  function delivery(body: unknown) {
+    const raw = JSON.stringify(body);
+    return {
+      raw,
+      headers: new Headers({
+        'x-razorpay-signature': signWebhook(raw, WEBHOOK_SECRET),
+        'x-razorpay-event-id': 'evt_refund_1',
+      }),
+    };
+  }
+
+  it('refunds the given paise against the payment and reports the refund id', async () => {
+    const fetchMock = stubFetch({ id: 'rfnd_1', amount: 100, status: 'processed' });
+
+    const result = await provider().refund({
+      gatewayPaymentId: 'pay_1',
+      amount: 100,
+      orderNumber: 'ITG-2608-ABC123',
+      reason: 'Customer asked to cancel',
+    });
+
+    expect(fetchMock.mock.calls[0]![0]).toBe('https://api.razorpay.com/v1/payments/pay_1/refund');
+    expect(JSON.parse(fetchMock.mock.calls[0]![1].body).amount).toBe(100);
+    expect(result).toEqual({ refundId: 'rfnd_1', status: 'processed', amount: 100 });
+  });
+
+  it('refuses a refund the gateway recorded at a different amount', async () => {
+    stubFetch({ id: 'rfnd_1', amount: 10000, status: 'pending' });
+    await expect(
+      provider().refund({ gatewayPaymentId: 'pay_1', amount: 100, orderNumber: 'X', reason: 'r' }),
+    ).rejects.toThrow(PaymentProviderError);
+  });
+
+  it('surfaces a gateway refusal as an error rather than a refund', async () => {
+    stubFetch({ error: { description: 'The amount exceeds the captured amount' } }, false, 400);
+    await expect(
+      provider().refund({ gatewayPaymentId: 'pay_1', amount: 100, orderNumber: 'X', reason: 'r' }),
+    ).rejects.toThrow(/400/);
+  });
+
+  it('creates a payment link for the order total, keyed on the order number', async () => {
+    const fetchMock = stubFetch({ id: 'plink_1', short_url: 'https://rzp.io/i/abc', amount: 850000 });
+    const expiresAt = new Date(Date.now() + 24 * 3600_000);
+
+    const link = await provider().createPaymentLink({ order: orderFixture(), expiresAt });
+
+    const body = JSON.parse(fetchMock.mock.calls[0]![1].body);
+    expect(body).toMatchObject({
+      amount: 850000,
+      reference_id: 'ITG-2608-ABC123',
+      accept_partial: false,
+      customer: { contact: '+919876543210' },
+      notify: { sms: true, email: false },
+      expire_by: Math.floor(expiresAt.getTime() / 1000),
+    });
+    expect(link).toEqual({ id: 'plink_1', url: 'https://rzp.io/i/abc' });
+  });
+
+  it('reads the refund id, and the order id from the payment beside a refund', async () => {
+    const { raw, headers } = delivery({
+      event: 'refund.processed',
+      payload: {
+        refund: { entity: { id: 'rfnd_9', payment_id: 'pay_9', amount: 100 } },
+        payment: { entity: { id: 'pay_9', order_id: 'order_9', amount: 850000 } },
+      },
+    });
+
+    const result = await provider().verifyWebhook(raw, headers);
+
+    expect(result.refundId).toBe('rfnd_9');
+    expect(result.gatewayOrderId).toBe('order_9');
+    expect(result.gatewayPaymentId).toBe('pay_9');
+    expect(result.amount).toBe(100);
+  });
+
+  it('maps payment_link.paid to paid, carrying the link id', async () => {
+    const { raw, headers } = delivery({
+      event: 'payment_link.paid',
+      payload: {
+        payment_link: { entity: { id: 'plink_1', reference_id: 'ITG-2608-ABC123', status: 'paid' } },
+        payment: { entity: { id: 'pay_5', order_id: 'order_link_5', amount: 850000, method: 'upi' } },
+      },
+    });
+
+    const result = await provider().verifyWebhook(raw, headers);
+
+    expect(result).toMatchObject({
+      status: 'paid',
+      paymentLinkId: 'plink_1',
+      gatewayOrderId: 'order_link_5',
+      gatewayPaymentId: 'pay_5',
+      amount: 850000,
+    });
+    expect(result.refundId).toBeUndefined();
+  });
+});
