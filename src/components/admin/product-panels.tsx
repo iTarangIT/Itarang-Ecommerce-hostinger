@@ -2,6 +2,7 @@ import {
   updateProductContentAction,
   updateProductFacetsAction,
   updateProductFaqsAction,
+  updateProductFamilyAction,
   updateProductInformationAction,
   updateProductPartiesAction,
   updateProductPricingAction,
@@ -11,7 +12,7 @@ import {
   updateProductWarrantyAction,
 } from '@/lib/admin/product-actions';
 import type { Category, ProductSection } from '@/lib/commerce/types';
-import type { Manufacturer, ProductRecord, Seller } from '@/lib/products/types';
+import type { FamilyMemberRow, Manufacturer, ProductRecord, Seller } from '@/lib/products/types';
 import {
   formatFaqs,
   formatLines,
@@ -260,6 +261,100 @@ export function InformationPanel({
   );
 }
 
+/* ------------------------------------------------------------------- family */
+
+/**
+ * Which family this product belongs to (R-11, D-16).
+ *
+ * Its own form, so grouping two products is one deliberate save rather than a
+ * side effect of editing a title. `members` is every product in any family,
+ * whatever its status: the datalist offers the existing family names so a
+ * second member is typed the same way as the first, and the list below says
+ * which siblings a shopper will actually see — published ones only.
+ */
+export function FamilyPanel({
+  product,
+  members,
+}: {
+  product: ProductRecord;
+  members: FamilyMemberRow[];
+}) {
+  const groups = [...new Set(members.map((member) => member.variantGroup))];
+  const siblings = product.variantGroup
+    ? members.filter(
+        (member) => member.variantGroup === product.variantGroup && member.productKey !== product.productKey,
+      )
+    : [];
+
+  return (
+    <form action={updateProductFamilyAction} className="mt-8 border-t border-border pt-6">
+      <KeyField productKey={product.productKey} />
+      <PanelHeading
+        title="Product family"
+        description="Products in the same family share one capacity dropdown on their pages, e.g. Powercube 1.4 and 2.7. Each keeps its own SKU, price, stock and page; only published members are offered."
+      />
+
+      <div className="grid gap-5 sm:grid-cols-2">
+        <Field
+          label="Family"
+          htmlFor="variantGroup"
+          hint="The same name on every member. Letters, numbers and hyphens; leave blank for no family."
+        >
+          <Input
+            id="variantGroup"
+            name="variantGroup"
+            list="variant-groups"
+            placeholder="e.g. powercube"
+            autoComplete="off"
+            defaultValue={product.variantGroup ?? ''}
+          />
+          <datalist id="variant-groups">
+            {groups.map((group) => (
+              <option key={group} value={group} />
+            ))}
+          </datalist>
+        </Field>
+        <Field
+          label="Name in the dropdown"
+          htmlFor="variantLabel"
+          hint="Short, and the same style across the family. Left blank, the model name is used."
+        >
+          <Input
+            id="variantLabel"
+            name="variantLabel"
+            placeholder="e.g. 1.4 kWh"
+            maxLength={40}
+            defaultValue={product.variantLabel ?? ''}
+          />
+        </Field>
+      </div>
+
+      {product.variantGroup ? (
+        <div className="mt-4 text-sm">
+          <p className="font-medium text-foreground">Other members of {product.variantGroup}</p>
+          {siblings.length > 0 ? (
+            <ul className="mt-1.5 space-y-1 text-muted-foreground">
+              {siblings.map((member) => (
+                <li key={member.productKey}>
+                  {member.title}
+                  {member.variantLabel ? ` · ${member.variantLabel}` : ''}
+                  {member.status === 'published' ? '' : ` (${member.status}, not shown to shoppers)`}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-1.5 text-muted-foreground">
+              None yet. The dropdown appears once a second published product has this family.
+            </p>
+          )}
+        </div>
+      ) : null}
+
+      <SaveRow label="Save family" />
+    </form>
+  );
+}
+
 /* ------------------------------------------------------------------ pricing */
 
 export function PricingPanel({ product }: { product: ProductRecord }) {
@@ -311,11 +406,12 @@ export function PricingPanel({ product }: { product: ProductRecord }) {
       <label className="mt-5 flex items-start gap-2.5 text-sm">
         <Checkbox name="emiEnabled" defaultChecked={product.emiEnabled} className="mt-0.5" />
         <span>
-          Show “Card EMI available at payment” on this product
+          Show “Card EMI from ₹x a month” on this product
           <span className="block text-xs text-muted-foreground">
-            Card EMI is offered by Razorpay at the payment step, on the card issuer’s terms. Tick
-            this only once Razorpay EMI is switched on for the live account. It never says
-            “no-cost”.
+            The figure is the lowest monthly instalment in the live Razorpay account’s card EMI
+            plans, with the bank’s interest. Nothing is shown until card EMI is switched on in
+            Razorpay and the site takes live payments, or when the price is below every bank’s
+            minimum. It never names a bank or claims the EMI is interest-free.
           </span>
         </span>
       </label>

@@ -12,7 +12,7 @@ const STORAGE_PREFIX = 'itarang.announcement.dismissed.v3';
 /**
  * Only offers that exist.
  *
- * Two were removed. "No-cost EMI available from ₹5,000" — `emiEnabled` is false
+ * Two were removed. An interest-free EMI "from ₹5,000" — `emiEnabled` is false
  * on every product and `DbCatalogProvider.listOffers()` returns nothing, so the
  * bar advertised an arrangement no lender has agreed to and linked to an empty
  * page. "₹1,500 off inverter + battery combos with COMBO1500" — the catalogue
@@ -22,7 +22,7 @@ const STORAGE_PREFIX = 'itarang.announcement.dismissed.v3';
  * What is here now is what the business specified and the checkout applies:
  * the campaigns marked "show on site" in /admin/campaigns, the UPI discount
  * (`UPI_DISCOUNT`, applied by `buildQuote`) and free delivery on every order
- * (D-03, decided 28 Oct). No card offers and no no-cost EMI — the business has
+ * (D-03, decided 28 Oct). No card offers and no interest-free EMI — the business has
  * neither online.
  */
 const STANDING_MESSAGES = [

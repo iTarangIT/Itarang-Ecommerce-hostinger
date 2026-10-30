@@ -16,6 +16,9 @@ import { ReviewForm } from '@/components/product/review-form';
 import { OrderProgress } from '@/components/account/order-progress';
 import { ShipmentDetails } from '@/components/account/shipment-details';
 import { eventLabel, trackView } from '@/lib/orders/tracking';
+import { requestCancellationAction } from '@/lib/orders/customer-actions';
+import { refundSummary } from '@/lib/orders/refund-rules';
+import { Button } from '@/components/ui/button';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,10 +33,10 @@ export default async function OrderPage({
   searchParams,
 }: {
   params: Promise<{ orderNumber: string }>;
-  searchParams: Promise<{ placed?: string }>;
+  searchParams: Promise<{ placed?: string; cancel?: string }>;
 }) {
   const { orderNumber: raw } = await params;
-  const { placed } = await searchParams;
+  const { placed, cancel } = await searchParams;
   const orderNumber = normaliseOrderNumber(raw);
 
   // Only the browser that placed this order may see it without a phone number.
@@ -76,6 +79,11 @@ export default async function OrderPage({
   const canReview = order.status === 'delivered' && order.paymentStatus !== 'refunded';
   const invoice = canInvoice(order) ? await findInvoiceMeta(order.id) : null;
   const invoiceReady = Boolean(invoice);
+  const refund = refundSummary(await repository.listRefunds(order.id));
+  // Before dispatch the customer may ask to cancel; an admin then cancels and
+  // refunds (R-12). Asked once — the request is shown instead of the button.
+  const canRequestCancel =
+    (order.status === 'confirmed' || order.status === 'packed') && !order.cancellationRequest;
 
   return (
     <div className="container py-6 lg:py-10">
@@ -129,7 +137,11 @@ export default async function OrderPage({
                   ? 'Paid online'
                   : 'Test payment'}
               <span className="block text-xs font-normal text-muted-foreground">
-                {order.paymentStatus}
+                {refund
+                  ? refund.state === 'processed'
+                    ? `Refunded ${formatPrice(refund.amount)}`
+                    : `Refund of ${formatPrice(refund.amount)} in progress — 5–7 working days`
+                  : order.paymentStatus}
               </span>
             </dd>
           </div>
@@ -236,6 +248,42 @@ export default async function OrderPage({
           <div className="mt-4">
             <ShipmentDetails shipment={order.shipment} />
           </div>
+
+          {order.cancellationRequest || cancel === 'requested' ? (
+            <p className="mt-4 rounded-lg border border-border bg-surface p-4 text-sm text-foreground">
+              <strong className="font-semibold">Cancellation requested.</strong> We will call you on{' '}
+              <span className="tabular">{order.contact.phone}</span> within one working day. If the order has not
+              been dispatched it is cancelled and any amount paid is refunded to the original payment method.
+            </p>
+          ) : canRequestCancel ? (
+            <details className="mt-4 rounded-lg border border-border bg-card p-4 text-sm">
+              <summary className="cursor-pointer font-semibold text-foreground">
+                Request cancellation
+              </summary>
+              <form action={requestCancellationAction} className="mt-3 space-y-2">
+                <input type="hidden" name="orderNumber" value={order.orderNumber} />
+                <label className="block text-xs font-medium text-muted-foreground">
+                  Reason (optional)
+                  <textarea
+                    name="note"
+                    maxLength={500}
+                    rows={2}
+                    className="mt-1 block w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground"
+                  />
+                </label>
+                <p className="text-xs text-muted-foreground">
+                  You can cancel free of charge until the order is dispatched. We will call you to confirm.
+                </p>
+                <Button type="submit" variant="outline" size="sm">
+                  Request cancellation
+                </Button>
+              </form>
+            </details>
+          ) : cancel === 'unavailable' ? (
+            <p className="mt-4 rounded-lg border border-border bg-surface p-4 text-sm text-muted-foreground">
+              This order can no longer be cancelled online. Call customer care and we will help.
+            </p>
+          ) : null}
 
           <h2 className="heading-3 mt-6">Delivery address</h2>
           <address className="mt-3 rounded-lg border border-border bg-card p-4 text-sm not-italic text-muted-foreground">

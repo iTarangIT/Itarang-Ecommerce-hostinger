@@ -13,7 +13,7 @@ import {
 import { ProductSections } from '@/components/product/product-sections';
 import { allProducts, productsByIds } from '@/lib/catalog/collections';
 import { toProductSummary, type ProductSummary } from '@/lib/commerce/summary';
-import type { Product, Review } from '@/lib/commerce/types';
+import type { Paise, Product, Review } from '@/lib/commerce/types';
 import { displayPrice, formatPrice, productAvailability } from '@/lib/catalog/pricing';
 import { SITE } from '@/lib/site';
 import { BreadcrumbJsonLd, Breadcrumbs } from '@/components/ui/breadcrumbs';
@@ -41,6 +41,8 @@ import { specSheetPath } from '@/lib/downloads/spec-sheets';
 import { RecentlyViewed } from '@/components/product/recently-viewed';
 import { ProductRail } from '@/components/merch/product-rail';
 import { categoryPath, productPath, subcategoryPath } from '@/lib/routes';
+import { familyOptions } from '@/lib/catalog/variant-family';
+import { fetchEmiPlans, lowestEmi } from '@/lib/payments/emi-plans';
 
 interface PageProps {
   params: Promise<{ slug: string }>;
@@ -94,6 +96,27 @@ async function linkedCompanions(product: Product): Promise<ProductSummary[]> {
   return linkedProducts(product, catalogue)
     .filter((candidate) => productAvailability(candidate) !== 'out-of-stock')
     .map(toProductSummary);
+}
+
+/**
+ * The card-EMI figure for each variant, keyed by variant id (R-16).
+ *
+ * Empty unless the product is set to show EMI *and* the live Razorpay account
+ * returned plans that cover the price — `fetchEmiPlans` asks only the live
+ * provider and fails soft, so a test build, the mock, an outage or an account
+ * with EMI off all render no line rather than a made-up one. The fetch is
+ * cached in Next's data cache, so a static product page stays static.
+ */
+async function emiFigures(product: Product): Promise<Record<string, Paise>> {
+  if (!product.emiEnabled) return {};
+  const plans = await fetchEmiPlans();
+  if (plans.length === 0) return {};
+  const figures: Record<string, Paise> = {};
+  for (const variant of product.variants) {
+    const quote = lowestEmi(variant.price.selling, plans);
+    if (quote) figures[variant.id] = quote.monthly;
+  }
+  return figures;
 }
 
 /**
@@ -162,6 +185,16 @@ export default async function ProductPage({ params }: PageProps) {
         provider.getReviews(product.id),
         linkedCompanions(product),
         productsByIds(product.relatedProductIds),
+      ]);
+
+  // The capacity dropdown (R-11) and the card-EMI figure (R-16). The family
+  // comes from the published catalogue, so only published siblings are
+  // offered; the demo fixture has neither.
+  const [family, emiByVariant] = isDemo
+    ? [null, {}]
+    : await Promise.all([
+        allProducts().then((catalogue) => familyOptions(product, catalogue)),
+        emiFigures(product),
       ]);
 
   const subcategory = category?.subcategories.find((s) => s.slug === product.subcategory);
@@ -354,7 +387,10 @@ export default async function ProductPage({ params }: PageProps) {
                 `data-buy-box` lets the WhatsApp bubble step aside while this
                 is on screen, so it never covers "Buy now" (R-07). */}
             <div data-buy-box>
-              <BuyBox product={product} />
+              {/* Keyed by slug: choosing another family member is a client
+                  navigation to the same route, and the buy box must start
+                  fresh on it — quantity and selection belong to one product. */}
+              <BuyBox key={product.slug} product={product} family={family} emiByVariant={emiByVariant} />
             </div>
 
             {isDemo ? null : <DeliveryCheck />}

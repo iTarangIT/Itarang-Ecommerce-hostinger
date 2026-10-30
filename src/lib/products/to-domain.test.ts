@@ -403,12 +403,35 @@ describe('toDomainProduct', () => {
     expect('sections' in toDomainProduct(record())).toBe(false);
   });
 
-  it('omits the EMI offer unless the product carries it', () => {
-    // No-cost EMI used to appear on any product priced over ₹5,000, because a
+  it('omits the EMI line unless the product carries it', () => {
+    // An EMI line used to appear on any product priced over ₹5,000, because a
     // price threshold stood in for an agreement with a lender. Absence is now
     // the default and the only thing that turns it on is the product saying so.
     expect('emiEnabled' in toDomainProduct(record())).toBe(false);
     expect(toDomainProduct(record({ emiEnabled: true })).emiEnabled).toBe(true);
+  });
+});
+
+describe('product families (R-11)', () => {
+  it('carries no family fields for a product outside a family', () => {
+    const product = toDomainProduct(record({ variantLabel: '1.4 kWh' }));
+    expect('variantGroup' in product).toBe(false);
+    expect('variantLabel' in product).toBe(false);
+  });
+
+  it('carries the group and the stated label', () => {
+    const product = toDomainProduct(record({ variantGroup: 'powercube', variantLabel: '1.4 kWh' }));
+    expect(product.variantGroup).toBe('powercube');
+    expect(product.variantLabel).toBe('1.4 kWh');
+  });
+
+  it('falls back to the model name, then the title, when no label is stated', () => {
+    expect(
+      toDomainProduct(record({ variantGroup: 'powercube', modelName: 'TK12100' })).variantLabel,
+    ).toBe('TK12100');
+    expect(toDomainProduct(record({ variantGroup: 'powercube', variantLabel: ' ' })).variantLabel).toBe(
+      'Test product',
+    );
   });
 });
 

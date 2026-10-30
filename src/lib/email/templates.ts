@@ -628,3 +628,57 @@ export function outOfStockAlertMessage(
     ),
   };
 }
+
+/**
+ * Sent when an admin cancels and refunds an order (R-12). The timeline is the
+ * one the refund policy promises, so the two cannot drift apart.
+ */
+export function refundStartedMessage(
+  to: string,
+  details: { name: string; orderNumber: string; amount: Paise; path: string },
+): Mail {
+  const href = `${env().NEXT_PUBLIC_SITE_URL.replace(/\/$/, '')}${details.path}`;
+  const firstName = details.name.split(/\s+/)[0] || 'there';
+  const amount = formatPrice(details.amount);
+
+  return {
+    to,
+    subject: `Refund of ${amount} for order ${details.orderNumber}`,
+    text: [
+      `Hi ${firstName},`,
+      '',
+      `Your order ${details.orderNumber} has been cancelled and we have refunded ${amount} to the original payment method.`,
+      'Your bank or card issuer usually credits it within 5–7 working days.',
+      '',
+      href,
+    ].join('\n'),
+    html: wrap(
+      'Your refund is on its way',
+      `Hi ${escapeHtml(firstName)}, your order <strong>${escapeHtml(details.orderNumber)}</strong> has been cancelled and we have refunded <strong>${escapeHtml(amount)}</strong> to the original payment method. Your bank or card issuer usually credits it within 5–7 working days.`,
+      { label: 'View your order', href },
+    ),
+  };
+}
+
+/** The team's alert when a customer presses "Request cancellation" (R-12). */
+export function cancellationRequestAlertMessage(
+  to: string,
+  details: { orderNumber: string; customer: string; phone: string; note?: string; total: Paise },
+): Mail {
+  const href = `${env().NEXT_PUBLIC_SITE_URL.replace(/\/$/, '')}/admin/orders/${encodeURIComponent(details.orderNumber)}`;
+  const lines = [
+    `${details.customer} (${details.phone}) asked to cancel order ${details.orderNumber} — ${formatPrice(details.total)}.`,
+    details.note ? `Reason given: ${details.note}` : 'No reason given.',
+  ];
+
+  return {
+    to,
+    subject: `Cancellation requested — ${details.orderNumber}`,
+    text: [...lines, '', 'Call the customer, then cancel and refund from the order page if it has not shipped.', href].join('\n'),
+    html: wrap(
+      `Cancellation requested — ${details.orderNumber}`,
+      `${lines.map(escapeHtml).join('<br>')}<br><br>Call the customer, then cancel and refund from the order page if it has not shipped.`,
+      { label: 'Open the order', href },
+    ),
+  };
+}

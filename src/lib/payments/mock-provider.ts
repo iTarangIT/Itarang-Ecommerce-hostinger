@@ -5,6 +5,8 @@ import type {
   CallbackPayload,
   PaymentIntent,
   PaymentProvider,
+  RefundRequest,
+  RefundResult,
   VerifyResult,
   WebhookResult,
 } from './provider';
@@ -194,6 +196,19 @@ export class MockPaymentProvider implements PaymentProvider {
       amount: entity.amount as number | undefined,
       method: entity.method as string | undefined,
       status,
+    };
+  }
+
+  /**
+   * Settles at once — no money moved, so there is nothing to wait for. The
+   * cap on the amount is the repository's job, not the gateway's, so the mock
+   * does not repeat it.
+   */
+  async refund(request: RefundRequest): Promise<RefundResult> {
+    return {
+      refundId: `mock_rfnd_${randomBytes(9).toString('hex')}`,
+      status: 'processed',
+      amount: request.amount,
     };
   }
 }

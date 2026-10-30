@@ -310,17 +310,26 @@ export interface Product {
   /** Free professional installation included? */
   installationIncluded: boolean;
   /**
-   * Whether this product is advertised with no-cost EMI.
+   * Whether the product page may show the card-EMI line.
    *
    * Optional, and absent means no — the same rule the warranty follows, for the
-   * same reason. No-cost EMI is a financing arrangement somebody has to have
-   * agreed with a lender, and it used to be printed on every product priced
-   * over ₹5,000 because a price threshold stood in for that agreement.
+   * same reason. An EMI line used to be printed on every product priced over
+   * ₹5,000 because a price threshold stood in for a financing agreement that
+   * did not exist (and still does not, D-07).
    *
-   * A provider that sets this is asserting the specific terms `PriceBlock`
-   * renders, not merely that instalments are possible.
+   * Even when set, the line appears only with a figure computed from the live
+   * Razorpay EMI plans (`payments/emi-plans.ts`); this flag is the admin's
+   * consent to show it, never a figure or a promise of its own.
    */
   emiEnabled?: boolean;
+  /**
+   * The family this product belongs to and its name inside it (R-11, D-16):
+   * products sharing `variantGroup` are offered on one another's pages through
+   * a capacity dropdown labelled with each member's `variantLabel`. Both are
+   * absent for a product with no family, which shows no dropdown.
+   */
+  variantGroup?: string;
+  variantLabel?: string;
   badges: BadgeKind[];
   options: ProductOption[];
   variants: ProductVariant[];

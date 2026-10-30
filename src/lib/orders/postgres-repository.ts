@@ -29,6 +29,8 @@ import type {
   OrderStatus,
   PaymentRecord,
   PaymentStatus,
+  RefundRecord,
+  RefundStatus,
   StockReservation,
 } from './types';
 
@@ -91,6 +93,11 @@ interface OrderRow {
   delivery_person: string | null;
   delivery_phone: string | null;
   terms_accepted_at: Date | null;
+  cancellation_requested_at: Date | null;
+  cancellation_request_note: string | null;
+  placed_by: string | null;
+  payment_link_id: string | null;
+  payment_link_url: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -179,6 +186,17 @@ function toOrder(row: OrderRow, items: OrderItem[]): Order {
       deliveryPhone: row.delivery_phone ?? undefined,
     },
     termsAcceptedAt: row.terms_accepted_at?.toISOString(),
+    cancellationRequest: row.cancellation_requested_at
+      ? {
+          requestedAt: row.cancellation_requested_at.toISOString(),
+          note: row.cancellation_request_note ?? undefined,
+        }
+      : undefined,
+    placedBy: row.placed_by ?? undefined,
+    paymentLink:
+      row.payment_link_id && row.payment_link_url
+        ? { id: row.payment_link_id, url: row.payment_link_url }
+        : undefined,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };
@@ -192,7 +210,8 @@ const ORDER_COLUMNS = `
   payment_method, is_test, idempotency_key, gateway_order_id,
   paid_at, confirmed_at, packed_at, shipped_at, delivered_at, cancelled_at,
   courier_name, tracking_number, tracking_url, delivery_person, delivery_phone,
-  terms_accepted_at, created_at, updated_at`;
+  terms_accepted_at, cancellation_requested_at, cancellation_request_note,
+  placed_by, payment_link_id, payment_link_url, created_at, updated_at`;
 
 /**
  * The column that records when an order first reached a status. Fixed
@@ -347,6 +366,20 @@ function groupByVariant<Row extends { id: string; variant_id: string; quantity: 
  * both, so the answer is on the order itself and needs no catalogue call —
  * which matters, because this runs inside the payment transaction.
  */
+/** Paise refunded on an order in the given refund states, read inside a transaction. */
+async function refundedWithin(
+  client: PoolClient,
+  orderId: number,
+  states: RefundStatus[],
+): Promise<number> {
+  const result = await client.query<{ sum: string }>(
+    `SELECT COALESCE(sum(amount), 0)::bigint AS sum FROM order_refunds
+      WHERE order_id = $1 AND status = ANY($2::text[])`,
+    [orderId, states],
+  );
+  return Number(result.rows[0]?.sum ?? 0);
+}
+
 async function productIdForVariant(
   client: PoolClient,
   orderId: number,
@@ -626,10 +659,10 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
                subtotal, product_savings, coupon_code, coupon_discount, shipping, cod_fee,
                total, gst_amount, gst_rate, place_of_supply, buyer_gstin, seller_gstin,
                payment_method, is_test, idempotency_key, gateway_order_id, payment_discount,
-               terms_accepted_at
+               terms_accepted_at, placed_by
              ) VALUES (
                $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,
-               CASE WHEN $26 THEN now() END
+               CASE WHEN $26 THEN now() END, $27
              ) RETURNING ${ORDER_COLUMNS}`,
             [
               orderNumber,
@@ -658,6 +691,7 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
               order.gatewayOrderId ?? null,
               order.amounts.paymentDiscount,
               order.termsAccepted === true,
+              order.placedBy ?? null,
             ],
           );
           inserted = result.rows[0];
@@ -1115,6 +1149,212 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
        SELECT id, status, status, $2, $3, $4 FROM orders WHERE id = $1`,
       [orderId, actor, note, customerVisible],
     );
+  }
+
+  /* ------------------------------------------------------- refunds (R-12) */
+
+  /**
+   * Reserve a refund against an order, refusing anything over what was paid.
+   *
+   * The cap (D-08: "never more than the amount paid on that order") is checked
+   * under the order's row lock and counts pending refunds as well as processed
+   * ones. Two admins pressing Refund at once therefore cannot both pass: the
+   * second waits for the first's row and then sees it in the sum. A refund the
+   * gateway refused is marked `failed` and stops counting.
+   *
+   * The row is written before the gateway is called, so a refund Razorpay
+   * accepted is never left without a record of who asked for it.
+   */
+  async beginRefund(input: {
+    orderId: number;
+    amount: number;
+    reason: string;
+    requestedBy: string;
+    provider: string;
+    gatewayPaymentId: string;
+  }): Promise<
+    | { ok: true; refundId: number }
+    | { ok: false; reason: 'not_paid' | 'exceeds_paid'; refundable: number }
+  > {
+    return transaction(async (client) => {
+      const order = await client.query<{ payment_status: PaymentStatus; total: number }>(
+        `SELECT payment_status, total FROM orders WHERE id = $1 FOR UPDATE`,
+        [input.orderId],
+      );
+      const row = order.rows[0];
+      if (!row || row.payment_status !== 'paid') {
+        return { ok: false as const, reason: 'not_paid' as const, refundable: 0 };
+      }
+
+      const refundable = row.total - (await refundedWithin(client, input.orderId, ['pending', 'processed']));
+      if (input.amount > refundable) {
+        return { ok: false as const, reason: 'exceeds_paid' as const, refundable: Math.max(0, refundable) };
+      }
+
+      const inserted = await client.query<{ id: number }>(
+        `INSERT INTO order_refunds (order_id, provider, gateway_payment_id, amount, reason, requested_by)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+        [input.orderId, input.provider, input.gatewayPaymentId, input.amount, input.reason, input.requestedBy],
+      );
+      return { ok: true as const, refundId: inserted.rows[0]!.id };
+    });
+  }
+
+  /** What the gateway said when the refund was requested. */
+  async recordRefundResponse(
+    refundId: number,
+    outcome: { gatewayRefundId?: string; status: RefundStatus; error?: string },
+  ): Promise<void> {
+    await query(
+      `UPDATE order_refunds
+          SET gateway_refund_id = COALESCE($2, gateway_refund_id),
+              status = $3,
+              error = $4,
+              processed_at = CASE WHEN $3 = 'processed' THEN COALESCE(processed_at, now()) END
+        WHERE id = $1`,
+      [refundId, outcome.gatewayRefundId ?? null, outcome.status, outcome.error ?? null],
+    );
+  }
+
+  /**
+   * Settle a refund the gateway has finished, from its webhook or its answer.
+   *
+   * Matched on the gateway's refund id. A refund made in the Razorpay dashboard
+   * rather than from our order page has no row yet; it is recorded here with
+   * `requested_by = 'gateway dashboard'`, so the order still shows the money
+   * going back. Returns whether the order is now refunded in full — that, not
+   * any single refund, is what moves the payment to `refunded`. A partial
+   * refund leaves it `paid`.
+   */
+  async settleRefund(input: {
+    orderId: number;
+    provider: string;
+    gatewayRefundId: string;
+    gatewayPaymentId?: string;
+    amount?: number;
+    status: 'processed' | 'failed';
+    error?: string;
+  }): Promise<{ fullyRefunded: boolean }> {
+    return transaction(async (client) => {
+      const order = await client.query<{ total: number }>(
+        `SELECT total FROM orders WHERE id = $1 FOR UPDATE`,
+        [input.orderId],
+      );
+      const total = order.rows[0]?.total ?? 0;
+
+      const updated = await client.query(
+        `UPDATE order_refunds
+            SET status = $3, error = $4,
+                processed_at = CASE WHEN $3 = 'processed' THEN COALESCE(processed_at, now()) END
+          WHERE provider = $1 AND gateway_refund_id = $2 AND status <> 'processed'
+          RETURNING id`,
+        [input.provider, input.gatewayRefundId, input.status, input.error ?? null],
+      );
+
+      if (
+        updated.rowCount === 0 &&
+        input.status === 'processed' &&
+        input.amount &&
+        input.gatewayPaymentId
+      ) {
+        await client.query(
+          `INSERT INTO order_refunds (order_id, provider, gateway_payment_id, gateway_refund_id,
+                                      amount, status, reason, requested_by, processed_at)
+           VALUES ($1, $2, $3, $4, $5, 'processed', 'Refunded in the gateway dashboard',
+                   'gateway dashboard', now())
+           ON CONFLICT (provider, gateway_refund_id) DO NOTHING`,
+          [input.orderId, input.provider, input.gatewayPaymentId, input.gatewayRefundId, input.amount],
+        );
+      }
+
+      const processed = await refundedWithin(client, input.orderId, ['processed']);
+      return { fullyRefunded: total > 0 && processed >= total };
+    });
+  }
+
+  async listRefunds(orderId: number): Promise<RefundRecord[]> {
+    const rows = await query<{
+      id: number;
+      order_id: number;
+      provider: string;
+      gateway_payment_id: string;
+      gateway_refund_id: string | null;
+      amount: string;
+      status: RefundStatus;
+      reason: string;
+      requested_by: string;
+      error: string | null;
+      created_at: Date;
+      processed_at: Date | null;
+    }>(`SELECT * FROM order_refunds WHERE order_id = $1 ORDER BY created_at`, [orderId]);
+
+    return rows.map((row) => ({
+      id: row.id,
+      orderId: row.order_id,
+      provider: row.provider,
+      gatewayPaymentId: row.gateway_payment_id,
+      gatewayRefundId: row.gateway_refund_id ?? undefined,
+      // bigint arrives as a string from `pg`.
+      amount: Number(row.amount),
+      status: row.status,
+      reason: row.reason,
+      requestedBy: row.requested_by,
+      error: row.error ?? undefined,
+      createdAt: row.created_at.toISOString(),
+      processedAt: row.processed_at?.toISOString(),
+    }));
+  }
+
+  /**
+   * The customer's "Request cancellation" (R-12).
+   *
+   * Only before dispatch, and only once: a second press changes nothing and
+   * returns null, so the team is not alerted twice. Nothing is cancelled here —
+   * an admin cancels and refunds from the order page.
+   */
+  async requestCancellation(orderId: number, note?: string): Promise<Order | null> {
+    return transaction(async (client) => {
+      const updated = await client.query<OrderRow>(
+        `UPDATE orders SET cancellation_requested_at = now(), cancellation_request_note = $2
+          WHERE id = $1 AND cancellation_requested_at IS NULL
+            AND status IN ('confirmed', 'packed')
+          RETURNING ${ORDER_COLUMNS}`,
+        [orderId, note ?? null],
+      );
+      const row = updated.rows[0];
+      if (!row) return null;
+
+      await client.query(
+        `INSERT INTO order_events (order_id, from_status, to_status, actor, note)
+         VALUES ($1, $2, $2, 'customer', $3)`,
+        [orderId, row.status, `Cancellation requested${note ? `: ${note}` : ''}`],
+      );
+      const [hydrated] = await this.hydrateWithin(client, [row]);
+      return hydrated;
+    });
+  }
+
+  /* ------------------------------------------------- payment links (R-18) */
+
+  /** The order a recorded payment belongs to — how a refund webhook without an order id is matched. */
+  findByGatewayPaymentId(gatewayPaymentId: string) {
+    return this.findOneBy(
+      'id = (SELECT order_id FROM payments WHERE gateway_payment_id = $1 LIMIT 1)',
+      [gatewayPaymentId],
+    );
+  }
+
+  findByPaymentLinkId(paymentLinkId: string) {
+    return this.findOneBy('payment_link_id = $1', [paymentLinkId]);
+  }
+
+  async setPaymentLink(orderId: number, link: { id: string; url: string }, actor: string): Promise<void> {
+    await query(`UPDATE orders SET payment_link_id = $2, payment_link_url = $3 WHERE id = $1`, [
+      orderId,
+      link.id,
+      link.url,
+    ]);
+    await this.addOrderNote(orderId, actor, 'Payment link sent to the customer', false);
   }
 
   /**

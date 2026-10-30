@@ -15,7 +15,7 @@ export function PriceBlock({
   size = 'md',
   from = false,
   discountPlacement = 'inline',
-  showEmi = false,
+  emiMonthly = null,
   showTaxNote = false,
   className,
 }: {
@@ -35,20 +35,20 @@ export function PriceBlock({
    */
   discountPlacement?: 'inline' | 'below';
   /**
-   * Print the card-EMI line.
+   * The lowest monthly card-EMI instalment on this price, or null for no line.
    *
-   * It names no monthly figure and does not say "no-cost": the business offers
-   * no no-cost EMI online, and the EMI that exists is the payment gateway's,
-   * priced by the card issuer. A per-month amount without the issuer's
-   * interest would be a number nobody actually pays.
+   * Computed by the caller from the live Razorpay plans (`payments/emi-plans.ts`)
+   * with the bank's own interest, so it is what the shopper will be quoted at
+   * payment. Never described as interest-free: there is no lender agreement
+   * (D-07), and the line names no bank or partner. Null — no plans, a non-live gateway, a price
+   * under every bank's minimum, or a product not set to show EMI — prints
+   * nothing; a figure is never invented to fill the space.
    *
-   * The caller decides, and only a product that states `emiEnabled` should say
-   * yes. This used to be gated additionally on `price >= 500000` — a threshold
-   * that was quietly making a commercial decision, since it meant any product
-   * over ₹5,000 advertised financing whether or not it had been arranged.
-   * The product now carries that fact, so the threshold is gone.
+   * This replaced a `showEmi` flag that printed a figure-less sentence, which
+   * in turn replaced a `price >= 500000` threshold that advertised financing
+   * on every product over ₹5,000 whether or not it had been arranged.
    */
-  showEmi?: boolean;
+  emiMonthly?: Paise | null;
   showTaxNote?: boolean;
   className?: string;
 }) {
@@ -89,9 +89,11 @@ export function PriceBlock({
       {showTaxNote ? (
         <p className="mt-1 text-xs text-muted-foreground">Inclusive of all taxes</p>
       ) : null}
-      {showEmi ? (
+      {emiMonthly ? (
         <p className="mt-1 text-xs text-muted-foreground">
-          Card EMI available at payment — terms set by your card issuer
+          Card EMI from{' '}
+          <span className="tabular font-semibold text-foreground">{formatPrice(emiMonthly)}</span> a
+          month — interest set by your card issuer, shown at payment
         </p>
       ) : null}
     </div>

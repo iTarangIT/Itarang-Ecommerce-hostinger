@@ -14,6 +14,8 @@ import type { OrderStatus } from '@/lib/orders/types';
 import { deliverMail, mailerIsLive, sendMail } from '@/lib/email/mailer';
 import { invoiceMessage, stockDelayMessage } from '@/lib/email/templates';
 import { canInvoice, markInvoiceEmailed, readInvoice } from '@/lib/orders/invoices';
+import { cancelAndRefund } from '@/lib/orders/refunds';
+import { rupeesToPaise } from '@/lib/orders/refund-rules';
 
 /**
  * Admin order actions.
@@ -79,6 +81,12 @@ export async function updateOrderStatusAction(formData: FormData): Promise<void>
   // longer possible (the payment arrived, another admin shipped it).
   if (!canTransitionOrder(order.status, to)) {
     redirect(withNotice(back, `This order is ${order.status.replace(/_/g, ' ')} and cannot move to ${to.replace(/_/g, ' ')}. The page has been refreshed.`));
+  }
+
+  // A paid online order is cancelled only together with its refund (R-12).
+  // Cancelling it here would put the stock back and leave the money taken.
+  if (to === 'cancelled' && order.paymentStatus === 'paid' && order.paymentMethod !== 'cod') {
+    redirect(withNotice(`/admin/orders/${orderNumber}`, 'This order has been paid. Use Cancel and refund on the order page so the customer gets the money back.'));
   }
 
   // Courier details are saved with the move to Shipped, in one transaction.
@@ -321,4 +329,31 @@ export async function pushInventoryToHostingerAction(): Promise<void> {
   );
 
   revalidatePath('/admin');
+}
+
+/**
+ * Cancel and refund a paid, unshipped order (R-12).
+ *
+ * D-08: any admin, capped at the amount paid. The amount defaults to the full
+ * remainder on the form; the cap is enforced again under a lock in the
+ * repository, so a tampered or stale form cannot refund more than was paid.
+ */
+export async function cancelAndRefundAction(formData: FormData): Promise<void> {
+  const actor = await requireAdminActor();
+  const orderNumber = String(formData.get('orderNumber') ?? '');
+  const back = `/admin/orders/${orderNumber}`;
+
+  const order = await orders().findByOrderNumber(orderNumber);
+  if (!order) return;
+
+  const amount = rupeesToPaise(String(formData.get('amount') ?? ''));
+  const reason = String(formData.get('reason') ?? '').trim().slice(0, 500);
+  if (!amount) redirect(withNotice(back, 'Enter the refund amount in rupees, for example 4999 or 4999.50.'));
+  if (!reason) redirect(withNotice(back, 'Give a reason for the refund — it is kept with the order.'));
+
+  const outcome = await cancelAndRefund({ order, amount: amount!, reason, actor });
+
+  revalidatePath('/admin');
+  revalidatePath(back);
+  redirect(withNotice(back, outcome.message));
 }

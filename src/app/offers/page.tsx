@@ -22,7 +22,8 @@ export const metadata: Metadata = {
  * The coupon clauses are dropped while `COUPONS_ENABLED` is false: a terms list
  * that explains how coupons stack, on a page that offers none, reads as an
  * offer we are quietly withholding. There are no bank-card offers and no
- * no-cost EMI; the business offers neither online, so neither is described.
+ * interest-free EMI; the business offers neither online, so neither is
+ * described (D-07).
  */
 const TERMS = [
   {
@@ -40,7 +41,7 @@ const TERMS = [
   {
     id: 'emi',
     title: 'EMI',
-    body: 'Card EMI is offered by the payment gateway (Razorpay) at the payment step, on your card issuer’s terms. Interest and any processing fee are set by the issuer and shown before you confirm. This is not no-cost EMI.',
+    body: 'Card EMI is offered by the payment gateway (Razorpay) at the payment step, on your card issuer’s terms. Interest and any processing fee are set by the issuer and shown before you confirm. The “Card EMI from” figure on a product page is the lowest monthly instalment among those plans, interest included.',
   },
   {
     id: 'delivery',

@@ -197,6 +197,17 @@ const schema = z
     EXOTEL_DLT_ENTITY_ID: z.string().optional(),
     EXOTEL_DLT_OTP_TEMPLATE_ID: z.string().optional(),
     EXOTEL_OTP_TEMPLATE: z.string().includes('{code}').optional(),
+
+    /* ------------------------------------------------------- CRM hand-off */
+    /**
+     * Where "Buy on finance" enquiries are sent as leads (R-15), e.g.
+     * https://crm.itarang.com, and the shared key the CRM checks. Both or
+     * neither. Unset, enquiries are still saved and mailed to the team; they
+     * simply wait in Admin → Support as "not sent to CRM".
+     */
+    CRM_BASE_URL: z.string().url().optional(),
+    /** SECRET. Sent as `x-store-key`; never gains a NEXT_PUBLIC_ prefix. */
+    CRM_STORE_API_KEY: z.string().min(16).optional(),
   })
   .superRefine((value, ctx) => {
     if (value.COMMERCE_PROVIDER === 'hostinger' && !value.HOSTINGER_SALES_CHANNEL_ID) {
@@ -297,6 +308,14 @@ const schema = z
           'SMS is partially configured. Set all of ' +
           exotel.map(([k]) => k).join(', ') +
           ', or none of them to keep SMS sign-in off.',
+      });
+    }
+
+    if (Boolean(value.CRM_BASE_URL) !== Boolean(value.CRM_STORE_API_KEY)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['CRM_BASE_URL'],
+        message: 'Set both CRM_BASE_URL and CRM_STORE_API_KEY, or neither to keep the CRM hand-off off.',
       });
     }
 
@@ -409,6 +428,8 @@ export function env(): Env {
     EXOTEL_DLT_ENTITY_ID: blank(process.env.EXOTEL_DLT_ENTITY_ID),
     EXOTEL_DLT_OTP_TEMPLATE_ID: blank(process.env.EXOTEL_DLT_OTP_TEMPLATE_ID),
     EXOTEL_OTP_TEMPLATE: blank(process.env.EXOTEL_OTP_TEMPLATE),
+    CRM_BASE_URL: blank(process.env.CRM_BASE_URL),
+    CRM_STORE_API_KEY: blank(process.env.CRM_STORE_API_KEY),
   });
 
   if (!parsed.success) {

@@ -21,7 +21,13 @@ export interface FormFieldSpec {
   maxLength?: number;
 }
 
-export type SupportRequestKind = 'complaint' | 'warranty' | 'installation' | 'enquiry' | 'callback';
+export type SupportRequestKind =
+  | 'complaint'
+  | 'warranty'
+  | 'installation'
+  | 'enquiry'
+  | 'callback'
+  | 'finance';
 
 /** Identity fields every request has; stored in their own columns. */
 const CONTACT: FormFieldSpec[] = [
@@ -178,6 +184,21 @@ export const SUPPORT_FORMS: Record<SupportRequestKind, FormFieldSpec[]> = {
       options: ['yes'],
     },
   ],
+  // "Buy on finance" from the product page and checkout (R-15). Only what the
+  // shopper types is validated here; the product is resolved on the server
+  // from the SKU, never taken from the form — see `finance-actions.ts`.
+  finance: [
+    { name: 'name', label: 'Full name', type: 'text', required: true, maxLength: 120 },
+    { name: 'phone', label: 'Mobile number', type: 'tel', required: true },
+    { name: 'pincode', label: 'Pincode', type: 'pincode', required: true },
+    {
+      name: 'consent',
+      label: 'Agreed to Terms, Privacy Policy and a call back',
+      type: 'select',
+      required: true,
+      options: ['yes'],
+    },
+  ],
 };
 
 export const KIND_LABEL: Record<SupportRequestKind, string> = {
@@ -186,6 +207,7 @@ export const KIND_LABEL: Record<SupportRequestKind, string> = {
   installation: 'Installation booking',
   enquiry: 'Product enquiry',
   callback: 'Expert callback',
+  finance: 'Finance enquiry',
 };
 
 export type FormValues = Record<string, string>;
