@@ -1,5 +1,6 @@
 import { after, NextResponse } from 'next/server';
 import { orders } from '@/lib/orders/postgres-repository';
+import { notifyRefund } from '@/lib/orders/refund-notify';
 import { paymentProvider } from '@/lib/payments';
 import { drainInventoryQueue } from '@/lib/orders/inventory-push';
 
@@ -70,7 +71,7 @@ export async function POST(request: Request) {
       if (!order) {
         console.warn(`[webhook] ${result.eventType} ${result.refundId} for an unknown order`);
       } else if (result.eventType === 'refund.processed' || result.eventType === 'refund.failed') {
-        const { fullyRefunded } = await repository.settleRefund({
+        const { fullyRefunded, changed } = await repository.settleRefund({
           orderId: order.id,
           provider: provider.id,
           gatewayRefundId: result.refundId,
@@ -80,6 +81,14 @@ export async function POST(request: Request) {
         });
         if (fullyRefunded) {
           await repository.applyPaymentStatus(order.id, 'refunded', 'webhook', result.eventType);
+        }
+        // A refund that was still processing has now landed (or failed), or
+        // one was made in the gateway dashboard: tell the customer and team.
+        // Not on a redelivery, and not for a refund already settled when it
+        // was made — that one was announced then.
+        if (changed) {
+          const refundId = result.refundId;
+          after(() => notifyRefund(order, refundId));
         }
       }
 

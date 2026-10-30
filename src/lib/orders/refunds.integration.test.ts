@@ -174,8 +174,12 @@ describe.skipIf(!CONFIGURED)('cancel and refund', () => {
     await repository.recordRefundResponse(reserved.refundId, { gatewayRefundId: 'rfnd_a', status: 'pending' });
 
     expect(
+      await repository.settleRefund({ orderId: order.id, provider: 'razorpay', gatewayRefundId: 'rfnd_a', status: 'processed' }),
+    ).toEqual({ fullyRefunded: false, changed: true });
+    // Redelivered: nothing moves, so nobody is notified twice.
+    expect(
       (await repository.settleRefund({ orderId: order.id, provider: 'razorpay', gatewayRefundId: 'rfnd_a', status: 'processed' }))
-        .fullyRefunded,
+        .changed,
     ).toBe(false);
 
     // Never seen before: refunded in the Razorpay dashboard.
@@ -187,10 +191,10 @@ describe.skipIf(!CONFIGURED)('cancel and refund', () => {
       amount: 70000,
       status: 'processed',
     });
-    expect(dashboard.fullyRefunded).toBe(true);
+    expect(dashboard).toEqual({ fullyRefunded: true, changed: true });
 
     // A redelivered webhook changes nothing.
-    await repository.settleRefund({
+    const again = await repository.settleRefund({
       orderId: order.id,
       provider: 'razorpay',
       gatewayRefundId: 'rfnd_b',
@@ -198,6 +202,7 @@ describe.skipIf(!CONFIGURED)('cancel and refund', () => {
       amount: 70000,
       status: 'processed',
     });
+    expect(again.changed).toBe(false);
     const refunds = await repository.listRefunds(order.id);
     expect(refunds).toHaveLength(2);
     expect(refunds[1]!.requestedBy).toBe('gateway dashboard');

@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import Image from 'next/image';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { CheckCircle2, Clock, FileText, FlaskConical } from 'lucide-react';
+import { CheckCircle2, Clock, FileText, FlaskConical, RotateCcw, XCircle } from 'lucide-react';
 import { orders } from '@/lib/orders/postgres-repository';
 import { hasOrderAccess } from '@/lib/orders/access';
 import { canInvoice, findInvoiceMeta } from '@/lib/orders/invoices';
@@ -17,7 +17,8 @@ import { OrderProgress } from '@/components/account/order-progress';
 import { ShipmentDetails } from '@/components/account/shipment-details';
 import { eventLabel, trackView } from '@/lib/orders/tracking';
 import { requestCancellationAction } from '@/lib/orders/customer-actions';
-import { refundSummary } from '@/lib/orders/refund-rules';
+import { customerRefunds, refundSummary } from '@/lib/orders/refund-rules';
+import { SITE } from '@/lib/site';
 import { Button } from '@/components/ui/button';
 
 export const dynamic = 'force-dynamic';
@@ -79,7 +80,10 @@ export default async function OrderPage({
   const canReview = order.status === 'delivered' && order.paymentStatus !== 'refunded';
   const invoice = canInvoice(order) ? await findInvoiceMeta(order.id) : null;
   const invoiceReady = Boolean(invoice);
-  const refund = refundSummary(await repository.listRefunds(order.id));
+  const refundRecords = await repository.listRefunds(order.id);
+  const refund = refundSummary(refundRecords);
+  const refunds = customerRefunds(refundRecords);
+  const cancelled = order.status === 'cancelled';
   // Before dispatch the customer may ask to cancel; an admin then cancels and
   // refunds (R-12). Asked once — the request is shown instead of the button.
   const canRequestCancel =
@@ -100,7 +104,12 @@ export default async function OrderPage({
       ) : null}
 
       <div className="mt-6 rounded-xl border border-border bg-card p-6 sm:p-8">
-        {placed && !awaitingPayment ? (
+        {cancelled ? (
+          <span className="inline-flex items-center gap-2 rounded-full bg-surface px-3 py-1.5 text-sm font-semibold text-muted-foreground">
+            <XCircle className="h-4 w-4" />
+            Cancelled
+          </span>
+        ) : placed && !awaitingPayment ? (
           <span className="inline-flex items-center gap-2 rounded-full bg-success-soft px-3 py-1.5 text-sm font-semibold text-success">
             <CheckCircle2 className="h-4 w-4" />
             Order placed
@@ -113,7 +122,11 @@ export default async function OrderPage({
         ) : null}
 
         <h1 className="heading-1 mt-4">
-          {awaitingPayment ? 'Your order is held' : 'Thank you — your order is confirmed'}
+          {cancelled
+            ? 'Your order has been cancelled'
+            : awaitingPayment
+              ? 'Your order is held'
+              : 'Thank you — your order is confirmed'}
         </h1>
         <p className="mt-2 text-sm text-muted-foreground sm:text-base">
           Order number{' '}
@@ -155,6 +168,50 @@ export default async function OrderPage({
             </dd>
           </div>
         </dl>
+
+        {/* Each refund with the dates to expect the money between (R-12) —
+            the timeline Razorpay states on the payment. */}
+        {refunds.length > 0 ? (
+          <section className="mt-6 rounded-lg border border-success/30 bg-success-soft p-4 sm:p-5">
+            <h2 className="flex items-center gap-2 font-display text-base font-semibold text-foreground">
+              <RotateCcw className="h-4 w-4 text-success" />
+              {refunds.length === 1 ? 'Your refund' : 'Your refunds'}
+            </h2>
+            <ul className="mt-3 space-y-3">
+              {refunds.map((line) => (
+                <li key={`${line.reference ?? line.startedAt}`} className="text-sm text-foreground">
+                  <p className="font-semibold">
+                    {line.state === 'processed'
+                      ? `${formatPrice(line.amount)} refunded on ${formatDate(line.processedAt ?? line.startedAt)}`
+                      : `Refund of ${formatPrice(line.amount)} started on ${formatDate(line.startedAt)}`}
+                  </p>
+                  <p className="mt-0.5 text-muted-foreground">
+                    {line.state === 'processed'
+                      ? 'It will be credited to your original payment method within 5–7 working days'
+                      : 'It takes 3–5 working days to process, then your bank or card issuer credits it within 5–7 working days'}{' '}
+                    — expect it between{' '}
+                    <span className="font-semibold text-foreground">{formatDate(line.creditFrom)}</span> and{' '}
+                    <span className="font-semibold text-foreground">{formatDate(line.creditBy)}</span>.
+                  </p>
+                  {line.reference ? (
+                    <p className="tabular mt-0.5 text-xs text-muted-foreground">Refund reference {line.reference}</p>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-3 border-t border-success/20 pt-3 text-xs text-muted-foreground">
+              Not received by the last date? Call{' '}
+              <a href={SITE.phoneHref} className="font-semibold text-foreground underline-offset-2 hover:underline">
+                {SITE.phone}
+              </a>{' '}
+              or write to{' '}
+              <a href={`mailto:${SITE.email}`} className="font-semibold text-foreground underline-offset-2 hover:underline">
+                {SITE.email}
+              </a>{' '}
+              with the refund reference — your bank can trace the credit with it.
+            </p>
+          </section>
+        ) : null}
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-12">
@@ -249,7 +306,7 @@ export default async function OrderPage({
             <ShipmentDetails shipment={order.shipment} />
           </div>
 
-          {order.cancellationRequest || cancel === 'requested' ? (
+          {cancelled ? null : order.cancellationRequest || cancel === 'requested' ? (
             <p className="mt-4 rounded-lg border border-border bg-surface p-4 text-sm text-foreground">
               <strong className="font-semibold">Cancellation requested.</strong> We will call you on{' '}
               <span className="tabular">{order.contact.phone}</span> within one working day. If the order has not

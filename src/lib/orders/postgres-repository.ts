@@ -1224,7 +1224,8 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
    * `requested_by = 'gateway dashboard'`, so the order still shows the money
    * going back. Returns whether the order is now refunded in full — that, not
    * any single refund, is what moves the payment to `refunded`. A partial
-   * refund leaves it `paid`.
+   * refund leaves it `paid`. `changed` says whether this call moved a refund
+   * at all, so a redelivered webhook does not notify anybody twice.
    */
   async settleRefund(input: {
     orderId: number;
@@ -1234,7 +1235,7 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
     amount?: number;
     status: 'processed' | 'failed';
     error?: string;
-  }): Promise<{ fullyRefunded: boolean }> {
+  }): Promise<{ fullyRefunded: boolean; changed: boolean }> {
     return transaction(async (client) => {
       const order = await client.query<{ total: number }>(
         `SELECT total FROM orders WHERE id = $1 FOR UPDATE`,
@@ -1246,18 +1247,20 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
         `UPDATE order_refunds
             SET status = $3, error = $4,
                 processed_at = CASE WHEN $3 = 'processed' THEN COALESCE(processed_at, now()) END
-          WHERE provider = $1 AND gateway_refund_id = $2 AND status <> 'processed'
+          WHERE provider = $1 AND gateway_refund_id = $2
+            AND status <> 'processed' AND status <> $3
           RETURNING id`,
         [input.provider, input.gatewayRefundId, input.status, input.error ?? null],
       );
+      let changed = (updated.rowCount ?? 0) > 0;
 
       if (
-        updated.rowCount === 0 &&
+        !changed &&
         input.status === 'processed' &&
         input.amount &&
         input.gatewayPaymentId
       ) {
-        await client.query(
+        const inserted = await client.query(
           `INSERT INTO order_refunds (order_id, provider, gateway_payment_id, gateway_refund_id,
                                       amount, status, reason, requested_by, processed_at)
            VALUES ($1, $2, $3, $4, $5, 'processed', 'Refunded in the gateway dashboard',
@@ -1265,10 +1268,11 @@ export class PostgresOrderRepository implements OrderRepository, CustomerAwareRe
            ON CONFLICT (provider, gateway_refund_id) DO NOTHING`,
           [input.orderId, input.provider, input.gatewayPaymentId, input.gatewayRefundId, input.amount],
         );
+        changed = (inserted.rowCount ?? 0) > 0;
       }
 
       const processed = await refundedWithin(client, input.orderId, ['processed']);
-      return { fullyRefunded: total > 0 && processed >= total };
+      return { fullyRefunded: total > 0 && processed >= total, changed };
     });
   }
 
