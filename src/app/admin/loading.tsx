@@ -1,8 +1,8 @@
 import { Skeleton } from '@/components/ui/skeleton';
 
 /**
- * `/admin` is `force-dynamic` and runs the order count, the order page and the
- * reconciliation report before it can render. It is also the surface an admin
+ * `/admin` is `force-dynamic` and runs the order count and the order page
+ * before it can render. It is also the surface an admin
  * paginates through repeatedly, so every click paid the full round trip with no
  * feedback.
  *

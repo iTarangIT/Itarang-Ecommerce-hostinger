@@ -1,9 +1,8 @@
 import type { Paise } from '@/lib/commerce/types';
 import { formatPrice } from '@/lib/catalog/pricing';
 import { paymentProvider } from '@/lib/payments';
-import { sendMail } from '@/lib/email/mailer';
-import { refundStartedMessage } from '@/lib/email/templates';
 import { orders } from './postgres-repository';
+import { notifyRefund } from './refund-notify';
 import { canTransitionOrder } from './state-machine';
 import { REFUND_REFUSAL_MESSAGES, refundRefusal } from './refund-rules';
 import type { Order } from './types';
@@ -109,17 +108,9 @@ export async function cancelAndRefund(input: {
     );
   }
 
-  if (order.contact.email) {
-    // Best effort, like every customer mail: the refund has happened either way.
-    void sendMail(
-      refundStartedMessage(order.contact.email, {
-        name: order.contact.name,
-        orderNumber: order.orderNumber,
-        amount,
-        path: `/order/${order.orderNumber}`,
-      }),
-    ).catch((error: unknown) => console.warn(`[refund] mail for ${order.orderNumber} failed`, error));
-  }
+  // The customer, with the dates to expect the money between, and the team.
+  // Best effort: the refund has happened either way.
+  void notifyRefund(order, result.refundId);
 
   return {
     ok: true,

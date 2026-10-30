@@ -1,6 +1,7 @@
 import type { Paise } from '@/lib/commerce/types';
 import { formatPrice } from '@/lib/catalog/pricing';
 import { env } from '@/lib/env';
+import { SITE } from '@/lib/site';
 import type { Mail } from './mailer';
 
 /**
@@ -629,34 +630,127 @@ export function outOfStockAlertMessage(
   };
 }
 
+/** "Mon, 10 Nov 2026" on the Indian calendar — the day a refund should land. */
+function refundDay(iso: string): string {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-IN', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      timeZone: 'Asia/Kolkata',
+    })
+      .formatToParts(new Date(iso))
+      .map((part) => [part.type, part.value]),
+  );
+  return `${parts.weekday}, ${parts.day} ${parts.month} ${parts.year}`;
+}
+
+/** What a refund email says about one refund, shared by the customer and team mails. */
+export interface RefundMailDetails {
+  orderNumber: string;
+  amount: Paise;
+  /** Everything refunded on the order so far, this refund included. */
+  refundedSoFar: Paise;
+  orderTotal: Paise;
+  state: 'pending' | 'processed' | 'failed';
+  reference?: string;
+  /** From `customerRefunds`: when the money should reach the payment method. */
+  creditFrom?: string;
+  creditBy?: string;
+}
+
+/** The sentence that tells the customer when to expect the money. */
+function refundTimelineSentence(details: RefundMailDetails): string {
+  const window =
+    details.creditFrom && details.creditBy
+      ? ` — between ${refundDay(details.creditFrom)} and ${refundDay(details.creditBy)}`
+      : '';
+  return details.state === 'processed'
+    ? `It will be credited to your original payment method within 5–7 working days${window}.`
+    : `It takes 3–5 working days to process, and your bank or card issuer then credits it within 5–7 working days${window}.`;
+}
+
 /**
- * Sent when an admin cancels and refunds an order (R-12). The timeline is the
- * one the refund policy promises, so the two cannot drift apart.
+ * Sent to the customer for each refund on their order (R-12): when it starts,
+ * and again when the gateway confirms a refund that was still processing. The
+ * timeline is the one Razorpay shows on the payment.
  */
-export function refundStartedMessage(
+export function refundCustomerMessage(
   to: string,
-  details: { name: string; orderNumber: string; amount: Paise; path: string },
+  details: RefundMailDetails & { name: string; path: string },
 ): Mail {
   const href = `${env().NEXT_PUBLIC_SITE_URL.replace(/\/$/, '')}${details.path}`;
   const firstName = details.name.split(/\s+/)[0] || 'there';
   const amount = formatPrice(details.amount);
+  const full = details.refundedSoFar >= details.orderTotal;
+  const opening =
+    details.state === 'processed'
+      ? `We have refunded ${amount} for your order ${details.orderNumber}.`
+      : `We have started a refund of ${amount} for your order ${details.orderNumber}.`;
+  const sofar = full
+    ? `That completes the refund of the full ${formatPrice(details.orderTotal)} you paid.`
+    : `${formatPrice(details.refundedSoFar)} of the ${formatPrice(details.orderTotal)} you paid has now been refunded.`;
+  const reference = details.reference ? `Refund reference: ${details.reference}.` : '';
+  const help = `Not received by then? Call ${SITE.phone} or write to ${SITE.email} with this reference.`;
+  const lines = [opening, refundTimelineSentence(details), sofar, reference, help].filter(Boolean);
 
   return {
     to,
-    subject: `Refund of ${amount} for order ${details.orderNumber}`,
-    text: [
-      `Hi ${firstName},`,
-      '',
-      `Your order ${details.orderNumber} has been cancelled and we have refunded ${amount} to the original payment method.`,
-      'Your bank or card issuer usually credits it within 5–7 working days.',
-      '',
-      href,
-    ].join('\n'),
+    subject:
+      details.state === 'processed'
+        ? `Refund of ${amount} processed — order ${details.orderNumber}`
+        : `Refund of ${amount} started — order ${details.orderNumber}`,
+    text: [`Hi ${firstName},`, '', ...lines, '', href].join('\n'),
     html: wrap(
-      'Your refund is on its way',
-      `Hi ${escapeHtml(firstName)}, your order <strong>${escapeHtml(details.orderNumber)}</strong> has been cancelled and we have refunded <strong>${escapeHtml(amount)}</strong> to the original payment method. Your bank or card issuer usually credits it within 5–7 working days.`,
+      details.state === 'processed' ? 'Your refund has been processed' : 'Your refund is on its way',
+      `Hi ${escapeHtml(firstName)},<br><br>${lines.map(escapeHtml).join('<br>')}`,
       { label: 'View your order', href },
     ),
+  };
+}
+
+/**
+ * The team's copy of each refund (R-12): customer care, ORDER_ALERT_EMAILS and
+ * the admin who made it. A failed refund is sent here only — nothing reached
+ * the customer, and somebody has to retry it.
+ */
+export function refundTeamMessage(
+  to: string,
+  details: RefundMailDetails & {
+    customer: string;
+    phone: string;
+    email?: string;
+    reason: string;
+    by: string;
+    error?: string;
+  },
+): Mail {
+  const href = `${env().NEXT_PUBLIC_SITE_URL.replace(/\/$/, '')}/admin/orders/${encodeURIComponent(details.orderNumber)}`;
+  const amount = formatPrice(details.amount);
+  const status =
+    details.state === 'processed' ? 'Processed' : details.state === 'pending' ? 'Processing' : 'FAILED';
+  const lines = [
+    `${status}: ${amount} refund on order ${details.orderNumber}.`,
+    `Customer: ${details.customer}, ${details.phone}${details.email ? `, ${details.email}` : ''}.`,
+    `Refunded so far: ${formatPrice(details.refundedSoFar)} of ${formatPrice(details.orderTotal)}.`,
+    `Reason: ${details.reason}. By: ${details.by}.`,
+    details.reference ? `Refund reference: ${details.reference}.` : '',
+    details.state === 'failed'
+      ? `The gateway did not refund it${details.error ? ` (${details.error})` : ''}. Check the gateway dashboard and refund again from the order page.`
+      : details.creditBy
+        ? `The customer has been told to expect it by ${refundDay(details.creditBy)}.`
+        : '',
+  ].filter(Boolean);
+
+  return {
+    to,
+    subject: `Refund ${status.toLowerCase()} — ${amount} on ${details.orderNumber}`,
+    text: [...lines, '', href].join('\n'),
+    html: wrap(`Refund ${status.toLowerCase()} — ${details.orderNumber}`, lines.map(escapeHtml).join('<br>'), {
+      label: 'Open the order',
+      href,
+    }),
   };
 }
 

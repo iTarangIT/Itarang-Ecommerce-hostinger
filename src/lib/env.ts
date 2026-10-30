@@ -174,6 +174,20 @@ const schema = z
           .filter(Boolean),
       )
       .pipe(z.array(z.string().email()).min(1)),
+    /**
+     * Who else hears about every refund, on top of ORDER_ALERT_EMAILS and the
+     * admin who made it (R-12). Comma-separated; defaults to the care inbox.
+     */
+    REFUND_ALERT_EMAILS: z
+      .string()
+      .default('care.itarang@gmail.com')
+      .transform((value) =>
+        value
+          .split(',')
+          .map((address) => address.trim())
+          .filter(Boolean),
+      )
+      .pipe(z.array(z.string().email())),
 
     /* -------------------------------------------------------- scheduled jobs */
     /**
@@ -419,6 +433,7 @@ export function env(): Env {
     STOCK_ALERT_EMAIL: blank(process.env.STOCK_ALERT_EMAIL),
     SUPPORT_INBOX_EMAIL: blank(process.env.SUPPORT_INBOX_EMAIL),
     ORDER_ALERT_EMAILS: blank(process.env.ORDER_ALERT_EMAILS),
+    REFUND_ALERT_EMAILS: blank(process.env.REFUND_ALERT_EMAILS),
     CRON_SECRET: blank(process.env.CRON_SECRET),
     EXOTEL_SID: blank(process.env.EXOTEL_SID),
     EXOTEL_API_KEY: blank(process.env.EXOTEL_API_KEY),

@@ -80,3 +80,69 @@ export function refundSummary(refunds: RefundRecord[]): {
     amount: live.reduce((sum, refund) => sum + refund.amount, 0),
   };
 }
+
+/**
+ * How long a refund takes to reach the customer, in working days, as Razorpay
+ * states it on the payment: the refund is processed in 3–5 working days, and
+ * the bank or card issuer credits it within 5–7 working days after that.
+ */
+export const REFUND_PROCESSING_WORKING_DAYS = { min: 3, max: 5 } as const;
+export const BANK_CREDIT_WORKING_DAYS = { min: 5, max: 7 } as const;
+
+const IST_OFFSET_MS = 330 * 60_000;
+
+/**
+ * `days` working days (Monday to Friday) after `iso`, counted on the Indian
+ * calendar date, returned as midday India time so any formatter shows that
+ * day. Bank holidays are not known here; the range already allows for them.
+ */
+export function addWorkingDays(iso: string, days: number): string {
+  const day = new Date(new Date(iso).getTime() + IST_OFFSET_MS);
+  day.setUTCHours(12, 0, 0, 0);
+  let left = days;
+  while (left > 0) {
+    day.setUTCDate(day.getUTCDate() + 1);
+    const weekday = day.getUTCDay();
+    if (weekday !== 0 && weekday !== 6) left -= 1;
+  }
+  return new Date(day.getTime() - IST_OFFSET_MS).toISOString();
+}
+
+/** One refund as the customer is told about it: what, when, and when to expect it. */
+export interface CustomerRefund {
+  amount: Paise;
+  /** The gateway's refund id — what a bank asks for when tracing a credit. */
+  reference?: string;
+  state: 'pending' | 'processed';
+  startedAt: string;
+  processedAt?: string;
+  /** The window in which the money should reach the original payment method. */
+  creditFrom: string;
+  creditBy: string;
+}
+
+/**
+ * Each refund on an order, oldest first, with the date window the customer
+ * should see the money in. A failed refund is left out: nothing is on its way,
+ * and the team is alerted to retry it.
+ */
+export function customerRefunds(refunds: RefundRecord[]): CustomerRefund[] {
+  return refunds
+    .filter((refund) => refund.status !== 'failed')
+    .map((refund) => {
+      const processed = refund.status === 'processed';
+      // A processed refund counts from the day it was processed; a pending
+      // one has the processing time still ahead of it.
+      const from = processed ? (refund.processedAt ?? refund.createdAt) : refund.createdAt;
+      const lead = processed ? { min: 0, max: 0 } : REFUND_PROCESSING_WORKING_DAYS;
+      return {
+        amount: refund.amount,
+        reference: refund.gatewayRefundId,
+        state: processed ? 'processed' : 'pending',
+        startedAt: refund.createdAt,
+        processedAt: processed ? from : undefined,
+        creditFrom: addWorkingDays(from, lead.min + BANK_CREDIT_WORKING_DAYS.min),
+        creditBy: addWorkingDays(from, lead.max + BANK_CREDIT_WORKING_DAYS.max),
+      };
+    });
+}
