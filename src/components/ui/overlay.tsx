@@ -35,6 +35,13 @@ const FOCUSABLE =
 
 function useFocusTrap(active: boolean, onClose: () => void) {
   const ref = React.useRef<HTMLDivElement>(null);
+  // Callers pass a fresh `onClose` on every render. Read it through a ref so a
+  // keystroke in the dialog does not re-run the effect, which would pull focus
+  // back to the first control (the close button) after every character.
+  const onCloseRef = React.useRef(onClose);
+  React.useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   React.useEffect(() => {
     if (!active) return;
@@ -50,7 +57,7 @@ function useFocusTrap(active: boolean, onClose: () => void) {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.stopPropagation();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== 'Tab' || !node) return;
@@ -75,7 +82,7 @@ function useFocusTrap(active: boolean, onClose: () => void) {
       document.removeEventListener('keydown', onKeyDown);
       previouslyFocused?.focus?.();
     };
-  }, [active, onClose]);
+  }, [active]);
 
   return ref;
 }
